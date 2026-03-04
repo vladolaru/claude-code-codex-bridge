@@ -1,6 +1,6 @@
 # claude-code-codex-bridge
 
-Bridge your local Claude Code setup into Codex so both runtimes stay equally effective.
+Bridge your local Claude Code setup into Codex so both stay equally effective.
 
 This repository contains the `cc-codex-bridge` CLI. It reads the Claude Code setup available on a local machine and projects it into Codex-compatible artifacts without creating a second hand-maintained ecosystem.
 
