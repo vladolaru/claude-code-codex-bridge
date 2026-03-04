@@ -1,7 +1,25 @@
 .DS_Store
+
+.idea/
+.vscode/
+
 .venv
+.python-version
+
 __pycache__/
 *.pyc
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
 
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+build/
+dist/
 *.egg-info/
+pip-wheel-metadata/
