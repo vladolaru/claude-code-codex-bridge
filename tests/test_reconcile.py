@@ -330,6 +330,62 @@ def test_reconcile_keeps_agents_md_and_project_claude_dir_untouched(
     assert local_settings.read_text() == original_settings
 
 
+def test_reconcile_keeps_user_level_claude_tree_untouched(
+    make_project,
+    tmp_path: Path,
+):
+    """Reconcile leaves the user-level `~/.claude` tree untouched."""
+    project_root, _agents_md = make_project()
+    sandbox_claude_root = tmp_path / "home" / ".claude"
+    (sandbox_claude_root / "settings.local.json").parent.mkdir(parents=True)
+    (sandbox_claude_root / "settings.local.json").write_text('{"theme":"dark"}\n')
+    agents_dir = sandbox_claude_root / "agents"
+    agents_dir.mkdir(parents=True)
+    (agents_dir / "local-agent.md").write_text(
+        "---\nname: local-agent\ndescription: Local user agent\n---\n\nBody.\n"
+    )
+
+    cache_version_dir = (
+        sandbox_claude_root
+        / "plugins"
+        / "cache"
+        / "market"
+        / "prompt-engineer"
+        / "1.0.0"
+    )
+    skill_dir = cache_version_dir / "skills" / "prompt-engineer"
+    agents_dir = cache_version_dir / "agents"
+    skill_dir.mkdir(parents=True)
+    agents_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    (agents_dir / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nPrompt body.\n"
+    )
+
+    before_claude = _snapshot_tree(sandbox_claude_root)
+
+    discovery = discover(project_path=project_root)
+    shim_decision = plan_claude_shim(discovery.project)
+    roles = translate_installed_agents(discovery.plugins)
+    skills = translate_installed_skills(discovery.plugins)
+    prompt_files = render_prompt_files(roles)
+    rendered_config = render_inline_codex_config(roles)
+    desired = build_desired_state(
+        discovery,
+        shim_decision,
+        prompt_files,
+        rendered_config,
+        skills,
+        codex_home=tmp_path / "codex-home",
+    )
+
+    reconcile_desired_state(desired)
+
+    assert _snapshot_tree(sandbox_claude_root) == before_claude
+
+
 def test_reconcile_rejects_unexpected_managed_project_files_in_state(
     make_project,
     make_plugin_version,
