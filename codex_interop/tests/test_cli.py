@@ -181,13 +181,19 @@ def test_diff_cli_reports_file_diff(make_project, make_plugin_version, tmp_path:
     assert "+New body." in captured.out
 
 
-def test_cli_handles_unsupported_command(monkeypatch: pytest.MonkeyPatch, capsys):
+def test_cli_handles_unsupported_command(
+    make_project,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+):
     """The fallback unsupported-command branch returns a non-zero exit code."""
+    project_root, _agents_md = make_project()
+
     class FakeParser:
         def parse_args(self, argv):
             return argparse.Namespace(
                 command="mystery",
-                project=None,
+                project=project_root,
                 cache_dir=None,
                 codex_home=None,
             )
