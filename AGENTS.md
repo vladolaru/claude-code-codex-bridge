@@ -90,6 +90,14 @@ pytest --cov=cc_codex_bridge --cov-report=term-missing tests -q
 - Keep imports using the `cc_codex_bridge` package path.
 - Keep the console script entrypoint in `pyproject.toml` aligned with the package layout.
 
+## Development Model
+
+This project is AI-written and AI-maintained with human guidance and decisions.
+
+The human maintainer, Vlad, sets direction, makes architectural decisions, and reviews work. Claude Code agents do the implementation, testing, analysis, and maintenance.
+
+"Single maintainer" does not mean capacity-constrained. It means there is a single human decision-maker with AI execution capacity. Do not assume limited implementation bandwidth when reasoning about priorities or feasibility.
+
 ## AI Artifacts
 
 All AI-generated artifacts go under `.claude/docs/`:
