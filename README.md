@@ -71,7 +71,7 @@ PYTHONPATH=src python3 -m cc_codex_bridge reconcile --project .
 
 ## Release
 
-The release workflow is triggered by version tags in the form `vX.Y.Z`. The release checklist lives in [`.claude/docs/patterns/2026-03-04-release-procedure.md`](.claude/docs/patterns/2026-03-04-release-procedure.md).
+The release workflow is triggered by version tags in the form `vX.Y.Z`. Update [`CHANGELOG.md`](CHANGELOG.md) for each release and follow the release instructions in [`AGENTS.md`](AGENTS.md).
 
 ## Developer Workflow
 

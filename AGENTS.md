@@ -135,3 +135,64 @@ Also check `DESIGN.md` for the canonical description of the current implemented 
 - Preserve deterministic behavior in generated outputs.
 - Keep Codex-facing artifacts generated from Claude Code sources instead of hand-maintained copies.
 - Update documentation when command surfaces, package layout, or installation behavior changes.
+
+## Versioning & Releases
+
+### Rule 0: Runtime Changes Must Update Release Metadata
+
+Any change that modifies shipped runtime behavior should update the release metadata in the same change:
+
+1. add or update an entry under `CHANGELOG.md` `Unreleased`
+2. bump the package version when preparing a release
+
+For this repository, release version sources must stay aligned:
+
+1. `pyproject.toml` `project.version`
+2. `src/cc_codex_bridge/__init__.py` `__version__`
+
+The package tests enforce that these values match.
+
+### Semver Guidance
+
+Use semver for release planning:
+
+- `feat` level changes: minor bump
+- `fix`, `refactor`, or `perf` changes that preserve compatibility: patch bump
+- breaking changes: major bump
+
+Documentation-only, test-only, CI-only, style-only, and non-runtime chore changes do not require an immediate version bump, but notable user-facing changes should still be recorded in `CHANGELOG.md`.
+
+### Changelog Discipline
+
+`CHANGELOG.md` is the canonical human-maintained release summary.
+
+Before a release:
+
+1. keep new entries under `## [Unreleased]`
+2. group changes under Keep a Changelog headings such as `Added`, `Changed`, `Fixed`, and `Removed`
+3. move the `Unreleased` notes into a dated `## [X.Y.Z] - YYYY-MM-DD` section when cutting the release
+
+If a release has not been tagged and pushed yet, fold additional related work into the pending unreleased notes rather than creating fake intermediate versions.
+
+### Tag and Release Model
+
+This is a single-package repository. Use package-level tags:
+
+- tag format: `vX.Y.Z`
+
+Pushing a matching version tag triggers `.github/workflows/release.yml`, which validates the package, builds `sdist` and `wheel` artifacts, and creates a GitHub Release.
+
+### Agent Release Workflow
+
+When asked to prepare or execute a release, agents should:
+
+1. update `CHANGELOG.md`
+2. update both version declarations
+3. run `pytest tests -q`
+4. run `python3 -m build --sdist --wheel`
+5. optionally smoke-test a clean `pip install .`
+6. commit the release changes
+7. create an annotated `vX.Y.Z` tag
+8. push the branch and tag
+
+Use conventional commit prefixes where they add clarity, but do not invent extra release mechanics beyond the workflow and docs already in this repository.
