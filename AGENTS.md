@@ -98,6 +98,12 @@ The human maintainer, Vlad, sets direction, makes architectural decisions, and r
 
 "Single maintainer" does not mean capacity-constrained. It means there is a single human decision-maker with AI execution capacity. Do not assume limited implementation bandwidth when reasoning about priorities or feasibility.
 
+## Canonical Architecture
+
+`DESIGN.md` is the canonical architectural source for the current implemented state of this project.
+
+Agents must consult `DESIGN.md` before making substantial architectural or cross-module changes, and must keep it updated at all times when implementation changes affect architecture, data flow, ownership rules, constraints, command behavior, or module responsibilities.
+
 ## AI Artifacts
 
 All AI-generated artifacts go under `.claude/docs/`:
@@ -110,6 +116,18 @@ All AI-generated artifacts go under `.claude/docs/`:
 - `research/` for deeper research notes
 
 Do not create AI working artifacts in the repo root.
+
+### Working Docs
+
+Before starting substantial implementation or design work, check for relevant docs under `.claude/docs/`.
+
+Also check `DESIGN.md` for the canonical description of the current implemented architecture.
+
+- Review `.claude/docs/analysis/` for prior investigations and technical findings.
+- Review spec documents in `.claude/docs/plans/`, such as `*-spec.md`, for the intended contract and constraints.
+- Review implementation plans in `.claude/docs/plans/`, such as `*-implementation-plan.md`, for sequencing, scope, and expected milestones.
+- Update `DESIGN.md` whenever the implemented architecture changes materially.
+- Update the relevant analysis, spec, or plan docs when the command surface, architecture, or implementation direction changes materially.
 
 ## Guidance
 
