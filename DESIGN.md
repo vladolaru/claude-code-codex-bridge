@@ -143,6 +143,8 @@ The state file records:
 ### Safety rules
 
 - project files are never overwritten unless they were previously recorded as managed
+- the state file may only authorize generator-owned project paths: `CLAUDE.md`, `.codex/config.toml`, `.codex/interop-state.json`, and `.codex/prompts/agents/*`
+- corrupted or unexpected managed project paths in state are treated as a hard error
 - symlinked managed project targets are rejected
 - non-directory skill targets are rejected
 - non-generated existing skill directories are rejected

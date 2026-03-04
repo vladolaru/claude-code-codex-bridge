@@ -23,6 +23,7 @@ from cc_codex_bridge.state import InteropState
 DEFAULT_CODEX_HOME = Path.home() / ".codex"
 STATE_RELATIVE_PATH = Path(".codex") / "interop-state.json"
 CONFIG_RELATIVE_PATH = Path(".codex") / "config.toml"
+PROMPTS_RELATIVE_ROOT = Path(".codex") / "prompts" / "agents"
 
 
 @dataclass(frozen=True)
@@ -202,6 +203,14 @@ def _compute_changes(
     """Compute file and directory changes, enforcing ownership safety."""
     project_file_map = dict(desired.project_files)
     managed_project_files = set(previous_state.managed_project_files) if previous_state else set()
+    invalid_managed_paths = sorted(
+        relative for relative in managed_project_files if not _is_allowed_managed_project_relative(relative)
+    )
+    if invalid_managed_paths:
+        raise ReconcileError(
+            "Interop state contains unexpected managed project files: "
+            + ", ".join(invalid_managed_paths)
+        )
     changes: list[Change] = []
 
     for path, content in sorted(project_file_map.items(), key=lambda item: str(item[0])):
@@ -346,6 +355,20 @@ def _build_state_record(desired: DesiredState) -> InteropState:
         managed_project_files=managed_project_files,
         managed_codex_skill_dirs=tuple(sorted(skill.install_dir_name for skill in desired.skills)),
     )
+
+
+def _is_allowed_managed_project_relative(relative: str) -> bool:
+    """Return True for the only project-relative paths the generator may ever manage."""
+    allowed_exact = {
+        "CLAUDE.md",
+        CONFIG_RELATIVE_PATH.as_posix(),
+        STATE_RELATIVE_PATH.as_posix(),
+    }
+    if relative in allowed_exact:
+        return True
+
+    prompts_prefix = f"{PROMPTS_RELATIVE_ROOT.as_posix()}/"
+    return relative.startswith(prompts_prefix)
 
 
 def _stage_transaction(

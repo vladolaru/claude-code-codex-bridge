@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -295,6 +296,81 @@ def test_reconcile_rejects_non_owned_skill_directory(make_project, make_plugin_v
         diff_desired_state(desired)
 
 
+def test_reconcile_keeps_agents_md_and_project_claude_dir_untouched(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Reconcile leaves AGENTS.md and project-local `.claude/` content unchanged."""
+    project_root, agents_md = make_project(agents_content="# Canonical shared instructions\n")
+    claude_dir = project_root / ".claude"
+    claude_dir.mkdir()
+    local_settings = claude_dir / "settings.local.json"
+    local_settings.write_text('{"permissions":["Skill(example)"]}\n')
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nPrompt body.\n"
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+
+    original_agents = agents_md.read_text()
+    original_settings = local_settings.read_text()
+
+    reconcile_desired_state(_build_desired(project_root, cache_root, tmp_path / "codex-home"))
+
+    assert agents_md.read_text() == original_agents
+    assert local_settings.read_text() == original_settings
+
+
+def test_reconcile_rejects_unexpected_managed_project_files_in_state(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Corrupted state may not authorize touching arbitrary project files."""
+    project_root, agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    state_path = project_root / STATE_RELATIVE_PATH
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "project_root": str(project_root),
+                "codex_home": str(tmp_path / "codex-home"),
+                "selected_plugins": [],
+                "managed_project_files": ["AGENTS.md", ".claude/settings.local.json"],
+                "managed_codex_skill_dirs": [],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+    desired = _build_desired(project_root, cache_root, tmp_path / "codex-home")
+
+    with pytest.raises(ReconcileError, match="unexpected managed project files"):
+        diff_desired_state(desired)
+    assert agents_md.exists()
+
+
 def test_format_change_report_handles_empty_report():
     """Empty reports render as a single no-op line."""
     assert format_change_report(ReconcileReport(changes=(), applied=False)) == "No changes."
@@ -426,6 +502,38 @@ def test_reconcile_rolls_back_when_stale_prompt_removal_fails(
     assert (project_root / STATE_RELATIVE_PATH).read_text() == original_state
 
 
+def test_reconcile_does_not_modify_symlink_resolved_plugin_cache_or_source(
+    make_project,
+    tmp_path: Path,
+):
+    """Reconcile treats symlink-resolved plugin installs as read-only inputs."""
+    project_root, _agents_md = make_project()
+    repo_root = tmp_path / "plugin-repo" / "prompt-engineer"
+    skill_dir = repo_root / "skills" / "prompt-engineer"
+    agents_dir = repo_root / "agents"
+    skill_dir.mkdir(parents=True)
+    agents_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    (agents_dir / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nPrompt body.\n"
+    )
+
+    cache_root = tmp_path / "claude-cache"
+    install_link = cache_root / "market" / "prompt-engineer" / "1.0.0"
+    install_link.parent.mkdir(parents=True, exist_ok=True)
+    install_link.symlink_to(repo_root, target_is_directory=True)
+
+    before_cache = _snapshot_tree(cache_root)
+    before_repo = _snapshot_tree(repo_root)
+
+    reconcile_desired_state(_build_desired(project_root, cache_root, tmp_path / "codex-home"))
+
+    assert _snapshot_tree(cache_root) == before_cache
+    assert _snapshot_tree(repo_root) == before_repo
+
+
 def _build_desired(project_root: Path, cache_root: Path, codex_home: Path):
     """Build desired state from fixture project and cache roots."""
     discovery = discover(project_path=project_root, cache_dir=cache_root)
@@ -442,3 +550,21 @@ def _build_desired(project_root: Path, cache_root: Path, codex_home: Path):
         skills,
         codex_home=codex_home,
     )
+
+
+def _snapshot_tree(root: Path) -> dict[str, tuple[str, str | bytes]]:
+    """Capture a deterministic snapshot of a directory tree without following symlinks."""
+    snapshot: dict[str, tuple[str, str | bytes]] = {}
+    if not root.exists():
+        return snapshot
+
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            snapshot[relative] = ("symlink", str(path.readlink()))
+        elif path.is_dir():
+            snapshot[relative] = ("dir", "")
+        else:
+            snapshot[relative] = ("file", path.read_bytes())
+
+    return snapshot
