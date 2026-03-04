@@ -11,25 +11,25 @@ PACKAGE_PARENT = Path(__file__).resolve().parent.parent
 if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
 
-from codex_interop.claude_shim import plan_claude_shim
-from codex_interop.discover import discover
-from codex_interop.install_launchagent import (
+from cc_codex_bridge.claude_shim import plan_claude_shim
+from cc_codex_bridge.discover import discover
+from cc_codex_bridge.install_launchagent import (
     DEFAULT_START_INTERVAL,
     build_launchagent_label,
     build_launchagent_plist,
     install_launchagent,
 )
-from codex_interop.model import DiscoveryError, ReconcileError, TranslationError
-from codex_interop.reconcile import (
+from cc_codex_bridge.model import DiscoveryError, ReconcileError, TranslationError
+from cc_codex_bridge.reconcile import (
     build_desired_state,
     diff_desired_state,
     format_change_report,
     format_diff_report,
     reconcile_desired_state,
 )
-from codex_interop.render_codex_config import render_inline_codex_config, render_prompt_files
-from codex_interop.translate_agents import translate_installed_agents
-from codex_interop.translate_skills import translate_installed_skills
+from cc_codex_bridge.render_codex_config import render_inline_codex_config, render_prompt_files
+from cc_codex_bridge.translate_agents import translate_installed_agents
+from cc_codex_bridge.translate_skills import translate_installed_skills
 
 
 def build_parser() -> argparse.ArgumentParser:

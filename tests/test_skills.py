@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from codex_interop.discover import discover_latest_plugins
-from codex_interop.translate_skills import (
+from cc_codex_bridge.discover import discover_latest_plugins
+from cc_codex_bridge.translate_skills import (
     materialize_generated_skills,
     translate_installed_skills,
 )

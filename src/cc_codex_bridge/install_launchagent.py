@@ -10,7 +10,7 @@ import tempfile
 from typing import Any
 from uuid import uuid5, NAMESPACE_URL
 
-from codex_interop.model import ReconcileError
+from cc_codex_bridge.model import ReconcileError
 
 
 DEFAULT_START_INTERVAL = 300

@@ -7,12 +7,12 @@ import plistlib
 
 import pytest
 
-from codex_interop.install_launchagent import (
+from cc_codex_bridge.install_launchagent import (
     build_launchagent_label,
     build_launchagent_plist,
     install_launchagent,
 )
-from codex_interop.model import ReconcileError
+from cc_codex_bridge.model import ReconcileError
 
 
 def test_build_launchagent_plist_renders_reconcile_command(make_project, tmp_path: Path):
@@ -25,7 +25,7 @@ def test_build_launchagent_plist_renders_reconcile_command(make_project, tmp_pat
         cache_dir=tmp_path / "claude-cache",
         codex_home=codex_home,
         python_executable=Path("/usr/bin/python3"),
-        cli_path=Path("/tmp/codex_interop/cli.py"),
+        cli_path=Path("/tmp/cc_codex_bridge/cli.py"),
         logs_dir=tmp_path / "logs",
     )
 
@@ -36,7 +36,7 @@ def test_build_launchagent_plist_renders_reconcile_command(make_project, tmp_pat
     assert payload["WorkingDirectory"] == str(project_root)
     assert payload["ProgramArguments"] == [
         "/usr/bin/python3",
-        str(Path("/tmp/codex_interop/cli.py").resolve()),
+        str(Path("/tmp/cc_codex_bridge/cli.py").resolve()),
         "reconcile",
         "--project",
         str(project_root),

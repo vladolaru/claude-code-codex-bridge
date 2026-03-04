@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from pathlib import Path
 
-from codex_interop.model import (
+from cc_codex_bridge.model import (
     DiscoveryError,
     DiscoveryResult,
     InstalledPlugin,

@@ -13,10 +13,12 @@ authors = [{ name = "Vlad Olaru" }]
 dependencies = []
 
 [project.scripts]
-cc-codex-bridge = "codex_interop.cli:main"
+cc-codex-bridge = "cc_codex_bridge.cli:main"
 
 [tool.setuptools]
 include-package-data = false
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
-include = ["codex_interop"]
+where = ["src"]
+include = ["cc_codex_bridge"]

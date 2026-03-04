@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from codex_interop.model import GeneratedAgentRole
+from cc_codex_bridge.model import GeneratedAgentRole
 
 
 def render_prompt_files(
@@ -23,7 +23,7 @@ def render_inline_codex_config(
     """Render inline `.codex/config.toml` agent role config deterministically."""
     lines = [
         "# GENERATED FILE - DO NOT EDIT",
-        "# Source: codex_interop phase 2",
+        "# Source: cc_codex_bridge phase 2",
         "",
     ]
 

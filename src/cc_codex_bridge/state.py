@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
-from codex_interop.model import ReconcileError
+from cc_codex_bridge.model import ReconcileError
 
 
 STATE_VERSION = 1

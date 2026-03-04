@@ -1,6 +1,6 @@
 # Codex Interop
 
-`codex_interop` is a generator and reconcile layer that projects the Claude Code plugin ecosystem installed on a local machine into Codex-compatible artifacts.
+`cc_codex_bridge` is a generator and reconcile layer that projects the Claude Code plugin ecosystem installed on a local machine into Codex-compatible artifacts.
 
 It exists to avoid maintaining two parallel systems:
 
@@ -113,7 +113,7 @@ python3 -m pip install -e .
 After that you can use either:
 
 - `cc-codex-bridge ...`
-- `python3 -m codex_interop ...`
+- `python3 -m cc_codex_bridge ...`
 
 Examples below use the packaged CLI form. Run from the repo root or pass `--project`.
 
@@ -150,7 +150,7 @@ These are mainly useful for testing or controlled local runs.
 
 ## Developer Workflow
 
-Treat `codex_interop` as a local generator, not as a second authored system.
+Treat `cc_codex_bridge` as a local generator, not as a second authored system.
 
 The normal workflow is:
 
@@ -166,7 +166,7 @@ The normal workflow is:
 6. Run `cc-codex-bridge reconcile --project .`
 6. Use the generated Codex artifacts from `.codex/*`, `CLAUDE.md`, and `~/.codex/skills/*`
 
-If you do not want to install the console script, `python3 -m codex_interop ...` works as the packaged fallback.
+If you do not want to install the console script, `python3 -m cc_codex_bridge ...` works as the packaged fallback.
 
 Important:
 
@@ -236,13 +236,13 @@ Skill translation:
 Run the test suite:
 
 ```bash
-pytest codex_interop/tests -q
+pytest tests -q
 ```
 
 Run coverage:
 
 ```bash
-pytest --cov=codex_interop --cov-report=term-missing codex_interop/tests -q
+pytest --cov=cc_codex_bridge --cov-report=term-missing tests -q
 ```
 
 Current status at the time this README was added:

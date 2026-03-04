@@ -7,13 +7,13 @@ from pathlib import Path
 import re
 from typing import Iterable
 
-from codex_interop.model import (
+from cc_codex_bridge.model import (
     GeneratedSkill,
     GeneratedSkillFile,
     InstalledPlugin,
     TranslationError,
 )
-from codex_interop.translate_agents import parse_markdown_with_frontmatter
+from cc_codex_bridge.translate_agents import parse_markdown_with_frontmatter
 
 
 SIBLING_SKILL_REF_RE = re.compile(r"\.\./(?P<skill>[A-Za-z0-9._-]+)/")

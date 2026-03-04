@@ -9,7 +9,7 @@ import plistlib
 
 import pytest
 
-from codex_interop import cli
+from cc_codex_bridge import cli
 
 
 def test_validate_runs_against_isolated_project_and_cache(
@@ -110,7 +110,7 @@ def test_install_launchagent_cli_writes_plist(make_project, tmp_path: Path):
             "--python-executable",
             "/usr/bin/python3",
             "--cli-path",
-            "/tmp/codex_interop/cli.py",
+            "/tmp/cc_codex_bridge/cli.py",
             "--interval",
             "900",
         ]
@@ -123,7 +123,7 @@ def test_install_launchagent_cli_writes_plist(make_project, tmp_path: Path):
     assert payload["StartInterval"] == 900
     assert payload["ProgramArguments"][:3] == [
         "/usr/bin/python3",
-        str(Path("/tmp/codex_interop/cli.py").resolve()),
+        str(Path("/tmp/cc_codex_bridge/cli.py").resolve()),
         "reconcile",
     ]
 
@@ -208,7 +208,7 @@ def test_cli_handles_unsupported_command(
 
 
 def test_module_entrypoint_invokes_cli_main(monkeypatch: pytest.MonkeyPatch):
-    """`python -m codex_interop` delegates to the CLI main entrypoint."""
+    """`python -m cc_codex_bridge` delegates to the CLI main entrypoint."""
     calls: list[list[str] | None] = []
 
     def fake_main(argv=None):
@@ -218,7 +218,7 @@ def test_module_entrypoint_invokes_cli_main(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(cli, "main", fake_main)
 
     with pytest.raises(SystemExit) as excinfo:
-        runpy.run_module("codex_interop", run_name="__main__")
+        runpy.run_module("cc_codex_bridge", run_name="__main__")
 
     assert excinfo.value.code == 0
     assert calls == [None]

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from codex_interop.model import GeneratedAgentRole, InstalledPlugin, TranslationError
+from cc_codex_bridge.model import GeneratedAgentRole, InstalledPlugin, TranslationError
 
 
 TOOL_TRANSLATIONS = {

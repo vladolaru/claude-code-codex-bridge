@@ -35,7 +35,7 @@ cc-codex-bridge reconcile --project .
 If you do not want to install the console script, the module entrypoint also works:
 
 ```bash
-python3 -m codex_interop reconcile --project .
+python3 -m cc_codex_bridge reconcile --project .
 ```
 
 ## Developer Workflow
@@ -49,7 +49,7 @@ python3 -m codex_interop reconcile --project .
 
 ## More Detail
 
-The package-level documentation remains in [`codex_interop/README.md`](codex_interop/README.md).
+The package-level documentation remains in [`src/cc_codex_bridge/README.md`](src/cc_codex_bridge/README.md).
 
 ## License
 

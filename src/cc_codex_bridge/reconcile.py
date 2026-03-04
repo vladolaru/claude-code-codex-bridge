@@ -10,14 +10,14 @@ import tempfile
 from typing import Iterable
 from uuid import uuid4
 
-from codex_interop.model import (
+from cc_codex_bridge.model import (
     ClaudeShimDecision,
     DiscoveryResult,
     GeneratedAgentRole,
     GeneratedSkill,
     ReconcileError,
 )
-from codex_interop.state import InteropState
+from cc_codex_bridge.state import InteropState
 
 
 DEFAULT_CODEX_HOME = Path.home() / ".codex"

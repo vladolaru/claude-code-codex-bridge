@@ -1,4 +1,4 @@
-"""Test setup for codex_interop package tests."""
+"""Test setup for cc_codex_bridge package tests."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 
 
-PACKAGE_PARENT = Path(__file__).resolve().parents[2]
-if str(PACKAGE_PARENT) not in sys.path:
-    sys.path.insert(0, str(PACKAGE_PARENT))
+SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 
 @pytest.fixture

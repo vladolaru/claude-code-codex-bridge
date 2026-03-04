@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-import codex_interop.reconcile as reconcile_module
-from codex_interop.claude_shim import plan_claude_shim
-from codex_interop.discover import discover
-from codex_interop.model import ReconcileError
-from codex_interop.reconcile import (
+import cc_codex_bridge.reconcile as reconcile_module
+from cc_codex_bridge.claude_shim import plan_claude_shim
+from cc_codex_bridge.discover import discover
+from cc_codex_bridge.model import ReconcileError
+from cc_codex_bridge.reconcile import (
     STATE_RELATIVE_PATH,
     ReconcileReport,
     build_desired_state,
@@ -19,9 +19,9 @@ from codex_interop.reconcile import (
     format_diff_report,
     reconcile_desired_state,
 )
-from codex_interop.render_codex_config import render_inline_codex_config, render_prompt_files
-from codex_interop.translate_agents import translate_installed_agents
-from codex_interop.translate_skills import translate_installed_skills
+from cc_codex_bridge.render_codex_config import render_inline_codex_config, render_prompt_files
+from cc_codex_bridge.translate_agents import translate_installed_agents
+from cc_codex_bridge.translate_skills import translate_installed_skills
 
 
 def test_reconcile_writes_project_and_codex_outputs(

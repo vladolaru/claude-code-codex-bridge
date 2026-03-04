@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from codex_interop.model import ClaudeShimDecision, ProjectContext
+from cc_codex_bridge.model import ClaudeShimDecision, ProjectContext
 
 
 SHIM_CONTENT = "@AGENTS.md\n"

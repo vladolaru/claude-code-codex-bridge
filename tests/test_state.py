@@ -7,8 +7,8 @@ from pathlib import Path
 import json
 import pytest
 
-from codex_interop.model import ReconcileError
-from codex_interop.state import InteropState
+from cc_codex_bridge.model import ReconcileError
+from cc_codex_bridge.state import InteropState
 
 
 def test_interop_state_round_trips(tmp_path: Path):

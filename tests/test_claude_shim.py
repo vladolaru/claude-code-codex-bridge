@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from codex_interop.claude_shim import SHIM_CONTENT, plan_claude_shim
-from codex_interop.model import ProjectContext
+from cc_codex_bridge.claude_shim import SHIM_CONTENT, plan_claude_shim
+from cc_codex_bridge.model import ProjectContext
 
 
 def test_plan_claude_shim_creates_when_missing(tmp_path: Path):

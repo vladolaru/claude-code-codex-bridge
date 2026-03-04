@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from codex_interop.discover import discover, discover_latest_plugins, resolve_project_root
-from codex_interop.model import DiscoveryError, SemVer
+from cc_codex_bridge.discover import discover, discover_latest_plugins, resolve_project_root
+from cc_codex_bridge.model import DiscoveryError, SemVer
 
 def test_resolve_project_root_from_cwd(make_project, monkeypatch: pytest.MonkeyPatch):
     """Project root resolves from current working directory when AGENTS.md exists above."""

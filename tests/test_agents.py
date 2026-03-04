@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from codex_interop.discover import discover_latest_plugins
-from codex_interop.model import InstalledPlugin, SemVer, TranslationError
-from codex_interop.render_codex_config import (
+from cc_codex_bridge.discover import discover_latest_plugins
+from cc_codex_bridge.model import InstalledPlugin, SemVer, TranslationError
+from cc_codex_bridge.render_codex_config import (
     render_inline_codex_config,
     render_prompt_files,
 )
-from codex_interop.translate_agents import (
+from cc_codex_bridge.translate_agents import (
     _parse_frontmatter_lines,
     parse_markdown_with_frontmatter,
     translate_tools,
