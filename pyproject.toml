@@ -8,14 +8,13 @@ version = "0.1.0"
 description = "Bridge a local Claude Code setup into Codex-compatible artifacts."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "Vlad Olaru" }]
 dependencies = []
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
   "Operating System :: MacOS",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
@@ -33,6 +32,7 @@ Issues = "https://github.com/vladolaru/claude-code-codex-bridge/issues"
 
 [project.optional-dependencies]
 dev = [
+  "build>=1.2",
   "pytest>=8.0",
   "pytest-cov>=5.0",
 ]

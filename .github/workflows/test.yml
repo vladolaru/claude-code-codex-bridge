@@ -24,3 +24,12 @@ jobs:
 
       - name: Run tests
         run: pytest tests -q
+
+      - name: Packaging smoke checks
+        run: |
+          python -m venv .venv-package-smoke
+          .venv-package-smoke/bin/python -m pip install --upgrade pip
+          .venv-package-smoke/bin/python -m pip install .
+          .venv-package-smoke/bin/cc-codex-bridge --help
+          .venv-package-smoke/bin/python -m cc_codex_bridge --help
+          python -m build --sdist --wheel
