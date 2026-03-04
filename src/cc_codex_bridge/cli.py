@@ -32,6 +32,10 @@ from cc_codex_bridge.translate_agents import translate_installed_agents
 from cc_codex_bridge.translate_skills import translate_installed_skills
 
 
+DISCOVERY_COMMANDS = {"reconcile", "validate", "dry-run", "diff"}
+LAUNCHAGENT_COMMANDS = {"print-launchagent", "install-launchagent"}
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI parser."""
     common = argparse.ArgumentParser(add_help=False)
@@ -103,8 +107,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.command in {"print-launchagent", "install-launchagent"}:
+    if args.command in LAUNCHAGENT_COMMANDS:
         return _handle_launchagent_command(args)
+
+    if args.command not in DISCOVERY_COMMANDS:
+        print(f"Error: unsupported command `{args.command}`", file=sys.stderr)
+        return 1
 
     try:
         result = discover(project_path=args.project, cache_dir=args.cache_dir)
@@ -179,16 +187,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    _print_summary(
-        result,
-        shim_decision.action,
-        len(roles),
-        len(prompt_files),
-        len(skills),
-        rendered_config,
-    )
-    print(f"Error: unsupported command `{args.command}`", file=sys.stderr)
-    return 1
+    raise AssertionError(f"Unhandled command dispatch path: {args.command}")
 
 
 def _handle_launchagent_command(args: argparse.Namespace) -> int:
