@@ -7,10 +7,13 @@ from pathlib import Path
 
 import pytest
 
-
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
+
+import cc_codex_bridge.discover as discover_module
+import cc_codex_bridge.install_launchagent as launchagent_module
+import cc_codex_bridge.reconcile as reconcile_module
 
 
 @pytest.fixture
@@ -66,3 +69,25 @@ def make_plugin_version(tmp_path: Path):
         return cache_root, version_dir
 
     return _make_plugin_version
+
+
+@pytest.fixture(autouse=True)
+def isolate_home_scoped_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Keep tests hermetic by redirecting module-level home defaults into tmp paths."""
+    sandbox_home = tmp_path / "home"
+    monkeypatch.setattr(
+        discover_module,
+        "CLAUDE_CACHE_DIR",
+        sandbox_home / ".claude" / "plugins" / "cache",
+    )
+    monkeypatch.setattr(reconcile_module, "DEFAULT_CODEX_HOME", sandbox_home / ".codex")
+    monkeypatch.setattr(
+        launchagent_module,
+        "DEFAULT_LAUNCHAGENTS_DIR",
+        sandbox_home / "Library" / "LaunchAgents",
+    )
+    monkeypatch.setattr(
+        launchagent_module,
+        "DEFAULT_LOGS_DIR",
+        sandbox_home / "Library" / "Logs" / "codex-interop",
+    )
