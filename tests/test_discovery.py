@@ -47,6 +47,48 @@ def test_resolve_project_root_from_file_path(make_project):
     assert result.agents_md_path == agents_md.resolve()
 
 
+def test_resolve_project_root_prefers_nearest_nested_agents_md(make_project):
+    """When multiple AGENTS.md files exist, the nearest ancestor wins."""
+    project_root, _root_agents = make_project()
+    nested_root = project_root / "packages" / "dashboard"
+    nested_root.mkdir(parents=True)
+    nested_agents = nested_root / "AGENTS.md"
+    nested_agents.write_text("# Nested instructions\n")
+
+    deeper_dir = nested_root / "src" / "components"
+    deeper_dir.mkdir(parents=True)
+
+    result = resolve_project_root(deeper_dir)
+
+    assert result.root == nested_root.resolve()
+    assert result.agents_md_path == nested_agents.resolve()
+
+
+def test_resolve_project_root_uses_nearest_agents_md_in_vendored_style_subtree(make_project):
+    """Vendored-style dependency paths still resolve to the nearest nested AGENTS.md."""
+    project_root, _root_agents = make_project()
+    vendor_root = (
+        project_root
+        / "node_modules"
+        / ".pnpm"
+        / "package@1.0.0"
+        / "node_modules"
+        / "@scope"
+        / "package"
+    )
+    vendor_root.mkdir(parents=True)
+    vendor_agents = vendor_root / "AGENTS.md"
+    vendor_agents.write_text("# Vendored package instructions\n")
+
+    nested_dir = vendor_root / "src" / "internal"
+    nested_dir.mkdir(parents=True)
+
+    result = resolve_project_root(nested_dir)
+
+    assert result.root == vendor_root.resolve()
+    assert result.agents_md_path == vendor_agents.resolve()
+
+
 def test_resolve_project_root_requires_agents_md(tmp_path: Path):
     """Missing AGENTS.md is a hard discovery failure."""
     project_root = tmp_path / "project"
