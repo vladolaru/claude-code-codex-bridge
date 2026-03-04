@@ -1,6 +1,6 @@
 # Codex Interop
 
-`cc_codex_bridge` is a generator and reconcile layer that projects the Claude Code plugin ecosystem installed on a local machine into Codex-compatible artifacts.
+`cc_codex_bridge` is a generator and reconcile layer that projects a local Claude Code setup into Codex-compatible artifacts.
 
 It exists to avoid maintaining two parallel systems:
 
@@ -13,12 +13,12 @@ That is the central design decision:
 - Codex-side skills, prompts, and config are generated projections
 - this directory should never become a second hand-maintained skill or agent ecosystem
 
-The canonical authored sources stay outside this directory:
+The canonical authored sources stay outside this package:
 
-- root [`AGENTS.md`](/Users/vladolaru/Work/a8c/claude-code-plugins/AGENTS.md)
-- `plugins/*/skills/*/SKILL.md`
-- `plugins/*/agents/*.md`
-- plugin-local `scripts/`, `references/`, `assets/`, and related resources
+- project `AGENTS.md`
+- Claude Code plugin-provided skills and agents
+- user-level Claude Code skills and agents
+- related scripts, references, assets, and resources attached to that local Claude Code setup
 
 ## What It Generates
 
@@ -115,6 +115,10 @@ After that you can use either:
 - `cc-codex-bridge ...`
 - `python3 -m cc_codex_bridge ...`
 
+Without installation from a raw checkout, use:
+
+- `PYTHONPATH=src python3 -m cc_codex_bridge ...`
+
 Examples below use the packaged CLI form. Run from the repo root or pass `--project`.
 
 Validate only:
@@ -154,11 +158,7 @@ Treat `cc_codex_bridge` as a local generator, not as a second authored system.
 
 The normal workflow is:
 
-1. Edit the canonical Claude-side sources:
-   - `AGENTS.md`
-   - `plugins/*/skills/*/SKILL.md`
-   - `plugins/*/agents/*.md`
-   - plugin-local `scripts/`, `references/`, `assets/`, and related files
+1. Edit the canonical Claude-side sources that make up the local Claude Code setup.
 2. Install the local package once with `python3 -m pip install -e .`
 3. Make sure the relevant Claude plugins are actually installed locally so they exist in the Claude plugin cache.
 4. Run `cc-codex-bridge validate --project .`
@@ -166,7 +166,7 @@ The normal workflow is:
 6. Run `cc-codex-bridge reconcile --project .`
 6. Use the generated Codex artifacts from `.codex/*`, `CLAUDE.md`, and `~/.codex/skills/*`
 
-If you do not want to install the console script, `python3 -m cc_codex_bridge ...` works as the packaged fallback.
+If you do not want to install the console script, either install the package and use `python3 -m cc_codex_bridge ...` or run from a raw checkout with `PYTHONPATH=src`.
 
 Important:
 
@@ -245,10 +245,7 @@ Run coverage:
 pytest --cov=cc_codex_bridge --cov-report=term-missing tests -q
 ```
 
-Current status at the time this README was added:
-
-- `54` tests passing
-- `96%` total coverage
+Current status changes over time. Run the commands above for the current local result.
 
 ## Scope Boundary
 

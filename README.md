@@ -32,10 +32,16 @@ cc-codex-bridge dry-run --project .
 cc-codex-bridge reconcile --project .
 ```
 
-If you do not want to install the console script, the module entrypoint also works:
+The module entrypoint also works after installation:
 
 ```bash
 python3 -m cc_codex_bridge reconcile --project .
+```
+
+If you need to run from a raw checkout without installing, use:
+
+```bash
+PYTHONPATH=src python3 -m cc_codex_bridge reconcile --project .
 ```
 
 ## Developer Workflow
