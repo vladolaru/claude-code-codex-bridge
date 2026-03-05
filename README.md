@@ -34,6 +34,8 @@ Then run:
 ```bash
 cc-codex-bridge validate --project .
 cc-codex-bridge dry-run --project .
+cc-codex-bridge dry-run --diff --project .
+cc-codex-bridge status --project .
 cc-codex-bridge reconcile --project .
 ```
 
@@ -79,8 +81,10 @@ The release workflow is triggered by version tags in the form `vX.Y.Z`. Update [
 2. Make sure those assets are available in the local Claude Code environment.
 3. Run `cc-codex-bridge validate --project .`
 4. Run `cc-codex-bridge dry-run --project .`
-5. Run `cc-codex-bridge reconcile --project .`
-6. Use the generated Codex artifacts. Do not hand-edit them.
+5. Optionally run `cc-codex-bridge dry-run --diff --project .`
+6. Inspect current state with `cc-codex-bridge status --project .`
+7. Run `cc-codex-bridge reconcile --project .`
+8. Use the generated Codex artifacts. Do not hand-edit them.
 
 ## More Detail
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import runpy
 from pathlib import Path
 import plistlib
@@ -140,8 +141,8 @@ def test_print_launchagent_cli_requires_valid_project(tmp_path: Path, capsys: py
     assert "must contain AGENTS.md" in captured.err
 
 
-def test_diff_cli_reports_file_diff(make_project, make_plugin_version, tmp_path: Path, capsys):
-    """CLI diff returns a unified diff when managed text changes."""
+def test_dry_run_with_diff_flag_reports_file_diff(make_project, make_plugin_version, tmp_path: Path, capsys):
+    """CLI dry-run --diff returns a unified diff when managed text changes."""
     project_root, _agents_md = make_project()
     cache_root, version_dir = make_plugin_version(
         "market", "prompt-engineer", "1.0.0", agent_names=("reviewer",)
@@ -161,11 +162,13 @@ def test_diff_cli_reports_file_diff(make_project, make_plugin_version, tmp_path:
             str(codex_home),
         ]
     ) == 0
+    capsys.readouterr()
 
     agent_path.write_text("---\nname: reviewer\ndescription: Review\n---\n\nNew body.\n")
     exit_code = cli.main(
         [
-            "diff",
+            "dry-run",
+            "--diff",
             "--project",
             str(project_root),
             "--cache-dir",
@@ -179,6 +182,76 @@ def test_diff_cli_reports_file_diff(make_project, make_plugin_version, tmp_path:
     assert exit_code == 0
     assert "@@" in captured.out
     assert "+New body." in captured.out
+
+
+def test_status_cli_reports_pending_and_json(make_project, make_plugin_version, tmp_path: Path, capsys):
+    """`status` reports pending changes and supports JSON output."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nPrompt body.\n"
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+
+    pending_exit = cli.main(
+        [
+            "status",
+            "--project",
+            str(project_root),
+            "--cache-dir",
+            str(cache_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+    pending_captured = capsys.readouterr()
+
+    assert pending_exit == 0
+    assert "STATUS: pending_changes" in pending_captured.out
+    assert "PENDING_CHANGES:" in pending_captured.out
+
+    assert cli.main(
+        [
+            "reconcile",
+            "--project",
+            str(project_root),
+            "--cache-dir",
+            str(cache_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    ) == 0
+    capsys.readouterr()
+
+    in_sync_exit = cli.main(
+        [
+            "status",
+            "--json",
+            "--project",
+            str(project_root),
+            "--cache-dir",
+            str(cache_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+    in_sync_captured = capsys.readouterr()
+
+    payload = json.loads(in_sync_captured.out)
+    assert in_sync_exit == 0
+    assert payload["status"] == "in_sync"
+    assert payload["pending_change_count"] == 0
+    assert payload["categorized_changes"]["project_files"]["create"] == []
+    assert payload["categorized_changes"]["skills"]["create"] == []
 
 
 def test_cli_handles_unsupported_command(

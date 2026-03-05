@@ -136,7 +136,14 @@ cc-codex-bridge dry-run --project .
 Show file-level diffs:
 
 ```bash
-cc-codex-bridge diff --project .
+cc-codex-bridge dry-run --diff --project .
+```
+
+Inspect reconcile state:
+
+```bash
+cc-codex-bridge status --project .
+cc-codex-bridge status --json --project .
 ```
 
 Apply generated outputs:
@@ -163,8 +170,10 @@ The normal workflow is:
 3. Make sure the relevant Claude plugins are actually installed locally so they exist in the Claude plugin cache.
 4. Run `cc-codex-bridge validate --project .`
 5. Run `cc-codex-bridge dry-run --project .`
-6. Run `cc-codex-bridge reconcile --project .`
-6. Use the generated Codex artifacts from `.codex/*`, `CLAUDE.md`, and `~/.codex/skills/*`
+6. Optionally run `cc-codex-bridge dry-run --diff --project .`
+7. Inspect current state with `cc-codex-bridge status --project .`
+8. Run `cc-codex-bridge reconcile --project .`
+9. Use the generated Codex artifacts from `.codex/*`, `CLAUDE.md`, and `~/.codex/skills/*`
 
 If you do not want to install the console script, either install the package and use `python3 -m cc_codex_bridge ...` or run from a raw checkout with `PYTHONPATH=src`.
 

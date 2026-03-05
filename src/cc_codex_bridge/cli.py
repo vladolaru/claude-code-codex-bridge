@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -32,7 +33,7 @@ from cc_codex_bridge.translate_agents import translate_installed_agents
 from cc_codex_bridge.translate_skills import translate_installed_skills
 
 
-PIPELINE_COMMANDS = {"reconcile", "validate", "dry-run", "diff"}
+PIPELINE_COMMANDS = {"reconcile", "validate", "dry-run", "status"}
 LAUNCHAGENT_COMMANDS = {"print-launchagent", "install-launchagent"}
 
 
@@ -61,8 +62,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
-    for command in ("reconcile", "validate", "dry-run", "diff"):
-        subparsers.add_parser(command, parents=[common])
+    subparsers.add_parser("reconcile", parents=[common])
+    subparsers.add_parser("validate", parents=[common])
+    dry_run_parser = subparsers.add_parser("dry-run", parents=[common])
+    dry_run_parser.add_argument(
+        "--diff",
+        action="store_true",
+        help="Include unified text diffs for managed .md/.toml/.json files.",
+    )
+    status_parser = subparsers.add_parser("status", parents=[common])
+    status_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit status as JSON instead of human-readable text.",
+    )
 
     launchagent_common = argparse.ArgumentParser(add_help=False)
     launchagent_common.add_argument(
@@ -168,20 +181,18 @@ def main(argv: list[str] | None = None) -> int:
                 len(skills),
                 rendered_config,
             )
-            print(format_change_report(report))
+            if args.diff:
+                print(format_diff_report(desired_state, report))
+            else:
+                print(format_change_report(report))
             return 0
 
-        if args.command == "diff":
+        if args.command == "status":
             report = diff_desired_state(desired_state)
-            _print_summary(
-                result,
-                shim_decision.action,
-                len(roles),
-                len(prompt_files),
-                len(skills),
-                rendered_config,
-            )
-            print(format_diff_report(desired_state, report))
+            if args.json:
+                print(format_status_json(report))
+            else:
+                print(format_status_report(report))
             return 0
     except ReconcileError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -250,6 +261,65 @@ def _print_summary(
             f"skills={len(plugin.skills)} "
             f"agents={len(plugin.agents)}"
         )
+
+
+def _build_status_payload(report) -> dict[str, object]:
+    """Build a stable status payload from reconcile diff output."""
+    categorized_changes: dict[str, dict[str, list[str]]] = {
+        "project_files": {"create": [], "update": [], "remove": []},
+        "skills": {"create": [], "update": [], "remove": []},
+    }
+    for change in report.changes:
+        category = "skills" if change.resource_kind == "skill" else "project_files"
+        categorized_changes[category][change.kind].append(str(change.path))
+
+    return {
+        "status": "in_sync" if not report.changes else "pending_changes",
+        "pending_change_count": len(report.changes),
+        "categorized_changes": categorized_changes,
+    }
+
+
+def format_status_json(report) -> str:
+    """Render status output as deterministic JSON."""
+    return json.dumps(_build_status_payload(report), indent=2, sort_keys=True)
+
+
+def format_status_report(report) -> str:
+    """Render status output as human-readable text."""
+    payload = _build_status_payload(report)
+    categorized = payload["categorized_changes"]
+    project_files = categorized["project_files"]
+    skills = categorized["skills"]
+    lines = [
+        f"STATUS: {payload['status']}",
+        f"PENDING_CHANGES: {payload['pending_change_count']}",
+        (
+            "PROJECT_FILES: "
+            f"create={len(project_files['create'])} "
+            f"update={len(project_files['update'])} "
+            f"remove={len(project_files['remove'])}"
+        ),
+        (
+            "SKILLS: "
+            f"create={len(skills['create'])} "
+            f"update={len(skills['update'])} "
+            f"remove={len(skills['remove'])}"
+        ),
+    ]
+    for path in project_files["create"]:
+        lines.append(f"PROJECT_FILE_CREATE: {path}")
+    for path in project_files["update"]:
+        lines.append(f"PROJECT_FILE_UPDATE: {path}")
+    for path in project_files["remove"]:
+        lines.append(f"PROJECT_FILE_REMOVE: {path}")
+    for path in skills["create"]:
+        lines.append(f"SKILL_CREATE: {path}")
+    for path in skills["update"]:
+        lines.append(f"SKILL_UPDATE: {path}")
+    for path in skills["remove"]:
+        lines.append(f"SKILL_REMOVE: {path}")
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

@@ -89,7 +89,7 @@ The runtime is a deterministic pipeline:
 6. render project-local Codex prompt files and `.codex/config.toml`
 7. decide whether `CLAUDE.md` can be created or preserved as an `@AGENTS.md` shim
 8. build a full desired state for project files plus Codex skill directories
-9. diff or reconcile that desired state with ownership and rollback protections
+9. inspect/preview or reconcile that desired state with ownership and rollback protections
 
 Every CLI command except the LaunchAgent commands runs through the same discovery and translation pipeline first.
 
@@ -364,9 +364,14 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
 - `dry-run`
   - compute reconcile changes without writing
   - print change summary
-- `diff`
+- `dry-run --diff`
   - compute reconcile changes without writing
   - print change summary plus unified diffs for managed text files
+- `status`
+  - compute reconcile changes without writing
+  - report `in_sync` vs `pending_changes`
+  - report categorized project-file vs skill create/update/remove changes
+  - support JSON output with `--json`
 - `reconcile`
   - apply the desired state to disk
   - print summary and applied changes
