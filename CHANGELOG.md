@@ -6,11 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-05
+
 ### Changed
 
 - Renamed the project-local reconcile state artifact to `.codex/claude-code-interop-state.json`.
 - Clarified internal naming in reconcile/discovery command flow (no behavior change).
-- Replaced standalone `diff` with `dry-run --diff` so preview behavior lives under one command.
+- Consolidated preview mode under `reconcile --dry-run` and `reconcile --dry-run --diff`.
 
 ### Added
 

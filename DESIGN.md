@@ -321,7 +321,7 @@ Diffs are represented as `Change` records with:
 
 - `kind`
 - `path`
-- optional `detail`
+- optional `resource_kind`
 
 Supported kinds in current reporting:
 
@@ -361,10 +361,10 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
 - `validate`
   - run discovery, translation, and rendering in memory
   - print a summary
-- `dry-run`
+- `reconcile --dry-run`
   - compute reconcile changes without writing
   - print change summary
-- `dry-run --diff`
+- `reconcile --dry-run --diff`
   - compute reconcile changes without writing
   - print change summary plus unified diffs for managed text files
 - `status`

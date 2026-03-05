@@ -130,13 +130,13 @@ cc-codex-bridge validate --project .
 Preview changes without writing:
 
 ```bash
-cc-codex-bridge dry-run --project .
+cc-codex-bridge reconcile --dry-run --project .
 ```
 
 Show file-level diffs:
 
 ```bash
-cc-codex-bridge dry-run --diff --project .
+cc-codex-bridge reconcile --dry-run --diff --project .
 ```
 
 Inspect reconcile state:
@@ -169,8 +169,8 @@ The normal workflow is:
 2. Install the local package once with `python3 -m pip install -e .`
 3. Make sure the relevant Claude plugins are actually installed locally so they exist in the Claude plugin cache.
 4. Run `cc-codex-bridge validate --project .`
-5. Run `cc-codex-bridge dry-run --project .`
-6. Optionally run `cc-codex-bridge dry-run --diff --project .`
+5. Run `cc-codex-bridge reconcile --dry-run --project .`
+6. Optionally run `cc-codex-bridge reconcile --dry-run --diff --project .`
 7. Inspect current state with `cc-codex-bridge status --project .`
 8. Run `cc-codex-bridge reconcile --project .`
 9. Use the generated Codex artifacts from `.codex/*`, `CLAUDE.md`, and `~/.codex/skills/*`

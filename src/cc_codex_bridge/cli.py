@@ -33,7 +33,7 @@ from cc_codex_bridge.translate_agents import translate_installed_agents
 from cc_codex_bridge.translate_skills import translate_installed_skills
 
 
-PIPELINE_COMMANDS = {"reconcile", "validate", "dry-run", "status"}
+PIPELINE_COMMANDS = {"reconcile", "validate", "status"}
 LAUNCHAGENT_COMMANDS = {"print-launchagent", "install-launchagent"}
 
 
@@ -62,14 +62,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("reconcile", parents=[common])
-    subparsers.add_parser("validate", parents=[common])
-    dry_run_parser = subparsers.add_parser("dry-run", parents=[common])
-    dry_run_parser.add_argument(
+    reconcile_parser = subparsers.add_parser("reconcile", parents=[common])
+    reconcile_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Compute reconcile changes without writing.",
+    )
+    reconcile_parser.add_argument(
         "--diff",
         action="store_true",
-        help="Include unified text diffs for managed .md/.toml/.json files.",
+        help="Include unified text diffs for managed .md/.toml/.json files (requires --dry-run).",
     )
+    subparsers.add_parser("validate", parents=[common])
     status_parser = subparsers.add_parser("status", parents=[common])
     status_parser.add_argument(
         "--json",
@@ -126,6 +130,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command not in PIPELINE_COMMANDS:
         print(f"Error: unsupported command `{args.command}`", file=sys.stderr)
         return 1
+    if args.command == "reconcile" and args.diff and not args.dry_run:
+        print("Error: --diff requires --dry-run for reconcile", file=sys.stderr)
+        return 1
 
     try:
         result = discover(project_path=args.project, cache_dir=args.cache_dir)
@@ -159,20 +166,10 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "reconcile":
-            report = reconcile_desired_state(desired_state)
-            _print_summary(
-                result,
-                shim_decision.action,
-                len(roles),
-                len(prompt_files),
-                len(skills),
-                rendered_config,
-            )
-            print(format_change_report(report))
-            return 0
-
-        if args.command == "dry-run":
-            report = diff_desired_state(desired_state)
+            if args.dry_run:
+                report = diff_desired_state(desired_state)
+            else:
+                report = reconcile_desired_state(desired_state)
             _print_summary(
                 result,
                 shim_decision.action,

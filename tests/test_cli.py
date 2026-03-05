@@ -47,7 +47,7 @@ def test_reconcile_and_dry_run_respect_fake_codex_home(
     make_plugin_version,
     tmp_path: Path,
 ):
-    """CLI reconcile writes outputs, while a later dry-run reports no changes."""
+    """CLI reconcile writes outputs, while a later `reconcile --dry-run` reports no changes."""
     project_root, _agents_md = make_project()
     cache_root, version_dir = make_plugin_version(
         "market",
@@ -77,7 +77,8 @@ def test_reconcile_and_dry_run_respect_fake_codex_home(
     )
     dry_run_exit = cli.main(
         [
-            "dry-run",
+            "reconcile",
+            "--dry-run",
             "--project",
             str(project_root),
             "--cache-dir",
@@ -141,8 +142,10 @@ def test_print_launchagent_cli_requires_valid_project(tmp_path: Path, capsys: py
     assert "must contain AGENTS.md" in captured.err
 
 
-def test_dry_run_with_diff_flag_reports_file_diff(make_project, make_plugin_version, tmp_path: Path, capsys):
-    """CLI dry-run --diff returns a unified diff when managed text changes."""
+def test_reconcile_dry_run_with_diff_flag_reports_file_diff(
+    make_project, make_plugin_version, tmp_path: Path, capsys
+):
+    """CLI reconcile --dry-run --diff returns a unified diff when managed text changes."""
     project_root, _agents_md = make_project()
     cache_root, version_dir = make_plugin_version(
         "market", "prompt-engineer", "1.0.0", agent_names=("reviewer",)
@@ -167,7 +170,8 @@ def test_dry_run_with_diff_flag_reports_file_diff(make_project, make_plugin_vers
     agent_path.write_text("---\nname: reviewer\ndescription: Review\n---\n\nNew body.\n")
     exit_code = cli.main(
         [
-            "dry-run",
+            "reconcile",
+            "--dry-run",
             "--diff",
             "--project",
             str(project_root),
@@ -182,6 +186,29 @@ def test_dry_run_with_diff_flag_reports_file_diff(make_project, make_plugin_vers
     assert exit_code == 0
     assert "@@" in captured.out
     assert "+New body." in captured.out
+
+
+def test_reconcile_diff_requires_dry_run(make_project, make_plugin_version, tmp_path: Path, capsys):
+    """CLI rejects `reconcile --diff` without `--dry-run`."""
+    project_root, _agents_md = make_project()
+    cache_root, _version_dir = make_plugin_version("market", "prompt-engineer", "1.0.0")
+
+    exit_code = cli.main(
+        [
+            "reconcile",
+            "--diff",
+            "--project",
+            str(project_root),
+            "--cache-dir",
+            str(cache_root),
+            "--codex-home",
+            str(tmp_path / "codex-home"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "--diff requires --dry-run" in captured.err
 
 
 def test_status_cli_reports_pending_and_json(make_project, make_plugin_version, tmp_path: Path, capsys):
