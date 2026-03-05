@@ -21,7 +21,7 @@ from cc_codex_bridge.state import InteropState
 
 
 DEFAULT_CODEX_HOME = Path.home() / ".codex"
-STATE_RELATIVE_PATH = Path(".codex") / "interop-state.json"
+STATE_RELATIVE_PATH = Path(".codex") / "claude-code-interop-state.json"
 CONFIG_RELATIVE_PATH = Path(".codex") / "config.toml"
 PROMPTS_RELATIVE_ROOT = Path(".codex") / "prompts" / "agents"
 
@@ -44,7 +44,7 @@ class Change:
 
     kind: str
     path: Path
-    detail: str = ""
+    resource_kind: str = ""
 
 
 @dataclass(frozen=True)
@@ -159,7 +159,7 @@ def format_change_report(report: ReconcileReport) -> str:
     if not report.changes:
         return "No changes."
     return "\n".join(
-        f"{change.kind.upper()}: {change.path}{f' ({change.detail})' if change.detail else ''}"
+        f"{change.kind.upper()}: {change.path}{f' ({change.resource_kind})' if change.resource_kind else ''}"
         for change in report.changes
     )
 
@@ -243,7 +243,7 @@ def _compute_changes(
         path = skills_root / skill.install_dir_name
         owned = skill.install_dir_name in managed_skill_dirs
         if not path.exists():
-            changes.append(Change("create", path, detail="skill"))
+            changes.append(Change("create", path, resource_kind="skill"))
             continue
         if not path.is_dir():
             raise ReconcileError(f"Expected a skill directory but found a file: {path}")
@@ -251,12 +251,12 @@ def _compute_changes(
             continue
         if not owned:
             raise ReconcileError(f"Refusing to overwrite non-generated skill directory: {path}")
-        changes.append(Change("update", path, detail="skill"))
+        changes.append(Change("update", path, resource_kind="skill"))
 
     for stale_skill_name in sorted(managed_skill_dirs - desired_skill_names):
         stale_path = skills_root / stale_skill_name
         if stale_path.exists():
-            changes.append(Change("remove", stale_path, detail="skill"))
+            changes.append(Change("remove", stale_path, resource_kind="skill"))
 
     return tuple(changes)
 
@@ -387,7 +387,7 @@ def _stage_transaction(
     stage_roots.append(project_backup_root)
 
     for change in sorted(changes, key=lambda item: str(item.path)):
-        if change.detail == "skill":
+        if change.resource_kind == "skill":
             continue
         if not _is_project_path(desired, change.path):
             continue
@@ -434,7 +434,7 @@ def _stage_transaction(
     skills_by_name = {skill.install_dir_name: skill for skill in desired.skills}
 
     for change in sorted(changes, key=lambda item: str(item.path)):
-        if change.detail != "skill":
+        if change.resource_kind != "skill":
             continue
         if change.kind == "remove":
             pending_removals.append(

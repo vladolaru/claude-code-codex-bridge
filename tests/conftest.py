@@ -77,7 +77,7 @@ def isolate_home_scoped_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     sandbox_home = tmp_path / "home"
     monkeypatch.setattr(
         discover_module,
-        "CLAUDE_CACHE_DIR",
+        "CLAUDE_PLUGIN_CACHE_DIR",
         sandbox_home / ".claude" / "plugins" / "cache",
     )
     monkeypatch.setattr(reconcile_module, "DEFAULT_CODEX_HOME", sandbox_home / ".codex")

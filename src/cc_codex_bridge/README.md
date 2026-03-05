@@ -30,7 +30,7 @@ Project-local outputs:
   - inline Codex multi-agent config
 - `.codex/prompts/agents/*.md`
   - generated prompt payloads for translated Claude agents
-- `.codex/interop-state.json`
+- `.codex/claude-code-interop-state.json`
   - generator ownership/state tracking
 
 User-global outputs:
@@ -89,7 +89,7 @@ Generator-owned:
 - `CLAUDE.md` when it is the exact `@AGENTS.md` shim
 - `.codex/config.toml`
 - `.codex/prompts/agents/*`
-- `.codex/interop-state.json`
+- `.codex/claude-code-interop-state.json`
 - generated Codex skills in `~/.codex/skills/*`
 
 Safety rules:

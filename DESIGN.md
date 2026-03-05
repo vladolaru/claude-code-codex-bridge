@@ -43,7 +43,7 @@ These are derived artifacts and must not become hand-maintained sources:
 - `CLAUDE.md`
 - `.codex/config.toml`
 - `.codex/prompts/agents/*.md`
-- `.codex/interop-state.json`
+- `.codex/claude-code-interop-state.json`
 - `~/.codex/skills/*`
 
 ### Authority rule
@@ -103,7 +103,7 @@ Every CLI command except the LaunchAgent commands runs through the same discover
   - rendered inline multi-agent config
 - `.codex/prompts/agents/*.md`
   - prompt bodies derived from Claude agent markdown bodies
-- `.codex/interop-state.json`
+- `.codex/claude-code-interop-state.json`
   - ownership and selection state for reconcile safety
 
 ### User-global outputs
@@ -129,7 +129,7 @@ The reconcile engine is conservative by design.
 
 ### Generator-owned artifacts
 
-Ownership is tracked through `.codex/interop-state.json`.
+Ownership is tracked through `.codex/claude-code-interop-state.json`.
 
 The state file records:
 
@@ -143,7 +143,7 @@ The state file records:
 ### Safety rules
 
 - project files are never overwritten unless they were previously recorded as managed
-- the state file may only authorize generator-owned project paths: `CLAUDE.md`, `.codex/config.toml`, `.codex/interop-state.json`, and `.codex/prompts/agents/*`
+- the state file may only authorize generator-owned project paths: `CLAUDE.md`, `.codex/config.toml`, `.codex/claude-code-interop-state.json`, and `.codex/prompts/agents/*`
 - corrupted or unexpected managed project paths in state are treated as a hard error
 - symlinked managed project targets are rejected
 - non-directory skill targets are rejected

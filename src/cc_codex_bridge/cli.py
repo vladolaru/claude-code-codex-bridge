@@ -32,7 +32,7 @@ from cc_codex_bridge.translate_agents import translate_installed_agents
 from cc_codex_bridge.translate_skills import translate_installed_skills
 
 
-DISCOVERY_COMMANDS = {"reconcile", "validate", "dry-run", "diff"}
+PIPELINE_COMMANDS = {"reconcile", "validate", "dry-run", "diff"}
 LAUNCHAGENT_COMMANDS = {"print-launchagent", "install-launchagent"}
 
 
@@ -110,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in LAUNCHAGENT_COMMANDS:
         return _handle_launchagent_command(args)
 
-    if args.command not in DISCOVERY_COMMANDS:
+    if args.command not in PIPELINE_COMMANDS:
         print(f"Error: unsupported command `{args.command}`", file=sys.stderr)
         return 1
 

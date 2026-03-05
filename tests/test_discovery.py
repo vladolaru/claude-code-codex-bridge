@@ -1,4 +1,4 @@
-"""Tests for Phase 1 Codex interop discovery and SemVer behavior."""
+"""Tests for Codex interop discovery and SemVer behavior."""
 
 from __future__ import annotations
 

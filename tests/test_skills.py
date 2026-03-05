@@ -1,4 +1,4 @@
-"""Tests for Phase 3 skill translation and materialization."""
+"""Tests for skill translation and materialization."""
 
 from __future__ import annotations
 

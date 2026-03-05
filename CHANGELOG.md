@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed the project-local reconcile state artifact to `.codex/claude-code-interop-state.json`.
+- Clarified internal naming in reconcile/discovery command flow (no behavior change).
+
 ## [0.1.0] - 2026-03-04
 
 ### Added

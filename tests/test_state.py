@@ -13,7 +13,7 @@ from cc_codex_bridge.state import InteropState
 
 def test_interop_state_round_trips(tmp_path: Path):
     """A valid state file deserializes and preserves deterministic JSON."""
-    path = tmp_path / "interop-state.json"
+    path = tmp_path / "claude-code-interop-state.json"
     state = InteropState(
         project_root=tmp_path / "project",
         codex_home=tmp_path / "codex-home",

@@ -1,4 +1,4 @@
-"""Phase 1 discovery for Codex interop generation."""
+"""Discovery for Codex interop generation."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from cc_codex_bridge.model import (
 
 
 AGENTS_MD = "AGENTS.md"
-CLAUDE_CACHE_DIR = Path.home() / ".claude" / "plugins" / "cache"
+CLAUDE_PLUGIN_CACHE_DIR = Path.home() / ".claude" / "plugins" / "cache"
 
 
 def resolve_project_root(start_path: str | Path | None = None) -> ProjectContext:
@@ -52,7 +52,7 @@ def discover_latest_plugins(
     cache_dir: str | Path | None = None,
 ) -> tuple[InstalledPlugin, ...]:
     """Discover the latest installed version of each Claude plugin."""
-    root = Path(cache_dir or CLAUDE_CACHE_DIR).expanduser().resolve()
+    root = Path(cache_dir or CLAUDE_PLUGIN_CACHE_DIR).expanduser().resolve()
     if not root.is_dir():
         raise DiscoveryError(f"Claude plugin cache not found: {root}")
 

@@ -1,4 +1,4 @@
-"""Phase 3 translation from Claude skills to self-contained Codex skills."""
+"""Translation from Claude skills to self-contained Codex skills."""
 
 from __future__ import annotations
 

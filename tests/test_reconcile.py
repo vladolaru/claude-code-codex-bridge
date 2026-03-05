@@ -1,4 +1,4 @@
-"""Tests for Phase 4 reconcile behavior."""
+"""Tests for reconcile behavior."""
 
 from __future__ import annotations
 

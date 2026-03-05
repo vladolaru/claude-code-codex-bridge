@@ -1,4 +1,4 @@
-"""Phase 2 translation from Claude agent markdown to Codex roles."""
+"""Translation from Claude agent markdown to Codex roles."""
 
 from __future__ import annotations
 

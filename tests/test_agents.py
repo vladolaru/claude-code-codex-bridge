@@ -1,4 +1,4 @@
-"""Tests for Phase 2 agent translation and rendering."""
+"""Tests for agent translation and rendering."""
 
 from __future__ import annotations
 
