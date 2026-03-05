@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-05
+
+### Added
+
+- Added exclusion controls for sync inputs via project `.codex/bridge.toml` and repeatable CLI flags: `--exclude-plugin`, `--exclude-skill`, and `--exclude-agent`.
+- Added status/summary reporting for effective excluded plugins, skills, and agents.
+
 ## [0.2.0] - 2026-03-05
 
 ### Changed

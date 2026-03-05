@@ -281,6 +281,162 @@ def test_status_cli_reports_pending_and_json(make_project, make_plugin_version, 
     assert payload["categorized_changes"]["skills"]["create"] == []
 
 
+def test_validate_honors_project_exclusion_config(make_project, make_plugin_version, capsys):
+    """`validate` applies exclusions from `.codex/bridge.toml`."""
+    project_root, _agents_md = make_project()
+    cache_root, _version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("portable", "cc-only"),
+        agent_names=("reviewer", "cc-reviewer"),
+    )
+    exclusions_path = project_root / ".codex" / "bridge.toml"
+    exclusions_path.parent.mkdir(parents=True)
+    exclusions_path.write_text(
+        "[exclude]\n"
+        'skills = ["market/prompt-engineer/cc-only"]\n'
+        'agents = ["market/prompt-engineer/cc-reviewer"]\n'
+    )
+
+    exit_code = cli.main(
+        ["validate", "--project", str(project_root), "--cache-dir", str(cache_root)]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "GENERATED_ROLES: 1" in captured.out
+    assert "GENERATED_SKILLS: 1" in captured.out
+    assert "EXCLUDED_SKILL: market/prompt-engineer/cc-only" in captured.out
+    assert "EXCLUDED_AGENT: market/prompt-engineer/cc-reviewer.md" in captured.out
+
+
+def test_reconcile_exclude_skill_removes_previously_managed_output(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Excluding a previously generated skill removes it as stale managed output."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    generated_skill = codex_home / "skills" / "prompt-engineer-prompt-engineer"
+
+    assert (
+        cli.main(
+            [
+                "reconcile",
+                "--project",
+                str(project_root),
+                "--cache-dir",
+                str(cache_root),
+                "--codex-home",
+                str(codex_home),
+            ]
+        )
+        == 0
+    )
+    assert generated_skill.exists()
+
+    assert (
+        cli.main(
+            [
+                "reconcile",
+                "--project",
+                str(project_root),
+                "--cache-dir",
+                str(cache_root),
+                "--codex-home",
+                str(codex_home),
+                "--exclude-skill",
+                "market/prompt-engineer/prompt-engineer",
+            ]
+        )
+        == 0
+    )
+    assert not generated_skill.exists()
+
+
+def test_status_json_reports_excluded_entities(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+    capsys,
+):
+    """`status --json` includes effective exclusions applied to this run."""
+    project_root, _agents_md = make_project()
+    cache_root, _version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        agent_names=("reviewer",),
+    )
+
+    exit_code = cli.main(
+        [
+            "status",
+            "--json",
+            "--project",
+            str(project_root),
+            "--cache-dir",
+            str(cache_root),
+            "--codex-home",
+            str(tmp_path / "codex-home"),
+            "--exclude-agent",
+            "market/prompt-engineer/reviewer",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert payload["excluded"]["plugins"] == []
+    assert payload["excluded"]["skills"] == []
+    assert payload["excluded"]["agents"] == ["market/prompt-engineer/reviewer.md"]
+
+
+def test_cli_exclude_skill_flag_overrides_config_skills(make_project, make_plugin_version, capsys):
+    """`--exclude-skill` replaces config skill exclusions for that run."""
+    project_root, _agents_md = make_project()
+    cache_root, _version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("portable", "cc-only"),
+    )
+    exclusions_path = project_root / ".codex" / "bridge.toml"
+    exclusions_path.parent.mkdir(parents=True)
+    exclusions_path.write_text(
+        "[exclude]\n"
+        'skills = ["market/prompt-engineer/portable"]\n'
+    )
+
+    exit_code = cli.main(
+        [
+            "validate",
+            "--project",
+            str(project_root),
+            "--cache-dir",
+            str(cache_root),
+            "--exclude-skill",
+            "market/prompt-engineer/cc-only",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "EXCLUDED_SKILL: market/prompt-engineer/cc-only" in captured.out
+    assert "EXCLUDED_SKILL: market/prompt-engineer/portable" not in captured.out
+
+
 def test_cli_handles_unsupported_command(
     make_project,
     monkeypatch: pytest.MonkeyPatch,

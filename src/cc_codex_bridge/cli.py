@@ -14,6 +14,12 @@ if str(PACKAGE_PARENT) not in sys.path:
 
 from cc_codex_bridge.claude_shim import plan_claude_shim
 from cc_codex_bridge.discover import discover
+from cc_codex_bridge.exclusions import (
+    ExclusionReport,
+    apply_sync_exclusions,
+    load_project_exclusions,
+    resolve_effective_exclusions,
+)
 from cc_codex_bridge.install_launchagent import (
     DEFAULT_START_INTERVAL,
     build_launchagent_label,
@@ -73,8 +79,27 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include unified text diffs for managed .md/.toml/.json files (requires --dry-run).",
     )
-    subparsers.add_parser("validate", parents=[common])
+    validate_parser = subparsers.add_parser("validate", parents=[common])
     status_parser = subparsers.add_parser("status", parents=[common])
+    for pipeline_parser in (reconcile_parser, validate_parser, status_parser):
+        pipeline_parser.add_argument(
+            "--exclude-plugin",
+            action="append",
+            default=None,
+            help="Exclude one plugin (`marketplace/plugin`) from sync. Repeatable.",
+        )
+        pipeline_parser.add_argument(
+            "--exclude-skill",
+            action="append",
+            default=None,
+            help="Exclude one skill (`marketplace/plugin/skill`) from sync. Repeatable.",
+        )
+        pipeline_parser.add_argument(
+            "--exclude-agent",
+            action="append",
+            default=None,
+            help="Exclude one agent (`marketplace/plugin/agent.md`) from sync. Repeatable.",
+        )
     status_parser.add_argument(
         "--json",
         action="store_true",
@@ -136,6 +161,14 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         result = discover(project_path=args.project, cache_dir=args.cache_dir)
+        config_exclusions = load_project_exclusions(result.project.root)
+        exclusions = resolve_effective_exclusions(
+            config_exclusions,
+            cli_exclude_plugins=args.exclude_plugin,
+            cli_exclude_skills=args.exclude_skill,
+            cli_exclude_agents=args.exclude_agent,
+        )
+        result, exclusion_report = apply_sync_exclusions(result, exclusions)
         shim_decision = plan_claude_shim(result.project)
         roles = translate_installed_agents(result.plugins)
         skills = translate_installed_skills(result.plugins)
@@ -161,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
             len(prompt_files),
             len(skills),
             rendered_config,
+            exclusion_report,
         )
         return 0
 
@@ -177,6 +211,7 @@ def main(argv: list[str] | None = None) -> int:
                 len(prompt_files),
                 len(skills),
                 rendered_config,
+                exclusion_report,
             )
             if args.diff:
                 print(format_diff_report(desired_state, report))
@@ -187,9 +222,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "status":
             report = diff_desired_state(desired_state)
             if args.json:
-                print(format_status_json(report))
+                print(format_status_json(report, exclusion_report))
             else:
-                print(format_status_report(report))
+                print(format_status_report(report, exclusion_report))
             return 0
     except ReconcileError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -240,6 +275,7 @@ def _print_summary(
     prompt_count: int,
     skill_count: int,
     rendered_config: str,
+    exclusion_report: ExclusionReport,
 ) -> None:
     """Print a human-readable discovery summary."""
     print(f"PROJECT_ROOT: {result.project.root}")
@@ -258,9 +294,18 @@ def _print_summary(
             f"skills={len(plugin.skills)} "
             f"agents={len(plugin.agents)}"
         )
+    print(f"EXCLUDED_PLUGINS: {len(exclusion_report.plugins)}")
+    print(f"EXCLUDED_SKILLS: {len(exclusion_report.skills)}")
+    print(f"EXCLUDED_AGENTS: {len(exclusion_report.agents)}")
+    for plugin_id in exclusion_report.plugins:
+        print(f"EXCLUDED_PLUGIN: {plugin_id}")
+    for skill_id in exclusion_report.skills:
+        print(f"EXCLUDED_SKILL: {skill_id}")
+    for agent_id in exclusion_report.agents:
+        print(f"EXCLUDED_AGENT: {agent_id}")
 
 
-def _build_status_payload(report) -> dict[str, object]:
+def _build_status_payload(report, exclusion_report: ExclusionReport) -> dict[str, object]:
     """Build a stable status payload from reconcile diff output."""
     categorized_changes: dict[str, dict[str, list[str]]] = {
         "project_files": {"create": [], "update": [], "remove": []},
@@ -274,17 +319,22 @@ def _build_status_payload(report) -> dict[str, object]:
         "status": "in_sync" if not report.changes else "pending_changes",
         "pending_change_count": len(report.changes),
         "categorized_changes": categorized_changes,
+        "excluded": {
+            "plugins": list(exclusion_report.plugins),
+            "skills": list(exclusion_report.skills),
+            "agents": list(exclusion_report.agents),
+        },
     }
 
 
-def format_status_json(report) -> str:
+def format_status_json(report, exclusion_report: ExclusionReport) -> str:
     """Render status output as deterministic JSON."""
-    return json.dumps(_build_status_payload(report), indent=2, sort_keys=True)
+    return json.dumps(_build_status_payload(report, exclusion_report), indent=2, sort_keys=True)
 
 
-def format_status_report(report) -> str:
+def format_status_report(report, exclusion_report: ExclusionReport) -> str:
     """Render status output as human-readable text."""
-    payload = _build_status_payload(report)
+    payload = _build_status_payload(report, exclusion_report)
     categorized = payload["categorized_changes"]
     project_files = categorized["project_files"]
     skills = categorized["skills"]
@@ -303,6 +353,12 @@ def format_status_report(report) -> str:
             f"update={len(skills['update'])} "
             f"remove={len(skills['remove'])}"
         ),
+        (
+            "EXCLUDED: "
+            f"plugins={len(payload['excluded']['plugins'])} "
+            f"skills={len(payload['excluded']['skills'])} "
+            f"agents={len(payload['excluded']['agents'])}"
+        ),
     ]
     for path in project_files["create"]:
         lines.append(f"PROJECT_FILE_CREATE: {path}")
@@ -316,6 +372,12 @@ def format_status_report(report) -> str:
         lines.append(f"SKILL_UPDATE: {path}")
     for path in skills["remove"]:
         lines.append(f"SKILL_REMOVE: {path}")
+    for plugin_id in payload["excluded"]["plugins"]:
+        lines.append(f"EXCLUDED_PLUGIN: {plugin_id}")
+    for skill_id in payload["excluded"]["skills"]:
+        lines.append(f"EXCLUDED_SKILL: {skill_id}")
+    for agent_id in payload["excluded"]["agents"]:
+        lines.append(f"EXCLUDED_AGENT: {agent_id}")
     return "\n".join(lines)
 
 

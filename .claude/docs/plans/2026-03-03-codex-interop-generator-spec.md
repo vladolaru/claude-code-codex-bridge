@@ -364,6 +364,9 @@ No project-local Codex skill mirrors.
 4. resolve selected plugin/version pairs
 5. resolve each selected plugin path through symlinks
 6. enumerate skills and agents from the resolved source path for each selected plugin
+7. load optional project exclusions from `.codex/bridge.toml`
+8. apply CLI exclusions (`--exclude-plugin`, `--exclude-skill`, `--exclude-agent`) if provided
+9. filter the discovered plugin/skill/agent set before translation
 
 ### Step 2: build desired state
 

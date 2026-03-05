@@ -32,6 +32,7 @@ The project has a strict source-of-truth split.
 These are authoritative inputs:
 
 - project `AGENTS.md`
+- optional project exclusion config at `.codex/bridge.toml`
 - installed Claude plugin skills discovered from the local Claude plugin cache
 - installed Claude plugin agents discovered from the local Claude plugin cache
 - plugin-local resources attached to those skills, such as `scripts/`, `references/`, `assets/`, and `agents/`
@@ -84,12 +85,14 @@ The runtime is a deterministic pipeline:
 1. resolve the target project root by searching upward for `AGENTS.md`
 2. discover installed Claude plugins from `~/.claude/plugins/cache` or `--cache-dir`
 3. choose the highest semantic version for each `<marketplace>/<plugin>`
-4. translate plugin agents into `GeneratedAgentRole` objects
-5. translate plugin skills into `GeneratedSkill` trees
-6. render project-local Codex prompt files and `.codex/config.toml`
-7. decide whether `CLAUDE.md` can be created or preserved as an `@AGENTS.md` shim
-8. build a full desired state for project files plus Codex skill directories
-9. inspect/preview or reconcile that desired state with ownership and rollback protections
+4. load optional `.codex/bridge.toml` exclusions and merge any CLI exclusion flags
+5. filter discovered plugins/skills/agents by the effective exclusion set
+6. translate plugin agents into `GeneratedAgentRole` objects
+7. translate plugin skills into `GeneratedSkill` trees
+8. render project-local Codex prompt files and `.codex/config.toml`
+9. decide whether `CLAUDE.md` can be created or preserved as an `@AGENTS.md` shim
+10. build a full desired state for project files plus Codex skill directories
+11. inspect/preview or reconcile that desired state with ownership and rollback protections
 
 Every CLI command except the LaunchAgent commands runs through the same discovery and translation pipeline first.
 
@@ -122,6 +125,7 @@ The reconcile engine is conservative by design.
 ### Never overwritten unless already generator-owned
 
 - project `AGENTS.md`
+- hand-authored project `.codex/bridge.toml` exclusion config
 - hand-authored `CLAUDE.md`
 - hand-authored `.codex/config.toml`
 - hand-authored `.codex/prompts/agents/*.md`
@@ -371,10 +375,19 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
   - compute reconcile changes without writing
   - report `in_sync` vs `pending_changes`
   - report categorized project-file vs skill create/update/remove changes
+  - report effective excluded plugin/skill/agent ids
   - support JSON output with `--json`
 - `reconcile`
   - apply the desired state to disk
   - print summary and applied changes
+
+Pipeline commands (`validate`, `status`, `reconcile`) support exclusion controls:
+
+- `--exclude-plugin marketplace/plugin`
+- `--exclude-skill marketplace/plugin/skill`
+- `--exclude-agent marketplace/plugin/agent.md`
+
+All exclusion flags are repeatable. `.codex/bridge.toml` can define persistent exclusions, and CLI exclusions override config values for the same entity kind in the current run.
 
 ### LaunchAgent commands
 
@@ -412,6 +425,8 @@ Current runtime module responsibilities:
   - argument parsing, command dispatch, summary/error reporting
 - `discover.py`
   - project root resolution and installed-plugin discovery
+- `exclusions.py`
+  - exclusion config loading, validation, CLI-override resolution, and discovery filtering
 - `model.py`
   - core dataclasses and domain-specific error types
 - `claude_shim.py`
@@ -457,6 +472,7 @@ These are current implemented simplifications, not necessarily permanent design 
 - unknown Claude tools are dropped rather than preserved or warned on
 - frontmatter parsing is custom and intentionally narrow
 - generated Codex config is inline rather than split across multiple files
+- exclusion ids are exact-match identifiers, not wildcard/glob patterns
 - LaunchAgent scheduling is supported; watcher mode is not
 
 Any change to these constraints should update this file.

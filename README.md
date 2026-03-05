@@ -39,6 +39,26 @@ cc-codex-bridge status --project .
 cc-codex-bridge reconcile --project .
 ```
 
+Optional exclusion flags (repeatable) let you skip Claude-specific entities:
+
+```bash
+cc-codex-bridge reconcile --project . \
+  --exclude-plugin marketplace/plugin \
+  --exclude-skill marketplace/plugin/skill \
+  --exclude-agent marketplace/plugin/agent.md
+```
+
+To persist exclusions per project, create `.codex/bridge.toml`:
+
+```toml
+[exclude]
+plugins = ["market/pirategoat-tools"]
+skills = ["market/prompt-engineer/internal-cc-only"]
+agents = ["market/prompt-engineer/reviewer.md"]
+```
+
+CLI exclusion flags override config exclusions for the same entity kind in that run.
+
 The module entrypoint also works after installation:
 
 ```bash

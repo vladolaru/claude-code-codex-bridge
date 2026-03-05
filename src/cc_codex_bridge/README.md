@@ -156,8 +156,22 @@ Useful overrides:
 
 - `--cache-dir /path/to/claude/plugins/cache`
 - `--codex-home /path/to/codex/home`
+- `--exclude-plugin marketplace/plugin` (repeatable)
+- `--exclude-skill marketplace/plugin/skill` (repeatable)
+- `--exclude-agent marketplace/plugin/agent.md` (repeatable)
 
 These are mainly useful for testing or controlled local runs.
+
+Persistent exclusions can be defined in `.codex/bridge.toml`:
+
+```toml
+[exclude]
+plugins = ["market/pirategoat-tools"]
+skills = ["market/prompt-engineer/internal-cc-only"]
+agents = ["market/prompt-engineer/reviewer.md"]
+```
+
+CLI exclusion flags override config exclusions for that entity kind in the current run.
 
 ## Developer Workflow
 
