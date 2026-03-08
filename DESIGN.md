@@ -148,11 +148,14 @@ The state file records:
 
 - project files are never overwritten unless they were previously recorded as managed
 - the state file may only authorize generator-owned project paths: `CLAUDE.md`, `.codex/config.toml`, `.codex/claude-code-interop-state.json`, and `.codex/prompts/agents/*`
+- generated project-relative paths are normalized and may not use absolute paths or `..` traversal
 - corrupted or unexpected managed project paths in state are treated as a hard error
+- malformed state payload field types are treated as a hard error
 - symlinked managed project targets are rejected
 - non-directory skill targets are rejected
 - non-generated existing skill directories are rejected
 - stale managed outputs are removed when no longer desired
+- if the configured Codex home changes, previously managed skill directories are removed from the old Codex home during the same reconcile
 - writes are staged and then swapped into place
 - failures during apply trigger rollback of already-applied changes
 
@@ -201,7 +204,7 @@ Allowed outcomes:
 `CLAUDE.md` is only generator-safe when:
 
 - it does not exist
-- it already contains `@AGENTS.md`
+- it exactly matches `@AGENTS.md` plus a trailing newline
 - it is a symlink to `AGENTS.md`
 
 Anything else is treated as hand-authored and causes failure.
@@ -222,8 +225,11 @@ Optional handled fields:
 
 Current mapping rules:
 
-- role name = `<plugin_name>_<normalized_agent_name>`
-- prompt file path = `.codex/prompts/agents/<plugin>-<agent-name>.md`
+- role name base = `<normalized_plugin_name>_<normalized_agent_name>`
+- role-name collisions are resolved by prefixing the normalized marketplace: `<marketplace>_<plugin>_<agent>`
+- prompt file path base = `.codex/prompts/agents/<normalized-plugin>-<normalized-agent>.md`
+- prompt-path collisions are resolved by prefixing the normalized marketplace: `.codex/prompts/agents/<marketplace>-<plugin>-<agent>.md`
+- normalized generated names reject absolute paths, `..` traversal, and values that collapse to an empty identifier
 - prompt body = markdown body after frontmatter, normalized to end with a trailing newline when non-empty
 - model = fixed default `gpt-5.3-codex`
 - original Claude `model` is preserved only as metadata in the generated config comment
@@ -261,6 +267,7 @@ The config is deterministic:
 - tools are sorted
 - output contains a generated-file header
 - prompt references are project-local `.codex/...` paths
+- string values use TOML-compatible escaping, including multiline content
 
 ### 8.4 Skill translation
 

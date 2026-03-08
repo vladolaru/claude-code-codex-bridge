@@ -37,6 +37,21 @@ def test_plan_claude_shim_preserves_exact_shim(tmp_path: Path):
     assert decision.content == SHIM_CONTENT
 
 
+def test_plan_claude_shim_rejects_non_exact_shim_variants(tmp_path: Path):
+    """Whitespace variants are treated as hand-authored rather than generator-owned."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    agents_md_path = project_root / "AGENTS.md"
+    agents_md_path.write_text("# Shared\n")
+    claude_md_path = project_root / "CLAUDE.md"
+    claude_md_path.write_text("@AGENTS.md\n\n")
+
+    decision = plan_claude_shim(ProjectContext(project_root, agents_md_path))
+
+    assert decision.action == "fail"
+    assert "not a generator-owned shim" in decision.reason
+
+
 def test_plan_claude_shim_preserves_symlink_to_agents_md(tmp_path: Path):
     """Symlinked CLAUDE.md -> AGENTS.md is preserved."""
     project_root = tmp_path / "project"

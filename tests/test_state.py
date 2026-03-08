@@ -51,3 +51,23 @@ def test_interop_state_handles_missing_invalid_and_unsupported_files(tmp_path: P
     )
     with pytest.raises(ReconcileError, match="Unsupported interop state version"):
         InteropState.from_path(unsupported)
+
+
+def test_interop_state_rejects_invalid_schema_shapes(tmp_path: Path):
+    """Version-matching state payloads still validate field types strictly."""
+    invalid = tmp_path / "invalid-schema.json"
+    invalid.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "project_root": 1,
+                "codex_home": str(tmp_path / "codex-home"),
+                "selected_plugins": ["market/plugin@1.0.0"],
+                "managed_project_files": [123],
+                "managed_codex_skill_dirs": [],
+            }
+        )
+    )
+
+    with pytest.raises(ReconcileError, match="Invalid interop state file"):
+        InteropState.from_path(invalid)

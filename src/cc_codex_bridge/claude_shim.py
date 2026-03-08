@@ -37,7 +37,7 @@ def plan_claude_shim(project: ProjectContext) -> ClaudeShimDecision:
         )
 
     content = claude_md_path.read_text()
-    if content.strip() == "@AGENTS.md":
+    if content == SHIM_CONTENT:
         return ClaudeShimDecision(
             action="preserve",
             path=claude_md_path,

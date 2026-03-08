@@ -96,16 +96,35 @@ def build_desired_state(
     if shim_decision.action == "fail":
         raise ReconcileError(shim_decision.reason)
 
-    project_root = discovery.project.root
+    project_root = discovery.project.root.resolve()
     codex_home_path = Path(codex_home or DEFAULT_CODEX_HOME).expanduser().resolve()
     project_files: list[tuple[Path, bytes]] = []
+    skills_tuple = tuple(skills)
 
     if shim_decision.content is not None:
-        project_files.append((project_root / "CLAUDE.md", shim_decision.content.encode()))
+        project_files.append(
+            (
+                _resolve_managed_project_path(project_root, Path("CLAUDE.md")),
+                shim_decision.content.encode(),
+            )
+        )
 
-    project_files.append((project_root / CONFIG_RELATIVE_PATH, rendered_config.encode()))
+    project_files.append(
+        (
+            _resolve_managed_project_path(project_root, CONFIG_RELATIVE_PATH),
+            rendered_config.encode(),
+        )
+    )
     for relpath, content in sorted(prompt_files.items(), key=lambda item: item[0].as_posix()):
-        project_files.append((project_root / relpath, content.encode()))
+        project_files.append(
+            (
+                _resolve_managed_project_path(project_root, relpath),
+                content.encode(),
+            )
+        )
+
+    _ensure_unique_project_file_paths(project_files)
+    _ensure_unique_skill_names(skills_tuple)
 
     selected_plugins = tuple(
         f"{plugin.marketplace}/{plugin.plugin_name}@{plugin.version_text}"
@@ -116,7 +135,7 @@ def build_desired_state(
         project_root=project_root,
         codex_home=codex_home_path,
         project_files=tuple(project_files),
-        skills=tuple(skills),
+        skills=skills_tuple,
         selected_plugins=selected_plugins,
         state_path=project_root / STATE_RELATIVE_PATH,
     )
@@ -253,8 +272,14 @@ def _compute_changes(
             raise ReconcileError(f"Refusing to overwrite non-generated skill directory: {path}")
         changes.append(Change("update", path, resource_kind="skill"))
 
-    for stale_skill_name in sorted(managed_skill_dirs - desired_skill_names):
-        stale_path = skills_root / stale_skill_name
+    stale_skill_names = managed_skill_dirs - desired_skill_names
+    stale_skills_root = skills_root
+    if previous_state is not None and previous_state.codex_home != desired.codex_home:
+        stale_skill_names = managed_skill_dirs
+        stale_skills_root = previous_state.codex_home / "skills"
+
+    for stale_skill_name in sorted(stale_skill_names):
+        stale_path = stale_skills_root / stale_skill_name
         if stale_path.exists():
             changes.append(Change("remove", stale_path, resource_kind="skill"))
 
@@ -310,7 +335,10 @@ def _atomic_write_file(path: Path, content: bytes) -> None:
 
 def _project_relative(desired: DesiredState, path: Path) -> str:
     """Return a project-relative path string."""
-    return path.relative_to(desired.project_root).as_posix()
+    return _normalize_relative_path(
+        path.relative_to(desired.project_root),
+        label="managed project path",
+    ).as_posix()
 
 
 def _lookup_desired_file_bytes(desired: DesiredState, path: Path) -> bytes | None:
@@ -359,16 +387,21 @@ def _build_state_record(desired: DesiredState) -> InteropState:
 
 def _is_allowed_managed_project_relative(relative: str) -> bool:
     """Return True for the only project-relative paths the generator may ever manage."""
+    try:
+        normalized = _normalize_relative_path(Path(relative), label="managed project path")
+    except ReconcileError:
+        return False
+
     allowed_exact = {
         "CLAUDE.md",
         CONFIG_RELATIVE_PATH.as_posix(),
         STATE_RELATIVE_PATH.as_posix(),
     }
-    if relative in allowed_exact:
+    normalized_text = normalized.as_posix()
+    if normalized_text in allowed_exact:
         return True
 
-    prompts_prefix = f"{PROMPTS_RELATIVE_ROOT.as_posix()}/"
-    return relative.startswith(prompts_prefix)
+    return normalized.parent == PROMPTS_RELATIVE_ROOT and normalized.suffix == ".md"
 
 
 def _stage_transaction(
@@ -429,9 +462,21 @@ def _stage_transaction(
     desired.codex_home.mkdir(parents=True, exist_ok=True)
     skill_stage_root = Path(tempfile.mkdtemp(prefix=".interop-skill-stage-", dir=skills_root.parent))
     stage_roots.append(skill_stage_root)
-    skill_backup_root = Path(tempfile.mkdtemp(prefix=".interop-skill-backup-", dir=skills_root.parent))
-    stage_roots.append(skill_backup_root)
+    skill_backup_roots: dict[Path, Path] = {}
     skills_by_name = {skill.install_dir_name: skill for skill in desired.skills}
+
+    def _skill_backup_root_for(destination: Path) -> Path:
+        backup_parent = destination.parent.parent
+        backup_root = skill_backup_roots.get(backup_parent)
+        if backup_root is not None:
+            return backup_root
+
+        backup_root = Path(
+            tempfile.mkdtemp(prefix=".interop-skill-backup-", dir=backup_parent)
+        )
+        skill_backup_roots[backup_parent] = backup_root
+        stage_roots.append(backup_root)
+        return backup_root
 
     for change in sorted(changes, key=lambda item: str(item.path)):
         if change.resource_kind != "skill":
@@ -440,7 +485,7 @@ def _stage_transaction(
             pending_removals.append(
                 _PendingRemoval(
                     destination=change.path,
-                    backup_root=skill_backup_root,
+                    backup_root=_skill_backup_root_for(change.path),
                     is_dir=True,
                 )
             )
@@ -454,7 +499,7 @@ def _stage_transaction(
             _PendingSwap(
                 destination=change.path,
                 staged_path=staged_dir,
-                backup_root=skill_backup_root,
+                backup_root=_skill_backup_root_for(change.path),
                 is_dir=True,
             )
         )
@@ -572,3 +617,64 @@ def _remove_existing_path(path: Path, *, is_dir: bool) -> None:
         shutil.rmtree(path)
     else:
         path.unlink()
+
+
+def _resolve_managed_project_path(project_root: Path, relative_path: Path) -> Path:
+    """Resolve and validate one generated project-relative output path."""
+    normalized = _normalize_relative_path(relative_path, label="managed project output")
+    if not _is_allowed_managed_project_relative(normalized.as_posix()):
+        raise ReconcileError(f"Unexpected managed project output path: {normalized}")
+
+    candidate = project_root / normalized
+    resolved_candidate = candidate.resolve()
+    if not _is_relative_to(resolved_candidate, project_root):
+        raise ReconcileError(f"Managed project output escapes the project root: {normalized}")
+    return candidate
+
+
+def _normalize_relative_path(path: Path, *, label: str) -> Path:
+    """Normalize one relative path and reject traversal or absolute forms."""
+    candidate = Path(path)
+    if candidate.is_absolute():
+        raise ReconcileError(f"{label.capitalize()} must be relative: {candidate}")
+
+    normalized_parts: list[str] = []
+    for part in candidate.parts:
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            raise ReconcileError(f"{label.capitalize()} may not contain parent traversal: {candidate}")
+        normalized_parts.append(part)
+
+    if not normalized_parts:
+        raise ReconcileError(f"{label.capitalize()} may not be empty: {candidate}")
+    return Path(*normalized_parts)
+
+
+def _ensure_unique_project_file_paths(project_files: list[tuple[Path, bytes]]) -> None:
+    """Reject duplicate generated project output paths."""
+    seen_paths: set[Path] = set()
+    for path, _content in project_files:
+        if path in seen_paths:
+            raise ReconcileError(f"Duplicate generated project file path: {path}")
+        seen_paths.add(path)
+
+
+def _ensure_unique_skill_names(skills: tuple[GeneratedSkill, ...]) -> None:
+    """Reject duplicate generated skill install directory names."""
+    seen_names: set[str] = set()
+    for skill in skills:
+        if skill.install_dir_name in seen_names:
+            raise ReconcileError(
+                f"Duplicate generated Codex skill directory name: {skill.install_dir_name}"
+            )
+        seen_names.add(skill.install_dir_name)
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    """Return True when `path` is within `root` after resolution."""
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tomllib
 
 import pytest
 
@@ -98,6 +99,28 @@ def test_render_inline_codex_config_is_deterministic(make_plugin_version):
     assert 'tools = ["read", "write"]' in rendered
 
 
+def test_render_inline_codex_config_escapes_multiline_strings(make_plugin_version):
+    """Multiline frontmatter values still produce valid TOML config output."""
+    cache_root, version_dir = make_plugin_version(
+        "market", "test-plugin", "1.0.0", agent_names=("reviewer",)
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\n"
+        "name: reviewer\n"
+        "description: |\n"
+        "  line one\n"
+        "  line two\n"
+        "---\n\n"
+        "Prompt body.\n"
+    )
+
+    roles = translate_installed_agents(discover_latest_plugins(cache_root))
+    rendered = render_inline_codex_config(roles)
+    parsed = tomllib.loads(rendered)
+
+    assert parsed["agents"]["test-plugin_reviewer"]["description"] == "line one\nline two"
+
+
 def test_translate_tools_and_rendered_config_ignore_source_tool_order(make_plugin_version):
     """Equivalent tool sets produce the same translated order and config output."""
     cache_root, version_dir = make_plugin_version(
@@ -140,6 +163,59 @@ def test_translate_tools_and_rendered_config_ignore_source_tool_order(make_plugi
     assert first_roles[0].tools == ("bash", "read", "write")
     assert second_roles[0].tools == ("bash", "read", "write")
     assert first_render == second_render
+
+
+def test_translate_installed_agents_sanitizes_generated_names_and_paths(make_plugin_version):
+    """Unsafe agent names are normalized before role and prompt paths are generated."""
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "test-plugin",
+        "1.0.0",
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\n"
+        "name: ../../../../tmp/pwn\n"
+        "description: Review\n"
+        "---\n\n"
+        "Prompt body.\n"
+    )
+
+    roles = translate_installed_agents(discover_latest_plugins(cache_root))
+
+    assert roles[0].role_name == "test-plugin_tmp_pwn"
+    assert roles[0].prompt_relpath.as_posix() == "prompts/agents/test-plugin-tmp-pwn.md"
+
+
+def test_translate_installed_agents_disambiguates_cross_marketplace_collisions(
+    make_plugin_version,
+):
+    """Marketplace prefixes resolve otherwise-colliding generated agent names."""
+    cache_root, alpha_dir = make_plugin_version(
+        "alpha",
+        "shared-plugin",
+        "1.0.0",
+        agent_names=("reviewer",),
+    )
+    _, beta_dir = make_plugin_version(
+        "beta",
+        "shared-plugin",
+        "1.0.0",
+        agent_names=("reviewer",),
+    )
+    for agent_path in (alpha_dir / "agents" / "reviewer.md", beta_dir / "agents" / "reviewer.md"):
+        agent_path.write_text("---\nname: reviewer\ndescription: Review\n---\n\nPrompt.\n")
+
+    roles = translate_installed_agents(discover_latest_plugins(cache_root))
+
+    assert [role.role_name for role in roles] == [
+        "alpha_shared-plugin_reviewer",
+        "beta_shared-plugin_reviewer",
+    ]
+    assert [role.prompt_relpath.as_posix() for role in roles] == [
+        "prompts/agents/alpha-shared-plugin-reviewer.md",
+        "prompts/agents/beta-shared-plugin-reviewer.md",
+    ]
 
 
 def test_parse_markdown_with_frontmatter_supports_folded_scalars_and_nested_maps(tmp_path: Path):

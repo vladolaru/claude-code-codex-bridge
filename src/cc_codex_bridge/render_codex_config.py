@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from cc_codex_bridge.model import GeneratedAgentRole
@@ -31,15 +32,15 @@ def render_inline_codex_config(
         lines.extend(
             [
                 f"[agents.{role.role_name}]",
-                f'description = "{_escape(role.description)}"',
-                f'model = "{_escape(role.model)}"',
-                f'prompt = ".codex/{role.prompt_relpath.as_posix()}"',
+                f"description = {_render_string(role.description)}",
+                f"model = {_render_string(role.model)}",
+                f"prompt = {_render_string(f'.codex/{role.prompt_relpath.as_posix()}')}",
                 f"tools = [{_render_tools(role.tools)}]",
             ]
         )
         if role.original_model_hint:
             lines.append(
-                f'# original_claude_model_hint = "{_escape(role.original_model_hint)}"'
+                f"# original_claude_model_hint = {_render_string(role.original_model_hint)}"
             )
         lines.append("")
 
@@ -48,10 +49,9 @@ def render_inline_codex_config(
 
 def _render_tools(tools: tuple[str, ...]) -> str:
     """Render a deterministic TOML list of tool strings."""
-    return ", ".join(f'"{_escape(tool)}"' for tool in tools)
+    return ", ".join(_render_string(tool) for tool in tools)
 
 
-def _escape(value: str) -> str:
-    """Escape TOML double-quoted string content minimally."""
-    return value.replace("\\", "\\\\").replace('"', '\\"')
-
+def _render_string(value: str) -> str:
+    """Render a TOML-compatible basic string with JSON-compatible escaping."""
+    return json.dumps(value)

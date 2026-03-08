@@ -175,6 +175,38 @@ def test_reconcile_removes_stale_managed_skill(make_project, make_plugin_version
     assert not installed_skill.exists()
 
 
+def test_reconcile_moves_managed_skills_when_codex_home_changes(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Changing Codex home migrates managed skill directories instead of orphaning the old ones."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    first_home = tmp_path / "codex-home-one"
+    second_home = tmp_path / "codex-home-two"
+
+    reconcile_desired_state(_build_desired(project_root, cache_root, first_home))
+    original_skill = first_home / "skills" / "prompt-engineer-prompt-engineer"
+    assert original_skill.exists()
+
+    reconcile_desired_state(_build_desired(project_root, cache_root, second_home))
+
+    assert not original_skill.exists()
+    assert (second_home / "skills" / "prompt-engineer-prompt-engineer").exists()
+    assert '"codex_home": "' + str(second_home.resolve()) + '"' in (
+        project_root / STATE_RELATIVE_PATH
+    ).read_text()
+
+
 def test_diff_report_includes_unified_diff_for_updated_text_files(
     make_project,
     make_plugin_version,
@@ -425,6 +457,29 @@ def test_reconcile_rejects_unexpected_managed_project_files_in_state(
     with pytest.raises(ReconcileError, match="unexpected managed project files"):
         diff_desired_state(desired)
     assert agents_md.exists()
+
+
+def test_build_desired_state_rejects_prompt_paths_outside_project(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Desired-state planning rejects prompt paths that attempt project traversal."""
+    project_root, _agents_md = make_project()
+    cache_root, _version_dir = make_plugin_version("market", "prompt-engineer", "1.0.0")
+    discovery = discover(project_path=project_root, cache_dir=cache_root)
+
+    with pytest.raises(ReconcileError, match="parent traversal"):
+        build_desired_state(
+            discovery,
+            plan_claude_shim(discovery.project),
+            {
+                Path(".codex/prompts/agents/../../../../evil.md"): "malicious\n",
+            },
+            render_inline_codex_config(()),
+            (),
+            codex_home=tmp_path / "codex-home",
+        )
 
 
 def test_format_change_report_handles_empty_report():

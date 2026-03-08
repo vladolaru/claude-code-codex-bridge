@@ -34,15 +34,19 @@ class InteropState:
         except json.JSONDecodeError as exc:
             raise ReconcileError(f"Invalid interop state file: {path}") from exc
 
+        if not isinstance(data, dict):
+            raise ReconcileError(f"Invalid interop state file: {path}")
         if data.get("version") != STATE_VERSION:
             raise ReconcileError(f"Unsupported interop state version in: {path}")
 
         return cls(
-            project_root=Path(data["project_root"]),
-            codex_home=Path(data["codex_home"]),
-            selected_plugins=tuple(data.get("selected_plugins", [])),
-            managed_project_files=tuple(data.get("managed_project_files", [])),
-            managed_codex_skill_dirs=tuple(data.get("managed_codex_skill_dirs", [])),
+            project_root=Path(_require_string(data, "project_root", path)),
+            codex_home=Path(_require_string(data, "codex_home", path)),
+            selected_plugins=tuple(_read_string_list(data, "selected_plugins", path)),
+            managed_project_files=tuple(_read_string_list(data, "managed_project_files", path)),
+            managed_codex_skill_dirs=tuple(
+                _read_string_list(data, "managed_codex_skill_dirs", path)
+            ),
             version=STATE_VERSION,
         )
 
@@ -57,3 +61,19 @@ class InteropState:
             "managed_codex_skill_dirs": list(self.managed_codex_skill_dirs),
         }
         return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+
+def _require_string(data: dict[str, object], key: str, path: Path) -> str:
+    """Read one required string field from the state payload."""
+    value = data.get(key)
+    if not isinstance(value, str) or not value:
+        raise ReconcileError(f"Invalid interop state file: {path}")
+    return value
+
+
+def _read_string_list(data: dict[str, object], key: str, path: Path) -> list[str]:
+    """Read one optional string-list field from the state payload."""
+    value = data.get(key, [])
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise ReconcileError(f"Invalid interop state file: {path}")
+    return value
