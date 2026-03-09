@@ -13,6 +13,7 @@ from cc_codex_bridge import __version__
 DEFAULT_REPOSITORY = "vladolaru/claude-code-codex-bridge"
 INSTALLER_TEMPLATE_PATH = Path(__file__).resolve().parents[2] / "packaging" / "install.sh.in"
 WHEELHOUSE_ARCHIVE_PREFIX = "cc-codex-bridge-wheelhouse-"
+SUPPORTED_PYTHON_MINORS = ((3, 11), (3, 12), (3, 13), (3, 14))
 
 
 def build_release_bundle(
@@ -79,8 +80,17 @@ def render_installer(
 ) -> str:
     """Render the installer shell script from the tracked template."""
     template = Path(template_path).expanduser().resolve().read_text(encoding="utf-8")
+    supported_python_display = ", ".join(
+        f"{major}.{minor}" for major, minor in SUPPORTED_PYTHON_MINORS
+    )
+    supported_python_tuples = ", ".join(
+        f"({major}, {minor})" for major, minor in SUPPORTED_PYTHON_MINORS
+    )
     return (
-        template.replace("@REPOSITORY@", repository).replace("@DEFAULT_TAG@", default_tag)
+        template.replace("@REPOSITORY@", repository)
+        .replace("@DEFAULT_TAG@", default_tag)
+        .replace("@SUPPORTED_PYTHON_DISPLAY@", supported_python_display)
+        .replace("@SUPPORTED_PYTHON_TUPLES@", supported_python_tuples)
     )
 
 

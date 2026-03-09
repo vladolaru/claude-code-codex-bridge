@@ -41,6 +41,10 @@ def main(argv: list[str] | None = None) -> int:
     branch = _run_git(project_root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
     if branch == "HEAD":
         raise SystemExit("Detached HEAD is not supported for make release.")
+    if branch != "main":
+        raise SystemExit(
+            f"make release must run from `main`, found branch {branch!r}"
+        )
 
     return 0
 

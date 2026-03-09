@@ -111,6 +111,8 @@ curl -fsSL https://github.com/vladolaru/claude-code-codex-bridge/releases/latest
 
 The installer downloads a self-contained wheelhouse bundle from GitHub and installs with `pip --no-index`, so it does not need PyPI during installation.
 
+Supported interpreter versions for the release installer are currently Python `3.11`, `3.12`, `3.13`, and `3.14`.
+
 After install, verify the machine-level prerequisites:
 
 ```bash

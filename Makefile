@@ -26,6 +26,5 @@ release: release-check
 		exit 1; \
 	fi
 	@git tag -a "$(TAG)" -m "Release $(TAG)"
-	@git push origin "$$(git rev-parse --abbrev-ref HEAD)"
-	@git push origin "$(TAG)"
+	@git push --atomic origin "$$(git rev-parse --abbrev-ref HEAD)" "$(TAG)"
 	@echo "Pushed $(TAG). GitHub Actions will build artifacts and publish the release."

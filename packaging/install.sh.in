@@ -124,9 +124,15 @@ PY
 "${PYTHON_BIN}" - <<'PY'
 import sys
 
-if sys.version_info[:2] < (3, 11):
+supported_versions = {@SUPPORTED_PYTHON_TUPLES@}
+supported_display = "@SUPPORTED_PYTHON_DISPLAY@"
+current_version = sys.version_info[:2]
+rendered = f"{sys.version_info[0]}.{sys.version_info[1]}.{sys.version_info[2]}"
+
+if current_version not in supported_versions:
     raise SystemExit(
-        f"Python 3.11+ is required, found {sys.version_info[0]}.{sys.version_info[1]}.{sys.version_info[2]}"
+        f"Python {rendered} is not supported by this release installer. "
+        f"Supported versions: {supported_display}"
     )
 PY
 

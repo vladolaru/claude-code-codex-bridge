@@ -203,9 +203,9 @@ When asked to prepare or execute a release, agents should:
 
 1. update `CHANGELOG.md`
 2. update both version declarations
-3. run `make release VERSION=X.Y.Z` from a clean git worktree
+3. run `make release VERSION=X.Y.Z` from a clean `main` worktree
 
-`make release` is the maintainer-facing release command. It checks version alignment, verifies the worktree is clean, runs `pytest tests -q`, creates the annotated `vX.Y.Z` tag, and pushes the current branch plus tag.
+`make release` is the maintainer-facing release command. It checks version alignment, verifies the worktree is clean, requires the current branch to be `main`, runs `pytest tests -q`, creates the annotated `vX.Y.Z` tag, and atomically pushes `main` plus the tag.
 
 GitHub Actions is authoritative for release artifact validation and publication. The release workflow must continue to:
 

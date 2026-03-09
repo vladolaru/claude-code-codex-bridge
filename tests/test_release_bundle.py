@@ -7,6 +7,7 @@ import tarfile
 
 from cc_codex_bridge import __version__
 from cc_codex_bridge.release_bundle import (
+    SUPPORTED_PYTHON_MINORS,
     build_release_bundle,
     render_installer,
     wheelhouse_archive_name,
@@ -16,7 +17,13 @@ from cc_codex_bridge.release_bundle import (
 def test_render_installer_embeds_repository_and_default_tag(tmp_path: Path):
     """The installer template should be parameterized by repo and tag."""
     template_path = tmp_path / "install.sh.in"
-    template_path.write_text("repo=@REPOSITORY@\ntag=@DEFAULT_TAG@\n", encoding="utf-8")
+    template_path.write_text(
+        "repo=@REPOSITORY@\n"
+        "tag=@DEFAULT_TAG@\n"
+        "supported=@SUPPORTED_PYTHON_DISPLAY@\n"
+        "tuples=@SUPPORTED_PYTHON_TUPLES@\n",
+        encoding="utf-8",
+    )
 
     rendered = render_installer(
         repository="example/repo",
@@ -24,7 +31,13 @@ def test_render_installer_embeds_repository_and_default_tag(tmp_path: Path):
         template_path=template_path,
     )
 
-    assert rendered == "repo=example/repo\ntag=v9.9.9\n"
+    assert rendered == (
+        "repo=example/repo\n"
+        "tag=v9.9.9\n"
+        "supported=3.11, 3.12, 3.13, 3.14\n"
+        "tuples=(3, 11), (3, 12), (3, 13), (3, 14)\n"
+    )
+    assert SUPPORTED_PYTHON_MINORS == ((3, 11), (3, 12), (3, 13), (3, 14))
 
 
 def test_build_release_bundle_creates_archive_installer_and_checksums(tmp_path: Path):

@@ -27,6 +27,8 @@ curl -fsSL https://github.com/vladolaru/claude-code-codex-bridge/releases/latest
 
 The release installer downloads a self-contained wheelhouse bundle from GitHub and installs with `pip --no-index`, so it does not need PyPI during installation.
 
+Supported interpreter versions for the release installer are currently Python `3.11`, `3.12`, `3.13`, and `3.14`.
+
 To install a specific release instead of the latest:
 
 ```bash
@@ -124,7 +126,9 @@ Maintainer flow:
 make release VERSION=X.Y.Z
 ```
 
-That command checks version alignment, verifies the git worktree is clean, runs `pytest tests -q`, creates the annotated tag, and pushes the branch and tag. GitHub Actions then builds the release artifacts and publishes the GitHub Release.
+Run it from `main`.
+
+That command checks version alignment, verifies the git worktree is clean, requires the current branch to be `main`, runs `pytest tests -q`, creates the annotated tag, and atomically pushes the branch plus tag. GitHub Actions then builds the release artifacts and publishes the GitHub Release.
 
 Update [`CHANGELOG.md`](CHANGELOG.md) and both version declarations before running it. The detailed agent-facing release guidance lives in [`AGENTS.md`](AGENTS.md).
 
