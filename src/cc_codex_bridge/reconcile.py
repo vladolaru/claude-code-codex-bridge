@@ -14,7 +14,6 @@ from cc_codex_bridge.locking import acquire_global_registry_lock, acquire_projec
 from cc_codex_bridge.model import (
     ClaudeShimDecision,
     DiscoveryResult,
-    GeneratedAgentRole,
     GeneratedSkill,
     ReconcileError,
 )
@@ -479,15 +478,6 @@ def _directory_matches_skill(path: Path, skill: GeneratedSkill) -> bool:
             return False
 
     return True
-
-
-def _atomic_write_file(path: Path, content: bytes) -> None:
-    """Atomically write one file on the target filesystem."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
-        handle.write(content)
-        temp_path = Path(handle.name)
-    temp_path.replace(path)
 
 
 def _load_previous_state(desired: DesiredState) -> InteropState | None:

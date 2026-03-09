@@ -167,10 +167,6 @@ def translate_tools(raw_tools: object) -> tuple[str, ...]:
     return tuple(sorted(translated))
 
 
-parse_markdown_with_frontmatter = frontmatter.parse_markdown_with_frontmatter
-_parse_frontmatter_lines = frontmatter.parse_frontmatter_lines
-
-
 def format_agent_translation_diagnostics(
     diagnostics: Iterable[AgentTranslationDiagnostic],
 ) -> str:

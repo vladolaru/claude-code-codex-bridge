@@ -476,7 +476,7 @@ Current runtime module responsibilities:
 - `registry.py`
   - global generated-skill registry serialization and deterministic skill hashing
 - `translate_skills.py`
-  - Codex skill translation and skill tree materialization helpers
+  - Codex skill translation plus relocation and vendoring helpers
 - `reconcile.py`
   - desired-state modeling, diffing, apply, rollback, report formatting
 - `state.py`

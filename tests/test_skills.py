@@ -1,4 +1,4 @@
-"""Tests for skill translation and materialization."""
+"""Tests for skill translation and generated skill trees."""
 
 from __future__ import annotations
 
@@ -11,14 +11,11 @@ from cc_codex_bridge.discover import discover_latest_plugins
 from cc_codex_bridge.model import GeneratedSkill, GeneratedSkillFile, TranslationError
 from cc_codex_bridge.registry import hash_generated_skill
 from cc_codex_bridge.translate_agents import translate_installed_agents
-from cc_codex_bridge.translate_skills import (
-    materialize_generated_skills,
-    translate_installed_skills,
-)
+from cc_codex_bridge.translate_skills import translate_installed_skills
 
 
-def test_materialize_generated_skills_copies_bundled_resources(make_plugin_version, tmp_path: Path):
-    """A translated skill stays self-contained after installation."""
+def test_generated_skills_copy_bundled_resources(make_plugin_version, tmp_path: Path):
+    """A translated skill stays self-contained after materialization."""
     cache_root, version_dir = make_plugin_version(
         "market",
         "prompt-engineer",
@@ -44,7 +41,10 @@ def test_materialize_generated_skills_copies_bundled_resources(make_plugin_versi
 
     skills = translate_installed_skills(discover_latest_plugins(cache_root))
     codex_home = tmp_path / "codex-home"
-    installed_paths = materialize_generated_skills(skills, codex_home)
+    installed_paths = tuple(
+        _write_skill_directory(codex_home / "skills" / skill.install_dir_name, skill)
+        for skill in skills
+    )
 
     assert installed_paths == (codex_home / "skills" / "prompt-engineer-prompt-engineer",)
     installed_root = installed_paths[0]
@@ -81,7 +81,8 @@ def test_translate_installed_skills_rewrites_plugin_root_script_paths(
     (plugin_scripts_dir / "decision-critic.py").write_text("print('ok')\n")
 
     skills = translate_installed_skills(discover_latest_plugins(cache_root))
-    materialize_generated_skills(skills, tmp_path / "codex-home")
+    for skill in skills:
+        _write_skill_directory(tmp_path / "codex-home" / "skills" / skill.install_dir_name, skill)
 
     installed_root = tmp_path / "codex-home" / "skills" / "pirategoat-tools-decision-critic"
     skill_md = (installed_root / "SKILL.md").read_text()
@@ -121,7 +122,8 @@ def test_translate_installed_skills_vendors_referenced_sibling_skills(
     (sibling_references / "test-philosophy.md").write_text("Behavior over implementation.\n")
 
     skills = translate_installed_skills(discover_latest_plugins(cache_root))
-    materialize_generated_skills(skills, tmp_path / "codex-home")
+    for skill in skills:
+        _write_skill_directory(tmp_path / "codex-home" / "skills" / skill.install_dir_name, skill)
 
     installed_root = tmp_path / "codex-home" / "skills" / "pirategoat-tools-e2e-testing-patterns"
     skill_md = (installed_root / "SKILL.md").read_text()
@@ -297,3 +299,14 @@ def test_agent_and_skill_translation_share_the_same_frontmatter_entrypoint(
         version_dir / "agents" / "reviewer.md",
         version_dir / "skills" / "prompt-engineer" / "SKILL.md",
     ]
+
+
+def _write_skill_directory(destination: Path, skill: GeneratedSkill) -> Path:
+    """Materialize one generated skill tree for test assertions."""
+    destination.mkdir(parents=True, exist_ok=True)
+    for generated_file in skill.files:
+        file_path = destination / generated_file.relative_path
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(generated_file.content)
+        file_path.chmod(generated_file.mode)
+    return destination

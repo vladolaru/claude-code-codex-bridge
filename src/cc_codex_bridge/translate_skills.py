@@ -77,32 +77,6 @@ def translate_installed_skills(
     return tuple(sorted(generated, key=lambda item: item.install_dir_name))
 
 
-def materialize_generated_skills(
-    skills: Iterable[GeneratedSkill],
-    codex_home: str | Path,
-) -> tuple[Path, ...]:
-    """Write generated skills into a Codex home directory."""
-    codex_home_path = Path(codex_home).expanduser().resolve()
-    skills_root = codex_home_path / "skills"
-    skills_root.mkdir(parents=True, exist_ok=True)
-
-    installed_paths: list[Path] = []
-    for skill in skills:
-        destination = skills_root / skill.install_dir_name
-        if destination.exists():
-            raise TranslationError(f"Codex skill destination already exists: {destination}")
-
-        destination.mkdir(parents=True)
-        for generated_file in skill.files:
-            file_path = destination / generated_file.relative_path
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.write_bytes(generated_file.content)
-            file_path.chmod(generated_file.mode)
-        installed_paths.append(destination)
-
-    return tuple(installed_paths)
-
-
 def _read_required_skill_name(skill_md_path: Path) -> str:
     """Read the canonical skill name from SKILL.md frontmatter."""
     parsed_frontmatter, _ = frontmatter.parse_markdown_with_frontmatter(skill_md_path)
