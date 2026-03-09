@@ -17,18 +17,31 @@ What it generates:
 - project-local `.codex/claude-code-interop-state.json`
 - user-global `~/.codex/skills/*`
 
-## Install From A Local Checkout
+## Install From GitHub Releases
 
-For normal use from a local clone, install the package non-editably:
+For normal use on macOS, install from the latest GitHub Release:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install --upgrade pip
-python3 -m pip install .
+curl -fsSL https://github.com/vladolaru/claude-code-codex-bridge/releases/latest/download/install.sh | bash
 ```
 
-Then run:
+The release installer downloads a self-contained wheelhouse bundle from GitHub and installs with `pip --no-index`, so it does not need PyPI during installation.
+
+To install a specific release instead of the latest:
+
+```bash
+curl -fsSL https://github.com/vladolaru/claude-code-codex-bridge/releases/latest/download/install.sh | \
+  bash -s -- --version v0.3.0
+```
+
+After installation, verify the local machine setup:
+
+```bash
+cc-codex-bridge doctor
+cc-codex-bridge doctor --json
+```
+
+Then run the normal project commands:
 
 ```bash
 cc-codex-bridge validate --project .
@@ -36,6 +49,17 @@ cc-codex-bridge reconcile --dry-run --project .
 cc-codex-bridge reconcile --dry-run --diff --project .
 cc-codex-bridge status --project .
 cc-codex-bridge reconcile --project .
+```
+
+## Install From A Local Checkout
+
+For direct installation from a local clone, install the package non-editably:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install --upgrade pip
+python3 -m pip install .
 ```
 
 Optional exclusion flags (repeatable) let you skip Claude-specific entities:
@@ -92,7 +116,17 @@ PYTHONPATH=src python3 -m cc_codex_bridge reconcile --project .
 
 ## Release
 
-The release workflow is triggered by version tags in the form `vX.Y.Z`. Update [`CHANGELOG.md`](CHANGELOG.md) for each release and follow the release instructions in [`AGENTS.md`](AGENTS.md).
+The release workflow is triggered by version tags in the form `vX.Y.Z`.
+
+Maintainer flow:
+
+```bash
+make release VERSION=X.Y.Z
+```
+
+That command checks version alignment, verifies the git worktree is clean, runs `pytest tests -q`, creates the annotated tag, and pushes the branch and tag. GitHub Actions then builds the release artifacts and publishes the GitHub Release.
+
+Update [`CHANGELOG.md`](CHANGELOG.md) and both version declarations before running it. The detailed agent-facing release guidance lives in [`AGENTS.md`](AGENTS.md).
 
 ## Developer Workflow
 

@@ -183,7 +183,19 @@ This is a single-package repository. Use package-level tags:
 
 - tag format: `vX.Y.Z`
 
-Pushing a matching version tag triggers `.github/workflows/release.yml`, which validates the package, builds `sdist` and `wheel` artifacts, and creates a GitHub Release.
+Pushing a matching version tag triggers `.github/workflows/release.yml`, which validates the package, builds `sdist` and `wheel` artifacts, collects exact runtime dependency wheels for supported macOS/Python targets, generates `install.sh` plus `SHA256SUMS`, and creates a GitHub Release.
+
+The release channel is GitHub Releases only for now.
+
+Release assets must remain self-contained:
+
+- package wheel
+- package sdist
+- offline wheelhouse archive with the app wheel plus exact runtime dependency wheels
+- generated `install.sh`
+- `SHA256SUMS`
+
+End-user installs should work from GitHub assets alone with `pip install --no-index` against the unpacked wheelhouse bundle. Do not introduce a PyPI requirement into the end-user install path.
 
 ### Agent Release Workflow
 
@@ -191,11 +203,15 @@ When asked to prepare or execute a release, agents should:
 
 1. update `CHANGELOG.md`
 2. update both version declarations
-3. run `pytest tests -q`
-4. run `python3 -m build --sdist --wheel`
-5. optionally smoke-test a clean `pip install .`
-6. commit the release changes
-7. create an annotated `vX.Y.Z` tag
-8. push the branch and tag
+3. run `make release VERSION=X.Y.Z` from a clean git worktree
+
+`make release` is the maintainer-facing release command. It checks version alignment, verifies the worktree is clean, runs `pytest tests -q`, creates the annotated `vX.Y.Z` tag, and pushes the current branch plus tag.
+
+GitHub Actions is authoritative for release artifact validation and publication. The release workflow must continue to:
+
+1. build `sdist` and `wheel`
+2. validate the offline wheelhouse install path
+3. generate the wheelhouse bundle, `install.sh`, and `SHA256SUMS`
+4. publish the GitHub Release
 
 Use conventional commit prefixes where they add clarity, but do not invent extra release mechanics beyond the workflow and docs already in this repository.

@@ -103,16 +103,31 @@ In practice, existing hand-authored files are treated as authoritative unless th
 
 ## Commands
 
-Package install for easier CLI use:
+Normal macOS installs should use the GitHub Release installer:
+
+```bash
+curl -fsSL https://github.com/vladolaru/claude-code-codex-bridge/releases/latest/download/install.sh | bash
+```
+
+The installer downloads a self-contained wheelhouse bundle from GitHub and installs with `pip --no-index`, so it does not need PyPI during installation.
+
+After install, verify the machine-level prerequisites:
+
+```bash
+cc-codex-bridge doctor
+cc-codex-bridge doctor --json
+```
+
+After that you can use:
+
+- `cc-codex-bridge ...`
+- `python3 -m cc_codex_bridge ...`
+
+For local development installs from a checkout, use:
 
 ```bash
 python3 -m pip install -e .
 ```
-
-After that you can use either:
-
-- `cc-codex-bridge ...`
-- `python3 -m cc_codex_bridge ...`
 
 Without installation from a raw checkout, use:
 

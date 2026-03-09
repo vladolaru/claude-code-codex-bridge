@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+set -eu
+
+REPOSITORY="@REPOSITORY@"
+DEFAULT_TAG="@DEFAULT_TAG@"
+PACKAGE_NAME="cc-codex-bridge"
+INSTALL_ROOT="${HOME}/.local/share/cc-codex-bridge"
+BIN_DIR="${HOME}/.local/bin"
+PYTHON_BIN="python3"
+FORCE=0
+UNINSTALL=0
+INSTALL_TAG="${DEFAULT_TAG}"
+
+usage() {
+  cat <<'EOF'
+Install cc-codex-bridge from a GitHub Release wheelhouse bundle.
+
+Usage:
+  install.sh [--version vX.Y.Z] [--python /path/to/python3] [--install-root PATH] [--bin-dir PATH] [--force]
+  install.sh --uninstall [--install-root PATH] [--bin-dir PATH]
+EOF
+}
+
+fail() {
+  printf '%s\n' "Error: $*" >&2
+  exit 1
+}
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || fail "Required command not found: $1"
+}
+
+expand_home() {
+  case "$1" in
+    "~")
+      printf '%s\n' "${HOME}"
+      ;;
+    "~/"*)
+      printf '%s\n' "${HOME}/${1#~/}"
+      ;;
+    *)
+      printf '%s\n' "$1"
+      ;;
+  esac
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --version)
+      [ "$#" -ge 2 ] || fail "--version requires a value"
+      INSTALL_TAG="$2"
+      shift 2
+      ;;
+    --python)
+      [ "$#" -ge 2 ] || fail "--python requires a value"
+      PYTHON_BIN="$2"
+      shift 2
+      ;;
+    --install-root)
+      [ "$#" -ge 2 ] || fail "--install-root requires a value"
+      INSTALL_ROOT="$2"
+      shift 2
+      ;;
+    --bin-dir)
+      [ "$#" -ge 2 ] || fail "--bin-dir requires a value"
+      BIN_DIR="$2"
+      shift 2
+      ;;
+    --force)
+      FORCE=1
+      shift
+      ;;
+    --uninstall)
+      UNINSTALL=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      fail "Unknown argument: $1"
+      ;;
+  esac
+done
+
+INSTALL_ROOT="$(expand_home "${INSTALL_ROOT}")"
+BIN_DIR="$(expand_home "${BIN_DIR}")"
+
+if [ "${UNINSTALL}" -eq 1 ]; then
+  CURRENT_LINK="${INSTALL_ROOT}/current"
+  TARGET_DIR="${INSTALL_ROOT}/versions/${INSTALL_TAG}"
+  COMMAND_LINK="${BIN_DIR}/${PACKAGE_NAME}"
+  if [ -L "${COMMAND_LINK}" ] || [ -e "${COMMAND_LINK}" ]; then
+    rm -f "${COMMAND_LINK}"
+  fi
+  if [ -d "${INSTALL_ROOT}" ] || [ -L "${INSTALL_ROOT}" ]; then
+    rm -rf "${INSTALL_ROOT}"
+  fi
+  printf '%s\n' "Removed ${PACKAGE_NAME} from ${INSTALL_ROOT}"
+  printf '%s\n' "If you installed a LaunchAgent, remove its plist manually from ~/Library/LaunchAgents."
+  exit 0
+fi
+
+case "$(uname -s)" in
+  Darwin) ;;
+  *) fail "This installer only supports macOS." ;;
+esac
+
+need_cmd curl
+need_cmd tar
+need_cmd shasum
+need_cmd "${PYTHON_BIN}"
+
+canonicalize_path() {
+  "${PYTHON_BIN}" - "$1" <<'PY'
+from pathlib import Path
+import sys
+
+print(Path(sys.argv[1]).expanduser().resolve())
+PY
+}
+
+"${PYTHON_BIN}" - <<'PY'
+import sys
+
+if sys.version_info[:2] < (3, 11):
+    raise SystemExit(
+        f"Python 3.11+ is required, found {sys.version_info[0]}.{sys.version_info[1]}.{sys.version_info[2]}"
+    )
+PY
+
+INSTALL_ROOT="$(canonicalize_path "${INSTALL_ROOT}")"
+BIN_DIR="$(canonicalize_path "${BIN_DIR}")"
+CURRENT_LINK="${INSTALL_ROOT}/current"
+TARGET_DIR="${INSTALL_ROOT}/versions/${INSTALL_TAG}"
+COMMAND_LINK="${BIN_DIR}/${PACKAGE_NAME}"
+
+PACKAGE_VERSION="${INSTALL_TAG#v}"
+WHEELHOUSE_ARCHIVE="cc-codex-bridge-wheelhouse-${INSTALL_TAG}.tar.gz"
+RELEASE_BASE_URL="https://github.com/${REPOSITORY}/releases/download/${INSTALL_TAG}"
+
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cc-codex-bridge-install.XXXXXX")"
+trap 'rm -rf "${TMP_DIR}"' EXIT INT TERM
+
+curl -fsSL "${RELEASE_BASE_URL}/SHA256SUMS" -o "${TMP_DIR}/SHA256SUMS"
+curl -fsSL "${RELEASE_BASE_URL}/${WHEELHOUSE_ARCHIVE}" -o "${TMP_DIR}/${WHEELHOUSE_ARCHIVE}"
+
+(
+  cd "${TMP_DIR}"
+  shasum -a 256 -c SHA256SUMS 2>/dev/null | grep " ${WHEELHOUSE_ARCHIVE}: OK$" >/dev/null \
+    || fail "Checksum verification failed for ${WHEELHOUSE_ARCHIVE}"
+)
+
+tar -xzf "${TMP_DIR}/${WHEELHOUSE_ARCHIVE}" -C "${TMP_DIR}"
+[ -d "${TMP_DIR}/wheelhouse" ] || fail "Wheelhouse archive did not unpack a wheelhouse directory"
+
+mkdir -p "${INSTALL_ROOT}/versions" "${BIN_DIR}"
+
+if [ -d "${TARGET_DIR}" ] && [ "${FORCE}" -ne 1 ]; then
+  [ -x "${TARGET_DIR}/bin/${PACKAGE_NAME}" ] || fail "Existing install at ${TARGET_DIR} is incomplete; rerun with --force"
+else
+  STAGE_DIR="${INSTALL_ROOT}/versions/.install-${INSTALL_TAG}-$$"
+  rm -rf "${STAGE_DIR}"
+  "${PYTHON_BIN}" -m venv "${STAGE_DIR}"
+  "${STAGE_DIR}/bin/python" -m pip --version >/dev/null 2>&1 \
+    || fail "The created virtual environment does not include pip"
+  "${STAGE_DIR}/bin/python" -m pip install \
+    --no-index \
+    --find-links "${TMP_DIR}/wheelhouse" \
+    "${PACKAGE_NAME}==${PACKAGE_VERSION}"
+  "${STAGE_DIR}/bin/${PACKAGE_NAME}" --help >/dev/null
+  "${STAGE_DIR}/bin/${PACKAGE_NAME}" doctor >/dev/null
+  if [ -d "${TARGET_DIR}" ] || [ -L "${TARGET_DIR}" ]; then
+    rm -rf "${TARGET_DIR}"
+  fi
+  mv "${STAGE_DIR}" "${TARGET_DIR}"
+fi
+
+ln -sfn "${TARGET_DIR}" "${CURRENT_LINK}"
+ln -sfn "${CURRENT_LINK}/bin/${PACKAGE_NAME}" "${COMMAND_LINK}"
+
+INSTALL_RECEIPT="${INSTALL_ROOT}/INSTALL_RECEIPT.json"
+cat > "${INSTALL_RECEIPT}" <<EOF
+{
+  "repository": "${REPOSITORY}",
+  "install_tag": "${INSTALL_TAG}",
+  "package_version": "${PACKAGE_VERSION}",
+  "python": "$("${TARGET_DIR}/bin/python" -c 'import sys; print(sys.executable)')",
+  "bin_dir": "${BIN_DIR}",
+  "installed_at_utc": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+EOF
+
+printf '%s\n' "Installed ${PACKAGE_NAME} ${PACKAGE_VERSION} into ${TARGET_DIR}"
+printf '%s\n' "Command symlink: ${COMMAND_LINK}"
+
+case ":${PATH:-}:" in
+  *":${BIN_DIR}:"*) ;;
+  *)
+    printf '%s\n' "Add ${BIN_DIR} to PATH if needed:"
+    printf '%s\n' "  export PATH=\"${BIN_DIR}:\$PATH\""
+    ;;
+esac

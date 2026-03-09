@@ -95,7 +95,9 @@ The runtime is a deterministic pipeline:
 10. build a full desired state for project files plus Codex skill directories
 11. inspect/preview or reconcile that desired state with ownership and rollback protections
 
-Every CLI command except the LaunchAgent commands runs through the same discovery and translation pipeline first.
+The reconcile pipeline is shared by `validate`, `status`, and `reconcile`.
+
+Utility commands such as `doctor` and the LaunchAgent commands are intentionally separate from the reconcile pipeline.
 
 ## 5. Implemented Output Contract
 
@@ -394,6 +396,10 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
 
 ### Main commands
 
+- `doctor`
+  - run machine-level environment checks without requiring a project
+  - report Python version support, Claude cache visibility, Codex-home writability, LaunchAgents directory access, and CLI PATH visibility
+  - support JSON output with `--json`
 - `validate`
   - run discovery, translation, and rendering in memory
   - fail non-zero on unsupported-agent diagnostics
@@ -436,7 +442,8 @@ LaunchAgent commands resolve the target project root with the same upward `AGENT
 
 ### CLI invariants
 
-- all non-LaunchAgent commands share the same pipeline and error types
+- `validate`, `status`, and `reconcile` share the same pipeline and error types
+- `doctor` is project-independent and does not require `AGENTS.md`
 - `DiscoveryError`, `TranslationError`, and `ReconcileError` are surfaced as user-facing errors with exit code `1`
 - filesystem `OSError` failures during CLI execution are also surfaced as user-facing errors with exit code `1`
 - UTF-8 decode failures for runtime text inputs are also surfaced as user-facing errors with exit code `1`
@@ -465,6 +472,8 @@ Current runtime module responsibilities:
   - argument parsing, command dispatch, summary/error reporting
 - `discover.py`
   - project root resolution and installed-plugin discovery
+- `doctor.py`
+  - machine-level environment checks and doctor report rendering
 - `exclusions.py`
   - exclusion config loading, validation, CLI-override resolution, and discovery filtering
 - `model.py`
@@ -492,6 +501,8 @@ Current runtime module responsibilities:
   - project-local managed-state serialization and validation
 - `install_launchagent.py`
   - LaunchAgent label generation, plist rendering, plist installation
+- `release_bundle.py`
+  - GitHub Release installer asset generation for offline wheelhouse installs
 
 ## 13. Testing Strategy
 
@@ -508,6 +519,7 @@ The suite currently verifies:
 - reconcile idempotence, stale cleanup, rollback safety conditions, and diff reporting
 - CLI command behavior
 - LaunchAgent rendering and installation
+- doctor reporting and release-bundle generation
 
 The test suite is the executable check for the invariants described in this file.
 

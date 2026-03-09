@@ -27,9 +27,28 @@ jobs:
 
       - name: Packaging smoke checks
         run: |
+          PACKAGE_VERSION="$(python - <<'PY'
+          import importlib.metadata
+          import re
+          import tomllib
+          from pathlib import Path
+
+          project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
+          print(project["version"])
+          Path("dist").mkdir(exist_ok=True)
+          with Path("dist/runtime-deps.txt").open("w", encoding="utf-8") as handle:
+              for requirement in project["dependencies"]:
+                  requirement_without_marker = requirement.split(";", 1)[0].strip()
+                  name = re.split(r"[<>=!~\[]", requirement_without_marker, maxsplit=1)[0].strip()
+                  handle.write(f"{name}=={importlib.metadata.version(name)}\n")
+          PY
+          )"
+          python -m build --sdist --wheel
+          python -m pip download --only-binary=:all: --dest .wheelhouse -r dist/runtime-deps.txt
+          cp dist/*.whl .wheelhouse/
           python -m venv .venv-package-smoke
-          .venv-package-smoke/bin/python -m pip install --upgrade pip
-          .venv-package-smoke/bin/python -m pip install .
+          .venv-package-smoke/bin/python -m pip install --no-index --find-links .wheelhouse "cc-codex-bridge==${PACKAGE_VERSION}"
           .venv-package-smoke/bin/cc-codex-bridge --help
           .venv-package-smoke/bin/python -m cc_codex_bridge --help
-          python -m build --sdist --wheel
+          .venv-package-smoke/bin/cc-codex-bridge doctor --json
+        shell: bash

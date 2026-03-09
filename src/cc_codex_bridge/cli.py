@@ -14,6 +14,12 @@ if str(PACKAGE_PARENT) not in sys.path:
 
 from cc_codex_bridge.claude_shim import plan_claude_shim
 from cc_codex_bridge.discover import discover, resolve_project_root
+from cc_codex_bridge.doctor import (
+    doctor_exit_code,
+    format_doctor_json,
+    format_doctor_report,
+    run_doctor,
+)
 from cc_codex_bridge.exclusions import (
     ExclusionReport,
     apply_sync_exclusions,
@@ -44,6 +50,7 @@ from cc_codex_bridge.translate_skills import translate_installed_skills
 
 PIPELINE_COMMANDS = {"reconcile", "validate", "status"}
 LAUNCHAGENT_COMMANDS = {"print-launchagent", "install-launchagent"}
+UTILITY_COMMANDS = {"doctor"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -84,6 +91,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_parser = subparsers.add_parser("validate", parents=[common])
     status_parser = subparsers.add_parser("status", parents=[common])
+    doctor_parser = subparsers.add_parser("doctor", parents=[common])
+    doctor_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit doctor results as JSON instead of human-readable text.",
+    )
+    doctor_parser.add_argument(
+        "--launchagents-dir",
+        type=Path,
+        help="Override the LaunchAgents directory checked by doctor.",
+    )
     for pipeline_parser in (reconcile_parser, validate_parser, status_parser):
         pipeline_parser.add_argument(
             "--exclude-plugin",
@@ -154,6 +172,18 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command in LAUNCHAGENT_COMMANDS:
         return _handle_launchagent_command(args)
+
+    if args.command in UTILITY_COMMANDS:
+        checks = run_doctor(
+            cache_dir=args.cache_dir,
+            codex_home=args.codex_home,
+            launchagents_dir=args.launchagents_dir,
+        )
+        if args.json:
+            print(format_doctor_json(checks))
+        else:
+            print(format_doctor_report(checks))
+        return doctor_exit_code(checks)
 
     if args.command not in PIPELINE_COMMANDS:
         print(f"Error: unsupported command `{args.command}`", file=sys.stderr)

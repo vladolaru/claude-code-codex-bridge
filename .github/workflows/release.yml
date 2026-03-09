@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   validate-and-build:
-    runs-on: macos-latest
+    runs-on: macos-14
 
     steps:
       - name: Check out repository
@@ -40,31 +40,110 @@ jobs:
       - name: Run tests
         run: pytest tests -q
 
+      - name: Build release distributions
+        run: |
+          python -m build --sdist --wheel
+          python - <<'PY' > dist/runtime-deps.txt
+          import importlib.metadata
+          import re
+          import tomllib
+          from pathlib import Path
+
+          dependencies = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["dependencies"]
+          for requirement in dependencies:
+              requirement_without_marker = requirement.split(";", 1)[0].strip()
+              name = re.split(r"[<>=!~\[]", requirement_without_marker, maxsplit=1)[0].strip()
+              print(f"{name}=={importlib.metadata.version(name)}")
+          PY
+
       - name: Packaging smoke checks
         run: |
+          PACKAGE_VERSION="${GITHUB_REF_NAME#v}"
+          python -m pip download --only-binary=:all: --dest .wheelhouse -r dist/runtime-deps.txt
+          cp dist/*.whl .wheelhouse/
           python -m venv .venv-package-smoke
-          .venv-package-smoke/bin/python -m pip install --upgrade pip
-          .venv-package-smoke/bin/python -m pip install .
+          .venv-package-smoke/bin/python -m pip install --no-index --find-links .wheelhouse "cc-codex-bridge==${PACKAGE_VERSION}"
           .venv-package-smoke/bin/cc-codex-bridge --help
           .venv-package-smoke/bin/python -m cc_codex_bridge --help
-          python -m build --sdist --wheel
+          .venv-package-smoke/bin/cc-codex-bridge doctor --json
+        shell: bash
 
-      - name: Upload release artifacts
+      - name: Upload built distributions
         uses: actions/upload-artifact@v4
         with:
           name: release-dist
           path: dist/*
 
-  publish-github-release:
+  collect-wheelhouse:
     needs: validate-and-build
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["macos-13", "macos-14"]
+        python-version: ["3.11", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
 
     steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Download built distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+          path: dist
+
+      - name: Download runtime wheels for this target
+        run: |
+          python -m pip download --only-binary=:all: --dest wheelhouse -r dist/runtime-deps.txt
+          cp dist/*.whl wheelhouse/
+
+      - name: Upload runtime wheelhouse slice
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-wheelhouse-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: wheelhouse/*.whl
+
+  publish-github-release:
+    needs:
+      - validate-and-build
+      - collect-wheelhouse
+    runs-on: macos-14
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
           name: release-dist
           path: dist
+
+      - name: Download runtime wheelhouse slices
+        uses: actions/download-artifact@v4
+        with:
+          pattern: runtime-wheelhouse-*
+          path: collected-wheelhouse
+
+      - name: Merge runtime wheelhouse
+        run: |
+          mkdir -p release-wheelhouse
+          find collected-wheelhouse -type f -name '*.whl' -exec cp -n {} release-wheelhouse/ \;
+
+      - name: Build installer assets
+        run: |
+          PYTHONPATH=src python -m cc_codex_bridge.release_bundle \
+            --dist-dir dist \
+            --wheelhouse-dir release-wheelhouse \
+            --output-dir dist
 
       - name: Publish GitHub Release
         env:
