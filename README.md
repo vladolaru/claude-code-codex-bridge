@@ -126,9 +126,11 @@ Maintainer flow:
 make release VERSION=X.Y.Z
 ```
 
-Run it from `main`.
+Run it from a clean `main` checkout using the repository `.venv`.
 
-That command checks version alignment, verifies the git worktree is clean, requires the current branch to be `main`, runs `pytest tests -q`, creates the annotated tag, and atomically pushes the branch plus tag. GitHub Actions then builds the release artifacts and publishes the GitHub Release.
+That command checks version alignment, verifies the selected interpreter has `pytest` and `setuptools`, verifies the git worktree is clean, requires the current branch to be `main`, runs `pytest tests -q`, creates the annotated tag, and atomically pushes the branch plus tag. GitHub Actions then builds the release artifacts and publishes the GitHub Release.
+
+Fresh disposable Python virtualenvs on modern macOS may not include `setuptools`. If you rehearse the release flow outside the repository `.venv`, bootstrap `setuptools` in that venv before installing the repo.
 
 Update [`CHANGELOG.md`](CHANGELOG.md) and both version declarations before running it. The detailed agent-facing release guidance lives in [`AGENTS.md`](AGENTS.md).
 

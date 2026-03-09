@@ -27,6 +27,7 @@ def test_release_check_requires_main_branch(monkeypatch: pytest.MonkeyPatch):
     module = _load_release_check_module()
 
     monkeypatch.setattr(module, "_read_runtime_version", lambda _path: __version__)
+    monkeypatch.setattr(module, "_require_release_tooling", lambda _project_root: None)
 
     def fake_run_git(_project_root: Path, *args: str):
         if args == ("status", "--porcelain"):
@@ -46,6 +47,7 @@ def test_release_check_accepts_clean_main_branch(monkeypatch: pytest.MonkeyPatch
     module = _load_release_check_module()
 
     monkeypatch.setattr(module, "_read_runtime_version", lambda _path: __version__)
+    monkeypatch.setattr(module, "_require_release_tooling", lambda _project_root: None)
 
     def fake_run_git(_project_root: Path, *args: str):
         if args == ("status", "--porcelain"):
@@ -57,3 +59,18 @@ def test_release_check_accepts_clean_main_branch(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(module, "_run_git", fake_run_git)
 
     assert module.main([__version__]) == 0
+
+
+def test_release_check_requires_pytest_and_setuptools(monkeypatch: pytest.MonkeyPatch):
+    """The maintainer release preflight should fail before git checks without local tooling."""
+    module = _load_release_check_module()
+
+    def fake_find_spec(name: str):
+        if name in {"pytest", "setuptools"}:
+            return None
+        raise AssertionError(name)
+
+    monkeypatch.setattr(module.importlib.util, "find_spec", fake_find_spec)
+
+    with pytest.raises(SystemExit, match=r"missing required modules: pytest, setuptools"):
+        module._require_release_tooling(Path.cwd())

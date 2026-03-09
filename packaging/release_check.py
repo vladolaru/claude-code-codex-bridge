@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 import tomllib
@@ -17,6 +18,8 @@ def main(argv: list[str] | None = None) -> int:
 
     requested_version = args[0]
     project_root = Path(__file__).resolve().parents[1]
+
+    _require_release_tooling(project_root)
 
     pyproject = tomllib.loads((project_root / "pyproject.toml").read_text(encoding="utf-8"))
     package_version = pyproject["project"]["version"]
@@ -47,6 +50,27 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     return 0
+
+
+def _require_release_tooling(project_root: Path) -> None:
+    """Fail fast when the selected interpreter cannot run the maintainer release flow."""
+    missing_modules = [
+        module_name
+        for module_name in ("pytest", "setuptools")
+        if importlib.util.find_spec(module_name) is None
+    ]
+    if not missing_modules:
+        return
+
+    missing_list = ", ".join(sorted(missing_modules))
+    raise SystemExit(
+        "Selected release interpreter "
+        f"{sys.executable!r} is missing required modules: {missing_list}. "
+        "Local releases are supported from the repository .venv. "
+        "Fix with:\n"
+        "  python3 -m venv .venv\n"
+        "  .venv/bin/python -m pip install -e '.[dev]'"
+    )
 
 
 def _read_runtime_version(path: Path) -> str:
