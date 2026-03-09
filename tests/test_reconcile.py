@@ -11,6 +11,7 @@ import cc_codex_bridge.reconcile as reconcile_module
 from cc_codex_bridge.claude_shim import plan_claude_shim
 from cc_codex_bridge.discover import discover
 from cc_codex_bridge.model import ReconcileError
+from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
 from cc_codex_bridge.reconcile import (
     STATE_RELATIVE_PATH,
     ReconcileReport,
@@ -70,6 +71,12 @@ def test_reconcile_writes_project_and_codex_outputs(
     assert (
         codex_home / "skills" / "pirategoat-tools-decision-critic" / "SKILL.md"
     ).read_text().startswith("---\nname: pirategoat-tools-decision-critic\n")
+    state_payload = json.loads((project_root / STATE_RELATIVE_PATH).read_text())
+    assert "managed_codex_skill_dirs" not in state_payload
+    registry_payload = _read_global_registry(codex_home)
+    assert registry_payload["skills"]["pirategoat-tools-decision-critic"]["owners"] == [
+        str(project_root)
+    ]
 
 
 def test_reconcile_is_idempotent(make_project, make_plugin_version, tmp_path: Path):
@@ -173,6 +180,130 @@ def test_reconcile_removes_stale_managed_skill(make_project, make_plugin_version
     reconcile_desired_state(second_desired)
 
     assert not installed_skill.exists()
+
+
+def test_reconcile_shares_identical_skill_ownership_across_projects(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Multiple projects may share the same generated skill when content matches."""
+    first_project, _ = make_project("project-a")
+    second_project, _ = make_project("project-b")
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+
+    first_report = reconcile_desired_state(_build_desired(first_project, cache_root, codex_home))
+    second_report = reconcile_desired_state(_build_desired(second_project, cache_root, codex_home))
+
+    assert any(change.resource_kind == "skill" for change in first_report.changes)
+    assert all(change.resource_kind != "skill" for change in second_report.changes)
+    assert _read_global_registry(codex_home)["skills"]["prompt-engineer-prompt-engineer"]["owners"] == [
+        str(first_project),
+        str(second_project),
+    ]
+
+
+def test_reconcile_keeps_shared_skill_when_one_project_drops_claim(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Dropping one shared owner preserves the skill directory for remaining owners."""
+    first_project, _ = make_project("project-a")
+    second_project, _ = make_project("project-b")
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    installed_skill = codex_home / "skills" / "prompt-engineer-prompt-engineer"
+
+    reconcile_desired_state(_build_desired(first_project, cache_root, codex_home))
+    reconcile_desired_state(_build_desired(second_project, cache_root, codex_home))
+    _, later_version_dir = make_plugin_version("market", "prompt-engineer", "1.0.1")
+    assert not (later_version_dir / "skills").exists()
+
+    report = reconcile_desired_state(_build_desired(first_project, cache_root, codex_home))
+
+    assert installed_skill.exists()
+    assert all(change.path != installed_skill for change in report.changes)
+    assert _read_global_registry(codex_home)["skills"]["prompt-engineer-prompt-engineer"]["owners"] == [
+        str(second_project)
+    ]
+
+
+def test_reconcile_adopts_existing_matching_skill_directory(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Matching pre-existing skill directories are adopted into the registry safely."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    desired = _build_desired(project_root, cache_root, codex_home)
+    _write_skill_directory(
+        codex_home / "skills" / "prompt-engineer-prompt-engineer",
+        desired.skills[0],
+    )
+
+    report = reconcile_desired_state(desired)
+
+    assert all(change.resource_kind != "skill" for change in report.changes)
+    assert _read_global_registry(codex_home)["skills"]["prompt-engineer-prompt-engineer"]["owners"] == [
+        str(project_root)
+    ]
+
+
+def test_reconcile_fails_on_registry_conflict_for_same_skill_directory(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """A different generated tree for the same install dir is a hard conflict."""
+    first_project, _ = make_project("project-a")
+    second_project, _ = make_project("project-b")
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    skill_path = version_dir / "skills" / "prompt-engineer" / "SKILL.md"
+    skill_path.write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse version A.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+
+    reconcile_desired_state(_build_desired(first_project, cache_root, codex_home))
+    skill_path.write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse version B.\n"
+    )
+
+    with pytest.raises(ReconcileError, match="Generated skill registry conflict"):
+        reconcile_desired_state(_build_desired(second_project, cache_root, codex_home))
 
 
 def test_reconcile_moves_managed_skills_when_codex_home_changes(
@@ -324,7 +455,7 @@ def test_reconcile_rejects_non_owned_skill_directory(make_project, make_plugin_v
 
     desired = _build_desired(project_root, cache_root, codex_home)
 
-    with pytest.raises(ReconcileError, match="non-generated skill directory"):
+    with pytest.raises(ReconcileError, match="adopt conflicting existing skill directory"):
         diff_desired_state(desired)
 
 
@@ -439,12 +570,10 @@ def test_reconcile_rejects_unexpected_managed_project_files_in_state(
     state_path.write_text(
         json.dumps(
             {
-                "version": 1,
+                "version": 3,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
-                "selected_plugins": [],
                 "managed_project_files": ["AGENTS.md", ".claude/settings.local.json"],
-                "managed_codex_skill_dirs": [],
             },
             indent=2,
             sort_keys=True,
@@ -480,12 +609,10 @@ def test_reconcile_rejects_foreign_project_state(
     state_path.write_text(
         json.dumps(
             {
-                "version": 1,
+                "version": 3,
                 "project_root": str(tmp_path / "different-project"),
                 "codex_home": str(tmp_path / "codex-home"),
-                "selected_plugins": [],
                 "managed_project_files": [STATE_RELATIVE_PATH.as_posix()],
-                "managed_codex_skill_dirs": ["prompt-engineer-prompt-engineer"],
             },
             indent=2,
             sort_keys=True,
@@ -729,6 +856,21 @@ def _build_desired(project_root: Path, cache_root: Path, codex_home: Path):
         skills,
         codex_home=codex_home,
     )
+
+
+def _read_global_registry(codex_home: Path) -> dict[str, object]:
+    """Read the global registry JSON payload for assertions."""
+    return json.loads((codex_home / GLOBAL_REGISTRY_FILENAME).read_text())
+
+
+def _write_skill_directory(destination: Path, skill) -> None:
+    """Materialize one generated skill tree for adoption tests."""
+    destination.mkdir(parents=True, exist_ok=True)
+    for generated_file in skill.files:
+        file_path = destination / generated_file.relative_path
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(generated_file.content)
+        file_path.chmod(generated_file.mode)
 
 
 def _snapshot_tree(root: Path) -> dict[str, tuple[str, str | bytes]]:

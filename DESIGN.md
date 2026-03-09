@@ -45,6 +45,7 @@ These are derived artifacts and must not become hand-maintained sources:
 - `.codex/config.toml`
 - `.codex/prompts/agents/*.md`
 - `.codex/claude-code-interop-state.json`
+- `~/.codex/claude-code-interop-global-state.json`
 - `~/.codex/skills/*`
 
 ### Authority rule
@@ -107,10 +108,12 @@ Every CLI command except the LaunchAgent commands runs through the same discover
 - `.codex/prompts/agents/*.md`
   - prompt bodies derived from Claude agent markdown bodies
 - `.codex/claude-code-interop-state.json`
-  - ownership and selection state for reconcile safety
+  - project-local ownership state for reconcile safety
 
 ### User-global outputs
 
+- `~/.codex/claude-code-interop-global-state.json`
+  - global generated-skill ownership registry keyed by install directory name
 - `~/.codex/skills/<generated-skill-name>/`
   - self-contained Codex skill directories derived from Claude skills
 
@@ -133,15 +136,20 @@ The reconcile engine is conservative by design.
 
 ### Generator-owned artifacts
 
-Ownership is tracked through `.codex/claude-code-interop-state.json`.
+Ownership is split across project-local and user-global state.
 
-The state file records:
+The project-local state file records:
 
 - project root
 - Codex home path
 - managed project-relative file paths
-- managed Codex skill directory names
 - state version
+
+The global registry records:
+
+- generated skill install directory names
+- deterministic content hashes for generated skill trees
+- owning project roots for each generated skill directory
 
 ### Safety rules
 
@@ -151,13 +159,16 @@ The state file records:
 - corrupted or unexpected managed project paths in state are treated as a hard error
 - state is rejected if it belongs to a different project root than the current reconcile target
 - malformed state payload field types are treated as a hard error
-- malformed state path fields or managed Codex skill directory names are treated as a hard error
+- malformed state path fields are treated as a hard error
 - symlinked managed project targets are rejected
 - symlinked interop state files are rejected
+- malformed or symlinked global registry files are treated as a hard error
 - non-directory skill targets are rejected
-- non-generated existing skill directories are rejected
+- existing skill directories are adopted only when their content matches the desired generated tree exactly
+- conflicting content for an existing generated skill directory is a hard error
+- generated skill directories are removed only when the global registry shows no remaining owners
 - stale managed outputs are removed when no longer desired
-- if the configured Codex home changes, previously managed skill directories are removed from the old Codex home during the same reconcile
+- if the configured Codex home changes, the current project's old registry claims are released from the previous Codex home during the same reconcile
 - writes are staged and then swapped into place
 - failures during apply trigger rollback of already-applied changes
 
@@ -345,21 +356,24 @@ Supported kinds in current reporting:
 ### Reconcile flow
 
 1. load previous state if present
-2. compute desired project file changes
-3. compute desired Codex skill directory changes
-4. validate ownership constraints
-5. stage all file and directory replacements in temporary roots
-6. write or update the state file as part of the same transaction
-7. swap staged content into place
-8. remove stale managed outputs
-9. finalize by deleting backups
-10. rollback if any apply step fails
+2. load the current global skill registry under the resolved Codex home
+3. compute desired project file changes
+4. compute desired generated-skill claims and reconcile changes from registry ownership plus on-disk content hashes
+5. validate ownership constraints
+6. stage all file and directory replacements in temporary roots
+7. write or update the project-local state file and any affected global registry files as part of the same transaction
+8. swap staged content into place
+9. remove stale managed outputs whose last owner released them
+10. finalize by deleting backups
+11. rollback if any apply step fails
 
 ### Atomicity model
 
 Project files are written atomically with temporary files in the destination directory.
 
 Skill directories are staged as full directory trees, then swapped using rename-based replacement with backups. This is transactional within the assumptions of a local filesystem and the current process boundaries.
+
+Global registry files are staged and swapped through the same transaction path as project-local state.
 
 ### Idempotence rule
 
@@ -452,7 +466,7 @@ Current runtime module responsibilities:
 - `reconcile.py`
   - desired-state modeling, diffing, apply, rollback, report formatting
 - `state.py`
-  - managed-state serialization and validation
+  - project-local managed-state serialization and validation
 - `install_launchagent.py`
   - LaunchAgent label generation, plist rendering, plist installation
 

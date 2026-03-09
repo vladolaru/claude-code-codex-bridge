@@ -17,6 +17,12 @@ from cc_codex_bridge.model import (
     GeneratedSkill,
     ReconcileError,
 )
+from cc_codex_bridge.registry import (
+    GLOBAL_REGISTRY_FILENAME,
+    GlobalSkillEntry,
+    GlobalSkillRegistry,
+    hash_generated_skill,
+)
 from cc_codex_bridge.state import InteropState
 
 
@@ -52,6 +58,31 @@ class ReconcileReport:
 
     changes: tuple[Change, ...]
     applied: bool
+
+
+@dataclass(frozen=True)
+class _RegistrySnapshot:
+    """One loaded global-registry snapshot."""
+
+    path: Path
+    registry: GlobalSkillRegistry
+    existed: bool
+
+
+@dataclass(frozen=True)
+class _RegistryWrite:
+    """One staged global-registry write."""
+
+    destination: Path
+    content: bytes
+
+
+@dataclass(frozen=True)
+class _MutationPlan:
+    """Planned file, skill, and registry mutations for one reconcile."""
+
+    changes: tuple[Change, ...]
+    registry_writes: tuple[_RegistryWrite, ...]
 
 
 @dataclass(frozen=True)
@@ -137,19 +168,22 @@ def build_desired_state(
 def diff_desired_state(desired: DesiredState) -> ReconcileReport:
     """Compare current outputs to desired state without writing."""
     previous_state = _load_previous_state(desired)
-    changes = _compute_changes(desired, previous_state)
-    return ReconcileReport(changes=changes, applied=False)
+    plan = _plan_mutations(desired, previous_state)
+    return ReconcileReport(changes=plan.changes, applied=False)
 
 
 def reconcile_desired_state(desired: DesiredState) -> ReconcileReport:
     """Apply the desired state to disk."""
     previous_state = _load_previous_state(desired)
-    changes = _compute_changes(desired, previous_state)
-    if not changes:
-        _write_state_if_needed(desired, previous_state)
+    plan = _plan_mutations(desired, previous_state)
+    if not plan.changes and not plan.registry_writes and not _state_write_needed(desired):
         return ReconcileReport(changes=(), applied=True)
 
-    pending_swaps, pending_removals, stage_roots = _stage_transaction(desired, changes)
+    pending_swaps, pending_removals, stage_roots = _stage_transaction(
+        desired,
+        plan.changes,
+        plan.registry_writes,
+    )
     applied_changes: list[_AppliedChange] = []
     try:
         _apply_transaction(pending_swaps, pending_removals, applied_changes)
@@ -163,7 +197,7 @@ def reconcile_desired_state(desired: DesiredState) -> ReconcileReport:
             if stage_root.exists():
                 shutil.rmtree(stage_root)
 
-    return ReconcileReport(changes=changes, applied=True)
+    return ReconcileReport(changes=plan.changes, applied=True)
 
 
 def format_change_report(report: ReconcileReport) -> str:
@@ -208,11 +242,24 @@ def format_diff_report(desired: DesiredState, report: ReconcileReport) -> str:
     return "\n".join(lines)
 
 
-def _compute_changes(
+def _plan_mutations(
+    desired: DesiredState,
+    previous_state: InteropState | None,
+) -> _MutationPlan:
+    """Plan file, skill, and registry mutations for one reconcile run."""
+    project_changes = _compute_project_file_changes(desired, previous_state)
+    skill_changes, registry_writes = _plan_skill_mutations(desired, previous_state)
+    return _MutationPlan(
+        changes=tuple((*project_changes, *skill_changes)),
+        registry_writes=registry_writes,
+    )
+
+
+def _compute_project_file_changes(
     desired: DesiredState,
     previous_state: InteropState | None,
 ) -> tuple[Change, ...]:
-    """Compute file and directory changes, enforcing ownership safety."""
+    """Compute project-local file changes, enforcing ownership safety."""
     if previous_state is not None and previous_state.project_root != desired.project_root:
         raise ReconcileError(
             "Interop state belongs to a different project root: "
@@ -254,43 +301,151 @@ def _compute_changes(
         if path.exists():
             changes.append(Change("remove", path))
 
-    managed_skill_dirs = set(previous_state.managed_codex_skill_dirs) if previous_state else set()
-    desired_skill_names = {skill.install_dir_name for skill in desired.skills}
-    skills_root = desired.codex_home / "skills"
-    for skill in desired.skills:
-        path = skills_root / skill.install_dir_name
-        owned = skill.install_dir_name in managed_skill_dirs
-        if not path.exists():
-            changes.append(Change("create", path, resource_kind="skill"))
-            continue
-        if not path.is_dir():
-            raise ReconcileError(f"Expected a skill directory but found a file: {path}")
-        if _directory_matches_skill(path, skill):
-            continue
-        if not owned:
-            raise ReconcileError(f"Refusing to overwrite non-generated skill directory: {path}")
-        changes.append(Change("update", path, resource_kind="skill"))
-
-    stale_skill_names = managed_skill_dirs - desired_skill_names
-    stale_skills_root = skills_root
-    if previous_state is not None and previous_state.codex_home != desired.codex_home:
-        stale_skill_names = managed_skill_dirs
-        stale_skills_root = previous_state.codex_home / "skills"
-
-    for stale_skill_name in sorted(stale_skill_names):
-        stale_path = stale_skills_root / stale_skill_name
-        if stale_path.exists():
-            changes.append(Change("remove", stale_path, resource_kind="skill"))
-
     return tuple(changes)
 
 
-def _write_state_if_needed(desired: DesiredState, previous_state: InteropState | None) -> None:
-    """Ensure state exists and stays in sync even when content outputs are unchanged."""
-    desired_state = _build_state_record(desired)
-    if previous_state is not None and previous_state == desired_state:
-        return
-    _atomic_write_file(desired.state_path, desired_state.to_json().encode())
+def _plan_skill_mutations(
+    desired: DesiredState,
+    previous_state: InteropState | None,
+) -> tuple[tuple[Change, ...], tuple[_RegistryWrite, ...]]:
+    """Plan global-skill ownership and directory mutations."""
+    current_snapshot = _load_registry_snapshot(desired.codex_home / GLOBAL_REGISTRY_FILENAME)
+    previous_snapshot = current_snapshot
+    if previous_state is not None and previous_state.codex_home != desired.codex_home:
+        previous_snapshot = _load_registry_snapshot(
+            previous_state.codex_home / GLOBAL_REGISTRY_FILENAME
+        )
+
+    desired_skills = {skill.install_dir_name: skill for skill in desired.skills}
+    desired_hashes = {
+        install_dir_name: hash_generated_skill(skill)
+        for install_dir_name, skill in desired_skills.items()
+    }
+    changes: list[Change] = []
+
+    updated_current = GlobalSkillRegistry(skills=dict(current_snapshot.registry.skills))
+    for install_dir_name in sorted(desired_skills):
+        skill = desired_skills[install_dir_name]
+        destination = desired.codex_home / "skills" / install_dir_name
+        existing_entry = updated_current.skills.get(install_dir_name)
+        desired_hash = desired_hashes[install_dir_name]
+        registry_owned = existing_entry is not None
+
+        if existing_entry is not None and existing_entry.content_hash != desired_hash:
+            if set(existing_entry.owners) != {desired.project_root}:
+                raise ReconcileError(
+                    "Generated skill registry conflict for "
+                    f"{destination}: existing content hash {existing_entry.content_hash} "
+                    f"does not match desired {desired_hash}"
+                )
+            registry_owned = True
+
+        if destination.exists() and not destination.is_dir():
+            raise ReconcileError(f"Expected a skill directory but found a file: {destination}")
+
+        if not registry_owned:
+            if destination.exists() and not _directory_matches_skill(destination, skill):
+                raise ReconcileError(
+                    "Refusing to adopt conflicting existing skill directory: "
+                    f"{destination}"
+                )
+            existing_owners: tuple[Path, ...] = ()
+        else:
+            existing_owners = existing_entry.owners if existing_entry is not None else ()
+
+        updated_current.skills[install_dir_name] = GlobalSkillEntry(
+            content_hash=desired_hash,
+            owners=_sorted_owner_set((*existing_owners, desired.project_root)),
+        )
+
+        if not destination.exists():
+            changes.append(Change("create", destination, resource_kind="skill"))
+            continue
+        if _directory_matches_skill(destination, skill):
+            continue
+        if not registry_owned:
+            raise AssertionError("Conflicting adopted skill directories should already fail")
+        changes.append(Change("update", destination, resource_kind="skill"))
+
+    previously_owned_current = _owned_skill_names(
+        current_snapshot.registry,
+        desired.project_root,
+    )
+    for install_dir_name in sorted(previously_owned_current - set(desired_skills)):
+        entry = updated_current.skills[install_dir_name]
+        remaining_owners = tuple(
+            owner for owner in entry.owners if owner != desired.project_root
+        )
+        if remaining_owners:
+            updated_current.skills[install_dir_name] = GlobalSkillEntry(
+                content_hash=entry.content_hash,
+                owners=remaining_owners,
+            )
+            continue
+
+        del updated_current.skills[install_dir_name]
+        stale_path = desired.codex_home / "skills" / install_dir_name
+        if stale_path.exists():
+            changes.append(Change("remove", stale_path, resource_kind="skill"))
+
+    registry_writes: list[_RegistryWrite] = []
+    current_write = _build_registry_write(current_snapshot, updated_current)
+    if current_write is not None:
+        registry_writes.append(current_write)
+
+    if previous_snapshot.path != current_snapshot.path:
+        updated_previous = GlobalSkillRegistry(skills=dict(previous_snapshot.registry.skills))
+        for install_dir_name in sorted(_owned_skill_names(previous_snapshot.registry, desired.project_root)):
+            entry = updated_previous.skills[install_dir_name]
+            remaining_owners = tuple(
+                owner for owner in entry.owners if owner != desired.project_root
+            )
+            if remaining_owners:
+                updated_previous.skills[install_dir_name] = GlobalSkillEntry(
+                    content_hash=entry.content_hash,
+                    owners=remaining_owners,
+                )
+                continue
+
+            del updated_previous.skills[install_dir_name]
+            stale_path = previous_snapshot.path.parent / "skills" / install_dir_name
+            if stale_path.exists():
+                changes.append(Change("remove", stale_path, resource_kind="skill"))
+
+        previous_write = _build_registry_write(previous_snapshot, updated_previous)
+        if previous_write is not None:
+            registry_writes.append(previous_write)
+
+    return tuple(changes), tuple(registry_writes)
+
+
+def _build_registry_write(
+    snapshot: _RegistrySnapshot,
+    updated_registry: GlobalSkillRegistry,
+) -> _RegistryWrite | None:
+    """Return one registry write when the desired registry differs from disk."""
+    if updated_registry == snapshot.registry:
+        return None
+    if not snapshot.existed and not updated_registry.skills:
+        return None
+    return _RegistryWrite(
+        destination=snapshot.path,
+        content=updated_registry.to_json().encode(),
+    )
+
+
+def _owned_skill_names(registry: GlobalSkillRegistry, project_root: Path) -> set[str]:
+    """Return the generated skill names currently claimed by one project."""
+    return {
+        install_dir_name
+        for install_dir_name, entry in registry.skills.items()
+        if project_root in entry.owners
+    }
+
+
+def _sorted_owner_set(owners: Iterable[Path]) -> tuple[Path, ...]:
+    """Return unique owners in deterministic order."""
+    return tuple(sorted(set(owners), key=str))
 
 
 def _write_skill_tree(destination: Path, skill: GeneratedSkill) -> None:
@@ -337,6 +492,18 @@ def _load_previous_state(desired: DesiredState) -> InteropState | None:
     if desired.state_path.is_symlink():
         raise ReconcileError(f"Refusing to use symlinked interop state file: {desired.state_path}")
     return InteropState.from_path(desired.state_path)
+
+
+def _load_registry_snapshot(path: Path) -> _RegistrySnapshot:
+    """Load one global registry only from a regular file at the expected path."""
+    if path.is_symlink():
+        raise ReconcileError(f"Refusing to use symlinked global skill registry file: {path}")
+    registry = GlobalSkillRegistry.from_path(path)
+    return _RegistrySnapshot(
+        path=path,
+        registry=registry or GlobalSkillRegistry(skills={}),
+        existed=registry is not None,
+    )
 
 
 def _project_relative(desired: DesiredState, path: Path) -> str:
@@ -386,8 +553,13 @@ def _build_state_record(desired: DesiredState) -> InteropState:
         project_root=desired.project_root,
         codex_home=desired.codex_home,
         managed_project_files=managed_project_files,
-        managed_codex_skill_dirs=tuple(sorted(skill.install_dir_name for skill in desired.skills)),
     )
+
+
+def _state_write_needed(desired: DesiredState) -> bool:
+    """Return True when the project-local state file must be updated."""
+    state_bytes = _build_state_record(desired).to_json().encode()
+    return not desired.state_path.exists() or desired.state_path.read_bytes() != state_bytes
 
 
 def _is_allowed_managed_project_relative(relative: str) -> bool:
@@ -412,6 +584,7 @@ def _is_allowed_managed_project_relative(relative: str) -> bool:
 def _stage_transaction(
     desired: DesiredState,
     changes: tuple[Change, ...],
+    registry_writes: tuple[_RegistryWrite, ...],
 ) -> tuple[tuple[_PendingSwap, ...], tuple[_PendingRemoval, ...], tuple[Path, ...]]:
     """Stage all create/update artifacts before mutating any live outputs."""
     stage_roots: list[Path] = []
@@ -459,6 +632,34 @@ def _stage_transaction(
                 destination=desired.state_path,
                 staged_path=staged_state_path,
                 backup_root=project_backup_root,
+                is_dir=False,
+            )
+        )
+
+    for registry_write in registry_writes:
+        registry_destination = registry_write.destination
+        registry_destination.parent.mkdir(parents=True, exist_ok=True)
+        registry_stage_root = Path(
+            tempfile.mkdtemp(
+                prefix=".interop-registry-stage-",
+                dir=registry_destination.parent,
+            )
+        )
+        stage_roots.append(registry_stage_root)
+        registry_backup_root = Path(
+            tempfile.mkdtemp(
+                prefix=".interop-registry-backup-",
+                dir=registry_destination.parent,
+            )
+        )
+        stage_roots.append(registry_backup_root)
+        staged_registry_path = registry_stage_root / registry_destination.name
+        _write_staged_file(staged_registry_path, registry_write.content)
+        pending_swaps.append(
+            _PendingSwap(
+                destination=registry_destination,
+                staged_path=staged_registry_path,
+                backup_root=registry_backup_root,
                 is_dir=False,
             )
         )
@@ -545,7 +746,7 @@ def _finalize_transaction(applied_changes: list[_AppliedChange], desired: Desire
         if applied_change.backup_path is None:
             continue
         _remove_existing_path(applied_change.backup_path, is_dir=applied_change.is_dir)
-        if not applied_change.is_dir:
+        if not applied_change.is_dir and _is_project_path(desired, applied_change.destination):
             _cleanup_empty_project_dirs(
                 applied_change.backup_path.parent,
                 desired.project_root,
@@ -556,7 +757,7 @@ def _finalize_transaction(applied_changes: list[_AppliedChange], desired: Desire
             continue
         if not applied_change.destination.exists():
             continue
-        if applied_change.is_dir:
+        if applied_change.is_dir or not _is_project_path(desired, applied_change.destination):
             continue
         _cleanup_empty_project_dirs(
             applied_change.destination.parent,
@@ -574,7 +775,7 @@ def _rollback_transaction(applied_changes: list[_AppliedChange], desired: Desire
             applied_change.backup_path.rename(applied_change.destination)
 
     for applied_change in applied_changes:
-        if applied_change.is_dir:
+        if applied_change.is_dir or not _is_project_path(desired, applied_change.destination):
             continue
         if applied_change.backup_path is None:
             _cleanup_empty_project_dirs(

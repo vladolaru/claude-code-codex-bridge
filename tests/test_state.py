@@ -19,14 +19,13 @@ def test_interop_state_round_trips(tmp_path: Path):
         project_root=tmp_path / "project",
         codex_home=tmp_path / "codex-home",
         managed_project_files=("CLAUDE.md", ".codex/config.toml"),
-        managed_codex_skill_dirs=("plugin-skill",),
     )
     path.write_text(state.to_json())
 
     loaded = InteropState.from_path(path)
 
     assert loaded == state
-    assert json.loads(state.to_json())["version"] == 2
+    assert json.loads(state.to_json())["version"] == 3
 
 
 def test_interop_state_handles_missing_invalid_and_unsupported_files(tmp_path: Path):
@@ -59,11 +58,10 @@ def test_interop_state_rejects_invalid_schema_shapes(tmp_path: Path):
     invalid.write_text(
         json.dumps(
             {
-                "version": 2,
+                "version": 3,
                 "project_root": 1,
                 "codex_home": str(tmp_path / "codex-home"),
                 "managed_project_files": [123],
-                "managed_codex_skill_dirs": [],
             }
         )
     )
@@ -72,39 +70,22 @@ def test_interop_state_rejects_invalid_schema_shapes(tmp_path: Path):
         InteropState.from_path(invalid)
 
 
-def test_interop_state_rejects_non_absolute_paths_and_non_name_skill_entries(tmp_path: Path):
-    """State path fields must be absolute and managed skill entries must be plain names."""
+def test_interop_state_rejects_non_absolute_paths(tmp_path: Path):
+    """State path fields must remain absolute paths."""
     invalid_paths = tmp_path / "invalid-paths.json"
     invalid_paths.write_text(
         json.dumps(
             {
-                "version": 2,
+                "version": 3,
                 "project_root": "relative/project",
                 "codex_home": str(tmp_path / "codex-home"),
                 "managed_project_files": [],
-                "managed_codex_skill_dirs": [],
             }
         )
     )
 
     with pytest.raises(ReconcileError, match="Invalid interop state file"):
         InteropState.from_path(invalid_paths)
-
-    invalid_skill_dirs = tmp_path / "invalid-skill-dirs.json"
-    invalid_skill_dirs.write_text(
-        json.dumps(
-            {
-                "version": 2,
-                "project_root": str(tmp_path / "project"),
-                "codex_home": str(tmp_path / "codex-home"),
-                "managed_project_files": [],
-                "managed_codex_skill_dirs": ["../escape"],
-            }
-        )
-    )
-
-    with pytest.raises(ReconcileError, match="Invalid interop state file"):
-        InteropState.from_path(invalid_skill_dirs)
 
 
 def test_global_skill_registry_round_trips(tmp_path: Path):

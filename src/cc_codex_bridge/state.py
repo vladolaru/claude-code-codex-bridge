@@ -9,7 +9,7 @@ from pathlib import Path
 from cc_codex_bridge.model import ReconcileError
 
 
-STATE_VERSION = 2
+STATE_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -19,7 +19,6 @@ class InteropState:
     project_root: Path
     codex_home: Path
     managed_project_files: tuple[str, ...]
-    managed_codex_skill_dirs: tuple[str, ...]
     version: int = STATE_VERSION
 
     @classmethod
@@ -42,9 +41,6 @@ class InteropState:
             project_root=_read_absolute_path(data, "project_root", path),
             codex_home=_read_absolute_path(data, "codex_home", path),
             managed_project_files=tuple(_read_string_list(data, "managed_project_files", path)),
-            managed_codex_skill_dirs=tuple(
-                _read_skill_dir_name_list(data, "managed_codex_skill_dirs", path)
-            ),
             version=STATE_VERSION,
         )
 
@@ -55,7 +51,6 @@ class InteropState:
             "project_root": str(self.project_root),
             "codex_home": str(self.codex_home),
             "managed_project_files": list(self.managed_project_files),
-            "managed_codex_skill_dirs": list(self.managed_codex_skill_dirs),
         }
         return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
@@ -82,21 +77,3 @@ def _read_string_list(data: dict[str, object], key: str, path: Path) -> list[str
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         raise ReconcileError(f"Invalid interop state file: {path}")
     return value
-
-
-def _read_skill_dir_name_list(data: dict[str, object], key: str, path: Path) -> list[str]:
-    """Read one string-list field containing only plain skill directory names."""
-    return [_require_skill_dir_name(value, path) for value in _read_string_list(data, key, path)]
-
-
-def _require_skill_dir_name(value: str, path: Path) -> str:
-    """Validate one managed Codex skill directory name from the state payload."""
-    candidate = value.strip()
-    if not candidate:
-        raise ReconcileError(f"Invalid interop state file: {path}")
-
-    normalized = Path(candidate)
-    if normalized.is_absolute() or candidate != normalized.name or candidate in {".", ".."}:
-        raise ReconcileError(f"Invalid interop state file: {path}")
-
-    return candidate
