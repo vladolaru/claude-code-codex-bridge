@@ -15,13 +15,15 @@ Not supported:
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 from cc_codex_bridge.model import TranslationError
+from cc_codex_bridge.text import read_utf8_text
 
 
 def parse_markdown_with_frontmatter(path: Path) -> tuple[dict[str, object], str]:
     """Parse simple YAML-like frontmatter plus markdown body."""
-    content = path.read_text()
+    content = read_utf8_text(path, label="frontmatter file", error_type=TranslationError)
     if not content.startswith("---\n"):
         return {}, content
 
@@ -86,14 +88,15 @@ def parse_frontmatter_lines(lines: list[str]) -> dict[str, object]:
         if ":" not in line:
             raise TranslationError(f"Invalid frontmatter line: {line}")
 
+        raw_value = line.split(":", 1)[1].strip()
         key, value = _parse_key_value(line)
         current_key = key
-        if value in {">", "|"}:
+        if isinstance(value, str) and value in {">", "|"}:
             block_lines, next_index = _consume_block_scalar(lines, index + 1, min_indent=1)
             result[current_key] = _join_block_scalar(block_lines, folded=(value == ">"))
             index = next_index
             continue
-        if value:
+        if raw_value:
             result[current_key] = value
         else:
             next_line = _next_nonempty_line(lines, index + 1)
@@ -113,12 +116,12 @@ def parse_frontmatter_lines(lines: list[str]) -> dict[str, object]:
     return result
 
 
-def _parse_key_value(line: str) -> tuple[str, str]:
+def _parse_key_value(line: str) -> tuple[str, object]:
     """Parse one `key: value` line."""
     if ":" not in line:
         raise TranslationError(f"Invalid frontmatter line: {line}")
     key, value = line.split(":", 1)
-    return key.strip(), value.strip()
+    return key.strip(), _parse_scalar_value(value.strip())
 
 
 def _next_nonempty_line(lines: list[str], start_index: int) -> str | None:
@@ -162,3 +165,70 @@ def _join_block_scalar(lines: list[str], *, folded: bool) -> str:
         joined = " ".join(part.strip() for part in lines if part.strip())
         return joined.strip()
     return "\n".join(lines).rstrip()
+
+
+def _parse_scalar_value(value: str) -> object:
+    """Parse one scalar or inline list value from minimal YAML-like frontmatter."""
+    if not value:
+        return ""
+    if value.startswith("[") and value.endswith("]"):
+        return _parse_inline_list(value)
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return _parse_quoted_scalar(value)
+    return value
+
+
+def _parse_inline_list(value: str) -> list[object]:
+    """Parse a simple inline list such as `[Read, "Write"]`."""
+    inner = value[1:-1].strip()
+    if not inner:
+        return []
+
+    items: list[object] = []
+    token: list[str] = []
+    quote_char: str | None = None
+    index = 0
+    while index < len(inner):
+        char = inner[index]
+        if quote_char is not None:
+            token.append(char)
+            if char == quote_char:
+                if quote_char == "'" and index + 1 < len(inner) and inner[index + 1] == "'":
+                    token.append(inner[index + 1])
+                    index += 2
+                    continue
+                quote_char = None
+            index += 1
+            continue
+
+        if char in {"'", '"'}:
+            quote_char = char
+            token.append(char)
+            index += 1
+            continue
+
+        if char == ",":
+            items.append(_parse_scalar_value("".join(token).strip()))
+            token = []
+            index += 1
+            continue
+
+        token.append(char)
+        index += 1
+
+    if quote_char is not None:
+        raise TranslationError(f"Unclosed quoted frontmatter value: {value}")
+
+    items.append(_parse_scalar_value("".join(token).strip()))
+    return items
+
+
+def _parse_quoted_scalar(value: str) -> str:
+    """Parse one quoted scalar value."""
+    if value.startswith('"'):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value[1:-1]
+
+    return value[1:-1].replace("''", "'")

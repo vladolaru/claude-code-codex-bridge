@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import socket
 
 import pytest
 
 import cc_codex_bridge.reconcile as reconcile_module
 from cc_codex_bridge.claude_shim import plan_claude_shim
 from cc_codex_bridge.discover import discover
-from cc_codex_bridge.locking import acquire_global_registry_lock, acquire_project_lock
+from cc_codex_bridge.locking import (
+    acquire_global_registry_lock,
+    acquire_project_lock,
+    global_registry_lock_path,
+    project_lock_path,
+)
 from cc_codex_bridge.model import ReconcileError
 from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
 from cc_codex_bridge.reconcile import (
@@ -99,6 +105,32 @@ def test_reconcile_is_idempotent(make_project, make_plugin_version, tmp_path: Pa
 
     assert first.changes
     assert second.changes == ()
+
+
+def test_reconcile_preserves_managed_claude_symlink(make_project, make_plugin_version, tmp_path: Path):
+    """A managed CLAUDE.md may transition to an AGENTS.md symlink without being deleted."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nPrompt body.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+
+    reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
+    claude_md = project_root / "CLAUDE.md"
+    claude_md.unlink()
+    claude_md.symlink_to("AGENTS.md")
+
+    report = reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
+
+    assert report.changes == ()
+    assert claude_md.is_symlink()
+    assert claude_md.resolve() == (project_root / "AGENTS.md").resolve()
 
 
 def test_diff_does_not_write_outputs(make_project, make_plugin_version, tmp_path: Path):
@@ -349,6 +381,39 @@ def test_diff_remains_lock_free(
             report = diff_desired_state(desired)
 
     assert any(change.resource_kind == "skill" for change in report.changes)
+
+
+def test_reconcile_reclaims_stale_project_and_global_lock_files(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Dead-process lock files are reclaimed automatically for a later reconcile."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    project_lock_path(project_root).parent.mkdir(parents=True, exist_ok=True)
+    project_lock_path(project_root).write_text(
+        f"pid=999999\nhost={socket.gethostname()}\n"
+    )
+    codex_home.mkdir(parents=True, exist_ok=True)
+    global_registry_lock_path(codex_home).write_text(
+        f"pid=999999\nhost={socket.gethostname()}\n"
+    )
+
+    report = reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
+
+    assert report.applied is True
+    assert not project_lock_path(project_root).exists()
+    assert not global_registry_lock_path(codex_home).exists()
 
 
 def test_reconcile_fails_on_registry_conflict_for_same_skill_directory(

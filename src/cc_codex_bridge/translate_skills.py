@@ -14,6 +14,7 @@ from cc_codex_bridge.model import (
     InstalledPlugin,
     TranslationError,
 )
+from cc_codex_bridge.text import read_utf8_text
 
 
 SIBLING_SKILL_REF_RE = re.compile(r"\.\./(?P<skill>[A-Za-z0-9._-]+)/")
@@ -116,7 +117,7 @@ def _build_generated_skill(
     _copy_skill_tree(raw_skill.skill_path, Path(), generated_files)
 
     skill_md_path = raw_skill.skill_path / "SKILL.md"
-    skill_content = skill_md_path.read_text()
+    skill_content = read_utf8_text(skill_md_path, label="skill file", error_type=TranslationError)
     rewritten_content, sibling_skills, needs_plugin_scripts = _rewrite_skill_content(
         skill_content,
         codex_skill_name=install_dir_name,

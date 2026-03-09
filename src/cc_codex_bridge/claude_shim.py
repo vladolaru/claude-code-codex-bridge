@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cc_codex_bridge.model import ClaudeShimDecision, ProjectContext
+from cc_codex_bridge.model import ClaudeShimDecision, ProjectContext, ReconcileError
+from cc_codex_bridge.text import read_utf8_text
 
 
 SHIM_CONTENT = "@AGENTS.md\n"
@@ -36,7 +37,11 @@ def plan_claude_shim(project: ProjectContext) -> ClaudeShimDecision:
             reason="CLAUDE.md is a symlink but not to AGENTS.md",
         )
 
-    content = claude_md_path.read_text()
+    content = read_utf8_text(
+        claude_md_path,
+        label="CLAUDE.md shim candidate",
+        error_type=ReconcileError,
+    )
     if content == SHIM_CONTENT:
         return ClaudeShimDecision(
             action="preserve",

@@ -7,6 +7,7 @@ from pathlib import Path
 import tomllib
 
 from cc_codex_bridge.model import DiscoveryResult, InstalledPlugin, ReconcileError
+from cc_codex_bridge.text import read_utf8_text
 
 
 DEFAULT_CONFIG_RELATIVE_PATH = Path(".codex") / "bridge.toml"
@@ -44,7 +45,9 @@ def load_project_exclusions(
         raise ReconcileError(f"Exclusion config path is not a file: {config_path}")
 
     try:
-        payload = tomllib.loads(config_path.read_text())
+        payload = tomllib.loads(
+            read_utf8_text(config_path, label="exclusion config", error_type=ReconcileError)
+        )
     except tomllib.TOMLDecodeError as exc:
         raise ReconcileError(f"Invalid TOML exclusion config: {config_path}") from exc
 

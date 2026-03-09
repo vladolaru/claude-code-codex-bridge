@@ -13,7 +13,7 @@ if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
 
 from cc_codex_bridge.claude_shim import plan_claude_shim
-from cc_codex_bridge.discover import discover
+from cc_codex_bridge.discover import discover, resolve_project_root
 from cc_codex_bridge.exclusions import (
     ExclusionReport,
     apply_sync_exclusions,
@@ -173,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         result, exclusion_report = apply_sync_exclusions(result, exclusions)
         shim_decision = plan_claude_shim(result.project)
-    except (DiscoveryError, TranslationError, ReconcileError, OSError) as exc:
+    except (DiscoveryError, TranslationError, ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
@@ -200,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
             skills,
             codex_home=args.codex_home,
         )
-    except (TranslationError, ReconcileError, OSError) as exc:
+    except (TranslationError, ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
@@ -244,7 +244,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(format_status_report(report, exclusion_report))
             return 0
-    except (ReconcileError, OSError) as exc:
+    except (ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
@@ -254,8 +254,7 @@ def main(argv: list[str] | None = None) -> int:
 def _handle_launchagent_command(args: argparse.Namespace) -> int:
     """Handle LaunchAgent rendering or installation commands."""
     try:
-        project = args.project or Path.cwd()
-        resolved_project = project.expanduser().resolve()
+        resolved_project = resolve_project_root(args.project or Path.cwd()).root
         label = args.label or build_launchagent_label(resolved_project)
         plist_bytes = build_launchagent_plist(
             project_root=resolved_project,
@@ -267,7 +266,7 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
             label=label,
             logs_dir=args.logs_dir,
         )
-    except (ReconcileError, OSError) as exc:
+    except (DiscoveryError, ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 

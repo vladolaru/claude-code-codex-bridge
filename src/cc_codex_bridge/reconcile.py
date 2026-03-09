@@ -24,6 +24,7 @@ from cc_codex_bridge.registry import (
     hash_generated_skill,
 )
 from cc_codex_bridge.state import InteropState
+from cc_codex_bridge.text import read_utf8_text
 
 
 DEFAULT_CODEX_HOME = Path.home() / ".codex"
@@ -39,6 +40,7 @@ class DesiredState:
     project_root: Path
     codex_home: Path
     project_files: tuple[tuple[Path, bytes], ...]
+    preserved_project_files: tuple[Path, ...]
     skills: tuple[GeneratedSkill, ...]
     state_path: Path
 
@@ -129,6 +131,7 @@ def build_desired_state(
     project_root = discovery.project.root.resolve()
     codex_home_path = Path(codex_home or DEFAULT_CODEX_HOME).expanduser().resolve()
     project_files: list[tuple[Path, bytes]] = []
+    preserved_project_files: list[Path] = []
     skills_tuple = tuple(skills)
 
     if shim_decision.content is not None:
@@ -137,6 +140,10 @@ def build_desired_state(
                 _resolve_managed_project_path(project_root, Path("CLAUDE.md")),
                 shim_decision.content.encode(),
             )
+        )
+    elif shim_decision.action == "preserve":
+        preserved_project_files.append(
+            _resolve_managed_project_path(project_root, Path("CLAUDE.md"))
         )
 
     project_files.append(
@@ -160,6 +167,7 @@ def build_desired_state(
         project_root=project_root,
         codex_home=codex_home_path,
         project_files=tuple(project_files),
+        preserved_project_files=tuple(sorted(set(preserved_project_files), key=str)),
         skills=skills_tuple,
         state_path=project_root / STATE_RELATIVE_PATH,
     )
@@ -226,7 +234,11 @@ def format_diff_report(desired: DesiredState, report: ReconcileReport) -> str:
         desired_bytes = _lookup_desired_file_bytes(desired, change.path)
         if desired_bytes is None:
             continue
-        existing_text = change.path.read_text() if change.path.exists() else ""
+        existing_text = (
+            read_utf8_text(change.path, label="managed text file", error_type=ReconcileError)
+            if change.path.exists()
+            else ""
+        )
         desired_text = desired_bytes.decode()
         if existing_text == desired_text:
             continue
@@ -295,7 +307,10 @@ def _compute_project_file_changes(
             raise ReconcileError(f"Refusing to overwrite non-generated project file: {path}")
         changes.append(Change("update", path))
 
-    desired_project_paths = {_project_relative(desired, path) for path, _ in desired.project_files}
+    desired_project_paths = {
+        *(_project_relative(desired, path) for path, _ in desired.project_files),
+        *(_project_relative(desired, path) for path in desired.preserved_project_files),
+    }
     for relative in sorted(managed_project_files - desired_project_paths):
         if relative == STATE_RELATIVE_PATH.as_posix():
             continue
@@ -537,11 +552,12 @@ def _cleanup_empty_project_dirs(path: Path, stop_at: Path) -> None:
 
 def _build_state_record(desired: DesiredState) -> InteropState:
     """Build the desired stable state payload."""
-    managed_project_files = tuple(
-        sorted(
-            (*(_project_relative(desired, path) for path, _ in desired.project_files), STATE_RELATIVE_PATH.as_posix())
-        )
-    )
+    managed_project_paths = {
+        *(_project_relative(desired, path) for path, _ in desired.project_files),
+        *(_project_relative(desired, path) for path in desired.preserved_project_files),
+        STATE_RELATIVE_PATH.as_posix(),
+    }
+    managed_project_files = tuple(sorted(managed_project_paths))
     return InteropState(
         project_root=desired.project_root,
         codex_home=desired.codex_home,

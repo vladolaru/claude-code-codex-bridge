@@ -140,7 +140,26 @@ def test_print_launchagent_cli_requires_valid_project(tmp_path: Path, capsys: py
 
     captured = capsys.readouterr()
     assert exit_code == 1
-    assert "must contain AGENTS.md" in captured.err
+    assert "Could not resolve a project root with AGENTS.md" in captured.err
+
+
+def test_print_launchagent_cli_resolves_project_root_from_nested_path(
+    make_project,
+    capsys: pytest.CaptureFixture[str],
+):
+    """LaunchAgent commands reuse project-root discovery instead of requiring the repo root."""
+    project_root, _agents_md = make_project()
+    nested_file = project_root / "nested" / "notes.txt"
+    nested_file.parent.mkdir(parents=True)
+    nested_file.write_text("note\n")
+
+    exit_code = cli.main(["print-launchagent", "--project", str(nested_file)])
+
+    captured = capsys.readouterr()
+    payload = plistlib.loads(captured.out.encode())
+    assert exit_code == 0
+    assert payload["WorkingDirectory"] == str(project_root)
+    assert payload["ProgramArguments"][4] == str(project_root)
 
 
 def test_reconcile_dry_run_with_diff_flag_reports_file_diff(
@@ -187,6 +206,56 @@ def test_reconcile_dry_run_with_diff_flag_reports_file_diff(
     assert exit_code == 0
     assert "@@" in captured.out
     assert "+New body." in captured.out
+
+
+def test_reconcile_diff_surfaces_non_utf8_managed_text_as_user_facing_error(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+    capsys,
+):
+    """Diff output rejects invalid UTF-8 managed files with a clean CLI error."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "prompt-engineer", "1.0.0", agent_names=("reviewer",)
+    )
+    agent_path = version_dir / "agents" / "reviewer.md"
+    agent_path.write_text("---\nname: reviewer\ndescription: Review\n---\n\nPrompt body.\n")
+    codex_home = tmp_path / "codex-home"
+
+    assert cli.main(
+        [
+            "reconcile",
+            "--project",
+            str(project_root),
+            "--cache-dir",
+            str(cache_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    ) == 0
+    capsys.readouterr()
+
+    prompt_path = project_root / ".codex" / "prompts" / "agents" / "prompt-engineer-reviewer.md"
+    prompt_path.write_bytes(b"\xff\xfebroken")
+
+    exit_code = cli.main(
+        [
+            "reconcile",
+            "--dry-run",
+            "--diff",
+            "--project",
+            str(project_root),
+            "--cache-dir",
+            str(cache_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Unable to decode managed text file as UTF-8" in captured.err
 
 
 def test_reconcile_diff_requires_dry_run(make_project, make_plugin_version, tmp_path: Path, capsys):
@@ -305,6 +374,33 @@ def test_validate_surfaces_os_errors_as_user_facing_errors(monkeypatch: pytest.M
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "Error: boom" in captured.err
+
+
+def test_validate_surfaces_non_utf8_claude_md_as_user_facing_error(
+    make_project,
+    make_plugin_version,
+    capsys,
+):
+    """Non-UTF-8 CLAUDE.md content fails cleanly during shim planning."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nPrompt body.\n"
+    )
+    (project_root / "CLAUDE.md").write_bytes(b"\xff\xfebroken")
+
+    exit_code = cli.main(
+        ["validate", "--project", str(project_root), "--cache-dir", str(cache_root)]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Unable to decode CLAUDE.md shim candidate as UTF-8" in captured.err
 
 
 def test_validate_fails_for_unsupported_agent_tools(make_project, make_plugin_version, capsys):

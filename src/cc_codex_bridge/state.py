@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from cc_codex_bridge.model import ReconcileError
+from cc_codex_bridge.text import read_utf8_text
 
 
 STATE_VERSION = 3
@@ -28,7 +29,9 @@ class InteropState:
             return None
 
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(
+                read_utf8_text(path, label="interop state file", error_type=ReconcileError)
+            )
         except json.JSONDecodeError as exc:
             raise ReconcileError(f"Invalid interop state file: {path}") from exc
 

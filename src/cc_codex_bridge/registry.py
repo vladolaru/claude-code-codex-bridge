@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Iterable
 
 from cc_codex_bridge.model import GeneratedSkill, GeneratedSkillFile, ReconcileError
+from cc_codex_bridge.text import read_utf8_text
 
 
 GLOBAL_REGISTRY_VERSION = 1
@@ -38,7 +39,9 @@ class GlobalSkillRegistry:
             return None
 
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(
+                read_utf8_text(path, label="global skill registry file", error_type=ReconcileError)
+            )
         except json.JSONDecodeError as exc:
             raise ReconcileError(f"Invalid global skill registry file: {path}") from exc
 

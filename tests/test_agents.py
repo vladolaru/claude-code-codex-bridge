@@ -365,6 +365,33 @@ def test_translate_tools_rejects_invalid_shapes():
         translate_tools(["Read", 1])
 
 
+def test_translate_installed_agents_accepts_quoted_fields_and_inline_tool_lists(
+    make_plugin_version,
+):
+    """Quoted scalars and inline lists in frontmatter still translate cleanly."""
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "test-plugin",
+        "1.0.0",
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\n"
+        'name: "reviewer"\n'
+        "description: 'Review: carefully'\n"
+        "tools: [Write, Read]\n"
+        "---\n\n"
+        "Prompt body.\n"
+    )
+
+    roles = translate_installed_agents(discover_latest_plugins(cache_root))
+
+    assert len(roles) == 1
+    assert roles[0].role_name == "test-plugin_reviewer"
+    assert roles[0].description == "Review: carefully"
+    assert roles[0].tools == ("read", "write")
+
+
 def test_parse_frontmatter_lines_rejects_invalid_indentation():
     """Low-level frontmatter parser rejects invalid list and indentation shapes."""
     with pytest.raises(TranslationError, match="List item found before a frontmatter key"):

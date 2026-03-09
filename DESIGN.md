@@ -168,6 +168,7 @@ The global registry records:
 - conflicting content for an existing generated skill directory is a hard error
 - generated skill directories are removed only when the global registry shows no remaining owners
 - mutating reconcile acquires a project lock first and a global registry lock second
+- same-host stale lock files are reclaimed when their recorded pid is no longer running
 - read-only diff/status planning remains lock-free
 - stale managed outputs are removed when no longer desired
 - if the configured Codex home changes, the current project's old registry claims are released from the previous Codex home during the same reconcile
@@ -265,7 +266,9 @@ Frontmatter parsing is shared through `src/cc_codex_bridge/frontmatter.py`.
 The parser is intentionally minimal and supports the shapes used by current test fixtures and known docs:
 
 - scalar values
+- quoted scalar values
 - list values
+- simple inline lists
 - simple nested maps
 - folded and literal block scalars
 
@@ -429,11 +432,14 @@ All exclusion flags are repeatable. `.codex/bridge.toml` can define persistent e
 - `install-launchagent`
   - write the plist into a LaunchAgents directory and print the `launchctl bootstrap` next step
 
+LaunchAgent commands resolve the target project root with the same upward `AGENTS.md` discovery used by the main pipeline.
+
 ### CLI invariants
 
 - all non-LaunchAgent commands share the same pipeline and error types
 - `DiscoveryError`, `TranslationError`, and `ReconcileError` are surfaced as user-facing errors with exit code `1`
 - filesystem `OSError` failures during CLI execution are also surfaced as user-facing errors with exit code `1`
+- UTF-8 decode failures for runtime text inputs are also surfaced as user-facing errors with exit code `1`
 - successful commands return `0`
 
 ## 11. LaunchAgent Architecture
@@ -467,6 +473,8 @@ Current runtime module responsibilities:
   - `CLAUDE.md` ownership-safe shim planning
 - `frontmatter.py`
   - dependency-free shared frontmatter parsing for Claude/Codex markdown assets
+- `text.py`
+  - shared UTF-8 text loading helpers for runtime-managed text files
 - `translate_agents.py`
   - Claude agent translation and unsupported-tool diagnostics
 - `render_codex_config.py`
