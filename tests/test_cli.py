@@ -307,6 +307,79 @@ def test_validate_surfaces_os_errors_as_user_facing_errors(monkeypatch: pytest.M
     assert "Error: boom" in captured.err
 
 
+def test_validate_fails_for_unsupported_agent_tools(make_project, make_plugin_version, capsys):
+    """Unsupported Claude tools block validation with an explicit diagnostic."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        agent_names=("broken",),
+    )
+    (version_dir / "agents" / "broken.md").write_text(
+        "---\n"
+        "name: broken\n"
+        "description: Review\n"
+        "tools:\n"
+        "  - Read\n"
+        "  - NotebookEdit\n"
+        "---\n\n"
+        "Prompt body.\n"
+    )
+
+    exit_code = cli.main(
+        ["validate", "--project", str(project_root), "--cache-dir", str(cache_root)]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "unsupported Claude tools: NotebookEdit" in captured.err
+
+
+def test_reconcile_fails_before_writing_for_unsupported_agent_tools(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+    capsys,
+):
+    """Unsupported Claude tools block reconcile before any outputs are written."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        agent_names=("broken",),
+    )
+    (version_dir / "agents" / "broken.md").write_text(
+        "---\n"
+        "name: broken\n"
+        "description: Review\n"
+        "tools:\n"
+        "  - NotebookEdit\n"
+        "---\n\n"
+        "Prompt body.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+
+    exit_code = cli.main(
+        [
+            "reconcile",
+            "--project",
+            str(project_root),
+            "--cache-dir",
+            str(cache_root),
+            "--codex-home",
+            str(codex_home),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "unsupported Claude tools: NotebookEdit" in captured.err
+    assert not (project_root / ".codex").exists()
+    assert not codex_home.exists()
+
+
 def test_status_surfaces_os_errors_as_user_facing_errors(
     make_project,
     make_plugin_version,
@@ -346,6 +419,103 @@ def test_status_surfaces_os_errors_as_user_facing_errors(
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "Error: boom" in captured.err
+
+
+def test_status_json_reports_invalid_translation_diagnostics(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+    capsys,
+):
+    """`status --json` reports invalid agent translation state instead of pending changes."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        agent_names=("broken",),
+    )
+    (version_dir / "agents" / "broken.md").write_text(
+        "---\n"
+        "name: broken\n"
+        "description: Review\n"
+        "tools:\n"
+        "  - NotebookEdit\n"
+        "  - Read\n"
+        "---\n\n"
+        "Prompt body.\n"
+    )
+
+    exit_code = cli.main(
+        [
+            "status",
+            "--json",
+            "--project",
+            str(project_root),
+            "--cache-dir",
+            str(cache_root),
+            "--codex-home",
+            str(tmp_path / "codex-home"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert payload["status"] == "invalid"
+    assert payload["pending_change_count"] == 0
+    assert payload["diagnostics"] == [
+        {
+            "agent_name": "broken",
+            "kind": "unsupported_agent_tools",
+            "message": f"{version_dir / 'agents' / 'broken.md'}: unsupported Claude tools: NotebookEdit",
+            "source_path": str(version_dir / "agents" / "broken.md"),
+            "unsupported_tools": ["NotebookEdit"],
+        }
+    ]
+
+
+def test_validate_succeeds_when_unsupported_agent_is_excluded(
+    make_project,
+    make_plugin_version,
+    capsys,
+):
+    """Excluded unsupported agents no longer block generation commands."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        agent_names=("broken", "reviewer"),
+    )
+    (version_dir / "agents" / "broken.md").write_text(
+        "---\n"
+        "name: broken\n"
+        "description: Review\n"
+        "tools:\n"
+        "  - NotebookEdit\n"
+        "---\n\n"
+        "Prompt body.\n"
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nPrompt body.\n"
+    )
+
+    exit_code = cli.main(
+        [
+            "validate",
+            "--project",
+            str(project_root),
+            "--cache-dir",
+            str(cache_root),
+            "--exclude-agent",
+            "market/prompt-engineer/broken",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "GENERATED_ROLES: 1" in captured.out
 
 
 def test_status_cli_reports_pending_and_json(make_project, make_plugin_version, tmp_path: Path, capsys):

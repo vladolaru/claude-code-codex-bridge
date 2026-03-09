@@ -15,9 +15,11 @@ from cc_codex_bridge.render_codex_config import (
 )
 from cc_codex_bridge.translate_agents import (
     _parse_frontmatter_lines,
+    format_agent_translation_diagnostics,
     parse_markdown_with_frontmatter,
     translate_tools,
     translate_installed_agents,
+    translate_installed_agents_with_diagnostics,
 )
 
 def test_translate_installed_agents_generates_deterministic_roles(make_plugin_version):
@@ -260,6 +262,41 @@ def test_translate_installed_agents_requires_name_and_description(make_plugin_ve
     (version_dir / "agents" / "broken.md").write_text("---\nname: broken\n---\n")
 
     with pytest.raises(TranslationError, match="missing required description"):
+        translate_installed_agents(discover_latest_plugins(cache_root))
+
+
+def test_translate_installed_agents_reports_unsupported_tools(make_plugin_version):
+    """Unsupported Claude tools become explicit diagnostics and strict translation errors."""
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "test-plugin",
+        "1.0.0",
+        agent_names=("broken",),
+    )
+    (version_dir / "agents" / "broken.md").write_text(
+        "---\n"
+        "name: broken\n"
+        "description: Review\n"
+        "tools:\n"
+        "  - Read\n"
+        "  - NotebookEdit\n"
+        "  - Bash\n"
+        "---\n\n"
+        "Prompt body.\n"
+    )
+
+    result = translate_installed_agents_with_diagnostics(discover_latest_plugins(cache_root))
+
+    assert result.roles == ()
+    assert len(result.diagnostics) == 1
+    assert result.diagnostics[0].source_path == version_dir / "agents" / "broken.md"
+    assert result.diagnostics[0].agent_name == "broken"
+    assert result.diagnostics[0].unsupported_tools == ("NotebookEdit",)
+    assert "unsupported Claude tools: NotebookEdit" in format_agent_translation_diagnostics(
+        result.diagnostics
+    )
+
+    with pytest.raises(TranslationError, match="unsupported Claude tools: NotebookEdit"):
         translate_installed_agents(discover_latest_plugins(cache_root))
 
 

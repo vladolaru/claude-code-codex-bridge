@@ -258,7 +258,7 @@ Current tool translation table:
 - `Bash` -> `bash`
 - `WebSearch` -> `web_search`
 
-Unknown Claude tools are ignored, not preserved.
+Unsupported Claude tools are hard diagnostics. They invalidate agent generation for that run instead of being silently dropped.
 
 The frontmatter parser is intentionally minimal and supports the shapes used by current test fixtures and known docs:
 
@@ -391,6 +391,7 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
 
 - `validate`
   - run discovery, translation, and rendering in memory
+  - fail non-zero on unsupported-agent diagnostics
   - print a summary
 - `reconcile --dry-run`
   - compute reconcile changes without writing
@@ -401,10 +402,13 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
 - `status`
   - compute reconcile changes without writing
   - report `in_sync` vs `pending_changes`
+  - report `invalid` when agent translation contains unsupported Claude tools
   - report categorized project-file vs skill create/update/remove changes
+  - include agent translation diagnostics in both text and JSON output when invalid
   - report effective excluded plugin/skill/agent ids
   - support JSON output with `--json`
 - `reconcile`
+  - fail before any writes on unsupported-agent diagnostics
   - apply the desired state to disk
   - print summary and applied changes
 
@@ -501,7 +505,7 @@ These are current implemented simplifications, not necessarily permanent design 
 - only installed Claude plugins are inputs
 - user-level Claude skills and agents are described in the repo docs but are not yet implemented as a discovered input source in the current codebase
 - agent model mapping is fixed to one default Codex model
-- unknown Claude tools are dropped rather than preserved or warned on
+- unsupported Claude tools are hard errors rather than being preserved or partially translated
 - frontmatter parsing is custom and intentionally narrow
 - generated Codex config is inline rather than split across multiple files
 - exclusion ids are exact-match identifiers, not wildcard/glob patterns

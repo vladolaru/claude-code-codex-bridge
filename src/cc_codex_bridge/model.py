@@ -163,6 +163,23 @@ class GeneratedAgentRole:
 
 
 @dataclass(frozen=True)
+class AgentTranslationDiagnostic:
+    """One agent translation diagnostic that invalidates generation."""
+
+    source_path: Path
+    agent_name: str
+    unsupported_tools: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AgentTranslationResult:
+    """Agent translation result plus any hard diagnostics."""
+
+    roles: tuple[GeneratedAgentRole, ...]
+    diagnostics: tuple[AgentTranslationDiagnostic, ...]
+
+
+@dataclass(frozen=True)
 class GeneratedSkillFile:
     """One file that will be materialized inside a generated Codex skill."""
 

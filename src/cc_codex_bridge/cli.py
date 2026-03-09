@@ -35,7 +35,10 @@ from cc_codex_bridge.reconcile import (
     reconcile_desired_state,
 )
 from cc_codex_bridge.render_codex_config import render_inline_codex_config, render_prompt_files
-from cc_codex_bridge.translate_agents import translate_installed_agents
+from cc_codex_bridge.translate_agents import (
+    format_agent_translation_diagnostics,
+    translate_installed_agents_with_diagnostics,
+)
 from cc_codex_bridge.translate_skills import translate_installed_skills
 
 
@@ -170,7 +173,22 @@ def main(argv: list[str] | None = None) -> int:
         )
         result, exclusion_report = apply_sync_exclusions(result, exclusions)
         shim_decision = plan_claude_shim(result.project)
-        roles = translate_installed_agents(result.plugins)
+    except (DiscoveryError, TranslationError, ReconcileError, OSError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        agent_result = translate_installed_agents_with_diagnostics(result.plugins)
+        if agent_result.diagnostics:
+            if args.command == "status":
+                if args.json:
+                    print(format_status_json(None, exclusion_report, diagnostics=agent_result.diagnostics))
+                else:
+                    print(format_status_report(None, exclusion_report, diagnostics=agent_result.diagnostics))
+                return 0
+            raise TranslationError(format_agent_translation_diagnostics(agent_result.diagnostics))
+
+        roles = agent_result.roles
         skills = translate_installed_skills(result.plugins)
         prompt_files = render_prompt_files(roles)
         rendered_config = render_inline_codex_config(roles)
@@ -182,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
             skills,
             codex_home=args.codex_home,
         )
-    except (DiscoveryError, TranslationError, ReconcileError, OSError) as exc:
+    except (TranslationError, ReconcileError, OSError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
@@ -305,20 +323,44 @@ def _print_summary(
         print(f"EXCLUDED_AGENT: {agent_id}")
 
 
-def _build_status_payload(report, exclusion_report: ExclusionReport) -> dict[str, object]:
+def _build_status_payload(
+    report,
+    exclusion_report: ExclusionReport,
+    *,
+    diagnostics=None,
+) -> dict[str, object]:
     """Build a stable status payload from reconcile diff output."""
     categorized_changes: dict[str, dict[str, list[str]]] = {
         "project_files": {"create": [], "update": [], "remove": []},
         "skills": {"create": [], "update": [], "remove": []},
     }
-    for change in report.changes:
-        category = "skills" if change.resource_kind == "skill" else "project_files"
-        categorized_changes[category][change.kind].append(str(change.path))
+    pending_change_count = 0
+    status = "invalid" if diagnostics else "in_sync"
+
+    if diagnostics:
+        rendered_diagnostics = [
+            {
+                "kind": "unsupported_agent_tools",
+                "source_path": str(diagnostic.source_path),
+                "agent_name": diagnostic.agent_name,
+                "unsupported_tools": list(diagnostic.unsupported_tools),
+                "message": format_agent_translation_diagnostics((diagnostic,)),
+            }
+            for diagnostic in diagnostics
+        ]
+    else:
+        rendered_diagnostics = []
+        for change in report.changes:
+            category = "skills" if change.resource_kind == "skill" else "project_files"
+            categorized_changes[category][change.kind].append(str(change.path))
+        pending_change_count = len(report.changes)
+        status = "in_sync" if not report.changes else "pending_changes"
 
     return {
-        "status": "in_sync" if not report.changes else "pending_changes",
-        "pending_change_count": len(report.changes),
+        "status": status,
+        "pending_change_count": pending_change_count,
         "categorized_changes": categorized_changes,
+        "diagnostics": rendered_diagnostics,
         "excluded": {
             "plugins": list(exclusion_report.plugins),
             "skills": list(exclusion_report.skills),
@@ -327,14 +369,18 @@ def _build_status_payload(report, exclusion_report: ExclusionReport) -> dict[str
     }
 
 
-def format_status_json(report, exclusion_report: ExclusionReport) -> str:
+def format_status_json(report, exclusion_report: ExclusionReport, *, diagnostics=None) -> str:
     """Render status output as deterministic JSON."""
-    return json.dumps(_build_status_payload(report, exclusion_report), indent=2, sort_keys=True)
+    return json.dumps(
+        _build_status_payload(report, exclusion_report, diagnostics=diagnostics),
+        indent=2,
+        sort_keys=True,
+    )
 
 
-def format_status_report(report, exclusion_report: ExclusionReport) -> str:
+def format_status_report(report, exclusion_report: ExclusionReport, *, diagnostics=None) -> str:
     """Render status output as human-readable text."""
-    payload = _build_status_payload(report, exclusion_report)
+    payload = _build_status_payload(report, exclusion_report, diagnostics=diagnostics)
     categorized = payload["categorized_changes"]
     project_files = categorized["project_files"]
     skills = categorized["skills"]
@@ -360,6 +406,8 @@ def format_status_report(report, exclusion_report: ExclusionReport) -> str:
             f"agents={len(payload['excluded']['agents'])}"
         ),
     ]
+    for diagnostic in payload["diagnostics"]:
+        lines.append(f"DIAGNOSTIC: {diagnostic['message']}")
     for path in project_files["create"]:
         lines.append(f"PROJECT_FILE_CREATE: {path}")
     for path in project_files["update"]:

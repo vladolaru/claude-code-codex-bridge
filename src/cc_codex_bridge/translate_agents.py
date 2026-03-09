@@ -8,7 +8,13 @@ from pathlib import Path
 import re
 from typing import Iterable
 
-from cc_codex_bridge.model import GeneratedAgentRole, InstalledPlugin, TranslationError
+from cc_codex_bridge.model import (
+    AgentTranslationDiagnostic,
+    AgentTranslationResult,
+    GeneratedAgentRole,
+    InstalledPlugin,
+    TranslationError,
+)
 
 
 TOOL_TRANSLATIONS = {
@@ -48,7 +54,23 @@ def translate_installed_agents(
     default_model: str = "gpt-5.3-codex",
 ) -> tuple[GeneratedAgentRole, ...]:
     """Translate installed Claude agent files into Codex role definitions."""
+    result = translate_installed_agents_with_diagnostics(
+        plugins,
+        default_model=default_model,
+    )
+    if result.diagnostics:
+        raise TranslationError(format_agent_translation_diagnostics(result.diagnostics))
+    return result.roles
+
+
+def translate_installed_agents_with_diagnostics(
+    plugins: Iterable[InstalledPlugin],
+    *,
+    default_model: str = "gpt-5.3-codex",
+) -> AgentTranslationResult:
+    """Translate installed Claude agent files into Codex role definitions."""
     raw_roles: list[_RawAgentRole] = []
+    diagnostics: list[AgentTranslationDiagnostic] = []
 
     for plugin in plugins:
         for agent_path in plugin.agents:
@@ -63,6 +85,18 @@ def translate_installed_agents(
                     f"Agent missing required description frontmatter: {agent_path}"
                 )
 
+            translated_tools = translate_tools(frontmatter.get("tools"))
+            unsupported_tools = _unsupported_tools(frontmatter.get("tools"))
+            if unsupported_tools:
+                diagnostics.append(
+                    AgentTranslationDiagnostic(
+                        source_path=agent_path,
+                        agent_name=agent_name,
+                        unsupported_tools=unsupported_tools,
+                    )
+                )
+                continue
+
             raw_roles.append(
                 _RawAgentRole(
                     marketplace=plugin.marketplace,
@@ -70,7 +104,7 @@ def translate_installed_agents(
                     source_path=agent_path,
                     description=description,
                     original_model_hint=_optional_str(frontmatter.get("model")),
-                    tools=translate_tools(frontmatter.get("tools")),
+                    tools=translated_tools,
                     prompt_body=body.strip() + ("\n" if body.strip() else ""),
                     role_name_base=(
                         f"{_normalize_role_namespace(plugin.plugin_name, kind='plugin name')}_"
@@ -108,7 +142,10 @@ def translate_installed_agents(
         for raw_role in raw_roles
     ]
 
-    return tuple(sorted(roles, key=lambda role: role.role_name))
+    return AgentTranslationResult(
+        roles=tuple(sorted(roles, key=lambda role: role.role_name)),
+        diagnostics=tuple(sorted(diagnostics, key=lambda item: str(item.source_path))),
+    )
 
 
 def parse_markdown_with_frontmatter(path: Path) -> tuple[dict[str, object], str]:
@@ -149,6 +186,39 @@ def translate_tools(raw_tools: object) -> tuple[str, ...]:
             translated.append(translated_tool)
 
     return tuple(sorted(translated))
+
+
+def format_agent_translation_diagnostics(
+    diagnostics: Iterable[AgentTranslationDiagnostic],
+) -> str:
+    """Render agent translation diagnostics as stable human-readable lines."""
+    return "\n".join(
+        _format_agent_translation_diagnostic(diagnostic)
+        for diagnostic in diagnostics
+    )
+
+
+def _format_agent_translation_diagnostic(diagnostic: AgentTranslationDiagnostic) -> str:
+    """Render one agent translation diagnostic."""
+    return (
+        f"{diagnostic.source_path}: unsupported Claude tools: "
+        + ", ".join(diagnostic.unsupported_tools)
+    )
+
+
+def _unsupported_tools(raw_tools: object) -> tuple[str, ...]:
+    """Return unsupported Claude tools after validating the frontmatter shape."""
+    if raw_tools is None:
+        return ()
+    if not isinstance(raw_tools, list):
+        raise TranslationError(f"Agent tools must be a list, got: {type(raw_tools).__name__}")
+
+    unsupported = {
+        tool
+        for tool in raw_tools
+        if isinstance(tool, str) and tool not in TOOL_TRANSLATIONS
+    }
+    return tuple(sorted(unsupported))
 
 
 def _resolve_role_names(raw_roles: list[_RawAgentRole]) -> dict[int, str]:
