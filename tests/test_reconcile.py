@@ -10,6 +10,7 @@ import pytest
 import cc_codex_bridge.reconcile as reconcile_module
 from cc_codex_bridge.claude_shim import plan_claude_shim
 from cc_codex_bridge.discover import discover
+from cc_codex_bridge.locking import acquire_global_registry_lock, acquire_project_lock
 from cc_codex_bridge.model import ReconcileError
 from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
 from cc_codex_bridge.reconcile import (
@@ -275,6 +276,79 @@ def test_reconcile_adopts_existing_matching_skill_directory(
     assert _read_global_registry(codex_home)["skills"]["prompt-engineer-prompt-engineer"]["owners"] == [
         str(project_root)
     ]
+
+
+def test_reconcile_fails_when_project_lock_is_held(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Mutating reconcile fails cleanly when another process holds the project lock."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    desired = _build_desired(project_root, cache_root, tmp_path / "codex-home")
+
+    with acquire_project_lock(project_root):
+        with pytest.raises(ReconcileError, match="Project reconcile lock is already held"):
+            reconcile_desired_state(desired)
+
+
+def test_reconcile_fails_when_global_registry_lock_is_held(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Mutating reconcile fails cleanly when another process holds the registry lock."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    desired = _build_desired(project_root, cache_root, codex_home)
+
+    with acquire_global_registry_lock(codex_home):
+        with pytest.raises(ReconcileError, match="Global skill registry lock is already held"):
+            reconcile_desired_state(desired)
+
+
+def test_diff_remains_lock_free(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Read-only diff planning stays usable even while reconcile locks are held."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    desired = _build_desired(project_root, cache_root, codex_home)
+
+    with acquire_project_lock(project_root):
+        with acquire_global_registry_lock(codex_home):
+            report = diff_desired_state(desired)
+
+    assert any(change.resource_kind == "skill" for change in report.changes)
 
 
 def test_reconcile_fails_on_registry_conflict_for_same_skill_directory(

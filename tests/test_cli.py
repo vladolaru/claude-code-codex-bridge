@@ -11,6 +11,7 @@ import plistlib
 import pytest
 
 from cc_codex_bridge import cli
+from cc_codex_bridge.locking import acquire_global_registry_lock, acquire_project_lock
 
 
 def test_validate_runs_against_isolated_project_and_cache(
@@ -209,6 +210,90 @@ def test_reconcile_diff_requires_dry_run(make_project, make_plugin_version, tmp_
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "--diff requires --dry-run" in captured.err
+
+
+def test_status_and_validate_remain_usable_while_reconcile_locks_are_held(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+    capsys,
+):
+    """Read-only CLI commands do not require the reconcile locks."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nPrompt body.\n"
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+
+    with acquire_project_lock(project_root):
+        with acquire_global_registry_lock(codex_home):
+            validate_exit = cli.main(
+                ["validate", "--project", str(project_root), "--cache-dir", str(cache_root)]
+            )
+            validate_captured = capsys.readouterr()
+            status_exit = cli.main(
+                [
+                    "status",
+                    "--project",
+                    str(project_root),
+                    "--cache-dir",
+                    str(cache_root),
+                    "--codex-home",
+                    str(codex_home),
+                ]
+            )
+            status_captured = capsys.readouterr()
+
+    assert validate_exit == 0
+    assert "GENERATED_SKILLS: 1" in validate_captured.out
+    assert status_exit == 0
+    assert "STATUS: pending_changes" in status_captured.out
+
+
+def test_reconcile_cli_surfaces_project_lock_errors(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+    capsys,
+):
+    """CLI reconcile prints a clean lock error and exits non-zero."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+
+    with acquire_project_lock(project_root):
+        exit_code = cli.main(
+            [
+                "reconcile",
+                "--project",
+                str(project_root),
+                "--cache-dir",
+                str(cache_root),
+                "--codex-home",
+                str(tmp_path / "codex-home"),
+            ]
+        )
+        captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Project reconcile lock is already held" in captured.err
 
 
 def test_validate_surfaces_os_errors_as_user_facing_errors(monkeypatch: pytest.MonkeyPatch, capsys):

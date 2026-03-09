@@ -10,6 +10,7 @@ import tempfile
 from typing import Iterable
 from uuid import uuid4
 
+from cc_codex_bridge.locking import acquire_global_registry_lock, acquire_project_lock
 from cc_codex_bridge.model import (
     ClaudeShimDecision,
     DiscoveryResult,
@@ -174,30 +175,32 @@ def diff_desired_state(desired: DesiredState) -> ReconcileReport:
 
 def reconcile_desired_state(desired: DesiredState) -> ReconcileReport:
     """Apply the desired state to disk."""
-    previous_state = _load_previous_state(desired)
-    plan = _plan_mutations(desired, previous_state)
-    if not plan.changes and not plan.registry_writes and not _state_write_needed(desired):
-        return ReconcileReport(changes=(), applied=True)
+    with acquire_project_lock(desired.project_root):
+        with acquire_global_registry_lock(desired.codex_home):
+            previous_state = _load_previous_state(desired)
+            plan = _plan_mutations(desired, previous_state)
+            if not plan.changes and not plan.registry_writes and not _state_write_needed(desired):
+                return ReconcileReport(changes=(), applied=True)
 
-    pending_swaps, pending_removals, stage_roots = _stage_transaction(
-        desired,
-        plan.changes,
-        plan.registry_writes,
-    )
-    applied_changes: list[_AppliedChange] = []
-    try:
-        _apply_transaction(pending_swaps, pending_removals, applied_changes)
-    except Exception:
-        _rollback_transaction(applied_changes, desired)
-        raise
-    else:
-        _finalize_transaction(applied_changes, desired)
-    finally:
-        for stage_root in stage_roots:
-            if stage_root.exists():
-                shutil.rmtree(stage_root)
+            pending_swaps, pending_removals, stage_roots = _stage_transaction(
+                desired,
+                plan.changes,
+                plan.registry_writes,
+            )
+            applied_changes: list[_AppliedChange] = []
+            try:
+                _apply_transaction(pending_swaps, pending_removals, applied_changes)
+            except Exception:
+                _rollback_transaction(applied_changes, desired)
+                raise
+            else:
+                _finalize_transaction(applied_changes, desired)
+            finally:
+                for stage_root in stage_roots:
+                    if stage_root.exists():
+                        shutil.rmtree(stage_root)
 
-    return ReconcileReport(changes=plan.changes, applied=True)
+            return ReconcileReport(changes=plan.changes, applied=True)
 
 
 def format_change_report(report: ReconcileReport) -> str:

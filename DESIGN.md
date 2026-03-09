@@ -167,6 +167,8 @@ The global registry records:
 - existing skill directories are adopted only when their content matches the desired generated tree exactly
 - conflicting content for an existing generated skill directory is a hard error
 - generated skill directories are removed only when the global registry shows no remaining owners
+- mutating reconcile acquires a project lock first and a global registry lock second
+- read-only diff/status planning remains lock-free
 - stale managed outputs are removed when no longer desired
 - if the configured Codex home changes, the current project's old registry claims are released from the previous Codex home during the same reconcile
 - writes are staged and then swapped into place
@@ -355,17 +357,19 @@ Supported kinds in current reporting:
 
 ### Reconcile flow
 
-1. load previous state if present
-2. load the current global skill registry under the resolved Codex home
-3. compute desired project file changes
-4. compute desired generated-skill claims and reconcile changes from registry ownership plus on-disk content hashes
-5. validate ownership constraints
-6. stage all file and directory replacements in temporary roots
-7. write or update the project-local state file and any affected global registry files as part of the same transaction
-8. swap staged content into place
-9. remove stale managed outputs whose last owner released them
-10. finalize by deleting backups
-11. rollback if any apply step fails
+1. acquire the project reconcile lock under the target project root
+2. acquire the global generated-skill registry lock under the resolved Codex home
+3. load previous state if present
+4. load the current global skill registry under the resolved Codex home
+5. compute desired project file changes
+6. compute desired generated-skill claims and reconcile changes from registry ownership plus on-disk content hashes
+7. validate ownership constraints
+8. stage all file and directory replacements in temporary roots
+9. write or update the project-local state file and any affected global registry files as part of the same transaction
+10. swap staged content into place
+11. remove stale managed outputs whose last owner released them
+12. finalize by deleting backups
+13. rollback if any apply step fails
 
 ### Atomicity model
 
@@ -459,6 +463,8 @@ Current runtime module responsibilities:
   - Claude agent parsing and Codex role translation
 - `render_codex_config.py`
   - prompt-file and inline config rendering
+- `locking.py`
+  - exclusive project and global-registry lock helpers for mutating reconcile flows
 - `registry.py`
   - global generated-skill registry serialization and deterministic skill hashing
 - `translate_skills.py`
