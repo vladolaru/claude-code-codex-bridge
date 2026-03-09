@@ -150,8 +150,11 @@ The state file records:
 - the state file may only authorize generator-owned project paths: `CLAUDE.md`, `.codex/config.toml`, `.codex/claude-code-interop-state.json`, and `.codex/prompts/agents/*`
 - generated project-relative paths are normalized and may not use absolute paths or `..` traversal
 - corrupted or unexpected managed project paths in state are treated as a hard error
+- state is rejected if it belongs to a different project root than the current reconcile target
 - malformed state payload field types are treated as a hard error
+- malformed state path fields or managed Codex skill directory names are treated as a hard error
 - symlinked managed project targets are rejected
+- symlinked interop state files are rejected
 - non-directory skill targets are rejected
 - non-generated existing skill directories are rejected
 - stale managed outputs are removed when no longer desired
@@ -300,6 +303,7 @@ Current relocation behavior:
 - if plugin-root scripts are referenced this way, the plugin `scripts/` tree is vendored into `_plugin/scripts`
 - sibling skill references matching `../<skill>/...` are rewritten to `_plugin/skills/<skill>/...`
 - referenced sibling skill trees are vendored into `_plugin/skills/<skill>/`
+- missing referenced sibling skills are treated as a hard translation error
 
 ### Skill naming
 
@@ -407,6 +411,7 @@ All exclusion flags are repeatable. `.codex/bridge.toml` can define persistent e
 
 - all non-LaunchAgent commands share the same pipeline and error types
 - `DiscoveryError`, `TranslationError`, and `ReconcileError` are surfaced as user-facing errors with exit code `1`
+- filesystem `OSError` failures during CLI execution are also surfaced as user-facing errors with exit code `1`
 - successful commands return `0`
 
 ## 11. LaunchAgent Architecture

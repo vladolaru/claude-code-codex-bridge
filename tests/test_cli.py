@@ -211,6 +211,58 @@ def test_reconcile_diff_requires_dry_run(make_project, make_plugin_version, tmp_
     assert "--diff requires --dry-run" in captured.err
 
 
+def test_validate_surfaces_os_errors_as_user_facing_errors(monkeypatch: pytest.MonkeyPatch, capsys):
+    """Filesystem errors during pipeline setup should not escape as tracebacks."""
+    monkeypatch.setattr(cli, "discover", lambda **_kwargs: (_ for _ in ()).throw(PermissionError("boom")))
+
+    exit_code = cli.main(["validate", "--project", "."])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Error: boom" in captured.err
+
+
+def test_status_surfaces_os_errors_as_user_facing_errors(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+):
+    """Filesystem errors during diff/reporting should produce a clean CLI error."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    monkeypatch.setattr(
+        cli,
+        "diff_desired_state",
+        lambda _desired: (_ for _ in ()).throw(PermissionError("boom")),
+    )
+
+    exit_code = cli.main(
+        [
+            "status",
+            "--project",
+            str(project_root),
+            "--cache-dir",
+            str(cache_root),
+            "--codex-home",
+            str(tmp_path / "codex-home"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Error: boom" in captured.err
+
+
 def test_status_cli_reports_pending_and_json(make_project, make_plugin_version, tmp_path: Path, capsys):
     """`status` reports pending changes and supports JSON output."""
     project_root, _agents_md = make_project()

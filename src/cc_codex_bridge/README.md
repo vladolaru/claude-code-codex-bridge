@@ -17,7 +17,6 @@ The canonical authored sources stay outside this package:
 
 - project `AGENTS.md`
 - Claude Code plugin-provided skills and agents
-- user-level Claude Code skills and agents
 - related scripts, references, assets, and resources attached to that local Claude Code setup
 
 ## What It Generates

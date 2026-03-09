@@ -12,6 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Escaped generated `.codex/config.toml` string values correctly so multiline Claude frontmatter fields still produce valid TOML.
 - Validated interop state schema types and migrated managed skill directories correctly when `--codex-home` changes, preventing crashes and orphaned generated skills.
 - Tightened `CLAUDE.md` shim ownership checks so only the exact generated shim content is treated as generator-owned.
+- Rejected foreign or malformed reconcile state before stale skill cleanup, including invalid managed skill directory entries and symlinked state files.
+- Failed fast when a generated Codex skill references a missing sibling Claude skill instead of emitting a broken relocated path.
+- Surfaced filesystem `OSError` failures as user-facing CLI errors with exit code `1` instead of uncaught exceptions.
 
 ## [0.3.0] - 2026-03-05
 

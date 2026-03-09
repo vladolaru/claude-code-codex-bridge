@@ -202,14 +202,19 @@ def _rewrite_skill_content(
     needs_plugin_scripts = SKILL_BASE_PLUGIN_ROOT in rewritten
 
     sibling_skills = tuple(
-        sorted(
-            {
-                match.group("skill")
-                for match in SIBLING_SKILL_REF_RE.finditer(rewritten)
-                if (plugin_root / "skills" / match.group("skill")).is_dir()
-            }
-        )
+        sorted({match.group("skill") for match in SIBLING_SKILL_REF_RE.finditer(rewritten)})
     )
+    missing_sibling_skills = [
+        sibling_skill_name
+        for sibling_skill_name in sibling_skills
+        if not (plugin_root / "skills" / sibling_skill_name).is_dir()
+    ]
+    if missing_sibling_skills:
+        raise TranslationError(
+            "Skill references missing sibling skill(s): "
+            + ", ".join(missing_sibling_skills)
+        )
+
     for sibling_skill_name in sibling_skills:
         rewritten = rewritten.replace(
             f"../{sibling_skill_name}/",

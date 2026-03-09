@@ -40,12 +40,12 @@ class InteropState:
             raise ReconcileError(f"Unsupported interop state version in: {path}")
 
         return cls(
-            project_root=Path(_require_string(data, "project_root", path)),
-            codex_home=Path(_require_string(data, "codex_home", path)),
+            project_root=_read_absolute_path(data, "project_root", path),
+            codex_home=_read_absolute_path(data, "codex_home", path),
             selected_plugins=tuple(_read_string_list(data, "selected_plugins", path)),
             managed_project_files=tuple(_read_string_list(data, "managed_project_files", path)),
             managed_codex_skill_dirs=tuple(
-                _read_string_list(data, "managed_codex_skill_dirs", path)
+                _read_skill_dir_name_list(data, "managed_codex_skill_dirs", path)
             ),
             version=STATE_VERSION,
         )
@@ -71,9 +71,35 @@ def _require_string(data: dict[str, object], key: str, path: Path) -> str:
     return value
 
 
+def _read_absolute_path(data: dict[str, object], key: str, path: Path) -> Path:
+    """Read one required absolute path field from the state payload."""
+    value = Path(_require_string(data, key, path)).expanduser()
+    if not value.is_absolute():
+        raise ReconcileError(f"Invalid interop state file: {path}")
+    return value.resolve()
+
+
 def _read_string_list(data: dict[str, object], key: str, path: Path) -> list[str]:
     """Read one optional string-list field from the state payload."""
     value = data.get(key, [])
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         raise ReconcileError(f"Invalid interop state file: {path}")
     return value
+
+
+def _read_skill_dir_name_list(data: dict[str, object], key: str, path: Path) -> list[str]:
+    """Read one string-list field containing only plain skill directory names."""
+    return [_require_skill_dir_name(value, path) for value in _read_string_list(data, key, path)]
+
+
+def _require_skill_dir_name(value: str, path: Path) -> str:
+    """Validate one managed Codex skill directory name from the state payload."""
+    candidate = value.strip()
+    if not candidate:
+        raise ReconcileError(f"Invalid interop state file: {path}")
+
+    normalized = Path(candidate)
+    if normalized.is_absolute() or candidate != normalized.name or candidate in {".", ".."}:
+        raise ReconcileError(f"Invalid interop state file: {path}")
+
+    return candidate

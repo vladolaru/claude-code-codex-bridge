@@ -459,6 +459,74 @@ def test_reconcile_rejects_unexpected_managed_project_files_in_state(
     assert agents_md.exists()
 
 
+def test_reconcile_rejects_foreign_project_state(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """A copied state file from another project may not drive cleanup in this project."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    state_path = project_root / STATE_RELATIVE_PATH
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "project_root": str(tmp_path / "different-project"),
+                "codex_home": str(tmp_path / "codex-home"),
+                "selected_plugins": [],
+                "managed_project_files": [STATE_RELATIVE_PATH.as_posix()],
+                "managed_codex_skill_dirs": ["prompt-engineer-prompt-engineer"],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+    desired = _build_desired(project_root, cache_root, tmp_path / "codex-home")
+
+    with pytest.raises(ReconcileError, match="different project root"):
+        diff_desired_state(desired)
+
+
+def test_reconcile_rejects_symlinked_state_file(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """The interop state file itself may not be a symlink."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    state_path = project_root / STATE_RELATIVE_PATH
+    state_path.parent.mkdir(parents=True)
+    real_state = project_root / "real-state.json"
+    real_state.write_text("{}\n")
+    state_path.symlink_to(real_state)
+
+    desired = _build_desired(project_root, cache_root, tmp_path / "codex-home")
+
+    with pytest.raises(ReconcileError, match="symlinked interop state file"):
+        diff_desired_state(desired)
+
+
 def test_build_desired_state_rejects_prompt_paths_outside_project(
     make_project,
     make_plugin_version,

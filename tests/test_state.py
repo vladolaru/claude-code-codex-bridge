@@ -71,3 +71,40 @@ def test_interop_state_rejects_invalid_schema_shapes(tmp_path: Path):
 
     with pytest.raises(ReconcileError, match="Invalid interop state file"):
         InteropState.from_path(invalid)
+
+
+def test_interop_state_rejects_non_absolute_paths_and_non_name_skill_entries(tmp_path: Path):
+    """State path fields must be absolute and managed skill entries must be plain names."""
+    invalid_paths = tmp_path / "invalid-paths.json"
+    invalid_paths.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "project_root": "relative/project",
+                "codex_home": str(tmp_path / "codex-home"),
+                "selected_plugins": [],
+                "managed_project_files": [],
+                "managed_codex_skill_dirs": [],
+            }
+        )
+    )
+
+    with pytest.raises(ReconcileError, match="Invalid interop state file"):
+        InteropState.from_path(invalid_paths)
+
+    invalid_skill_dirs = tmp_path / "invalid-skill-dirs.json"
+    invalid_skill_dirs.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "project_root": str(tmp_path / "project"),
+                "codex_home": str(tmp_path / "codex-home"),
+                "selected_plugins": [],
+                "managed_project_files": [],
+                "managed_codex_skill_dirs": ["../escape"],
+            }
+        )
+    )
+
+    with pytest.raises(ReconcileError, match="Invalid interop state file"):
+        InteropState.from_path(invalid_skill_dirs)

@@ -182,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
             skills,
             codex_home=args.codex_home,
         )
-    except (DiscoveryError, TranslationError, ReconcileError) as exc:
+    except (DiscoveryError, TranslationError, ReconcileError, OSError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
@@ -226,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(format_status_report(report, exclusion_report))
             return 0
-    except ReconcileError as exc:
+    except (ReconcileError, OSError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
@@ -249,7 +249,7 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
             label=label,
             logs_dir=args.logs_dir,
         )
-    except ReconcileError as exc:
+    except (ReconcileError, OSError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 

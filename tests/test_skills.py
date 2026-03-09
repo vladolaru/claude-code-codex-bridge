@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from cc_codex_bridge.discover import discover_latest_plugins
+from cc_codex_bridge.model import TranslationError
 from cc_codex_bridge.translate_skills import (
     materialize_generated_skills,
     translate_installed_skills,
@@ -123,6 +126,27 @@ def test_translate_installed_skills_vendors_referenced_sibling_skills(
     assert (
         installed_root / "_plugin" / "skills" / "testing-patterns" / "references" / "test-philosophy.md"
     ).read_text() == "Behavior over implementation.\n"
+
+
+def test_translate_installed_skills_rejects_missing_sibling_skill_references(make_plugin_version):
+    """Relocated sibling-skill references must resolve to a real sibling skill."""
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "pirategoat-tools",
+        "1.0.0",
+        skill_names=("e2e-testing-patterns",),
+    )
+    e2e_skill_dir = version_dir / "skills" / "e2e-testing-patterns"
+    (e2e_skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: e2e-testing-patterns\n"
+        "description: E2E guidance\n"
+        "---\n\n"
+        "Read `../testing-patterns/references/test-philosophy.md` first.\n"
+    )
+
+    with pytest.raises(TranslationError, match="missing sibling skill"):
+        translate_installed_skills(discover_latest_plugins(cache_root))
 
 
 def test_translate_installed_skills_handles_name_and_directory_collisions(make_plugin_version):

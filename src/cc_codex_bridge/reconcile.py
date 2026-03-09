@@ -143,14 +143,14 @@ def build_desired_state(
 
 def diff_desired_state(desired: DesiredState) -> ReconcileReport:
     """Compare current outputs to desired state without writing."""
-    previous_state = InteropState.from_path(desired.state_path)
+    previous_state = _load_previous_state(desired)
     changes = _compute_changes(desired, previous_state)
     return ReconcileReport(changes=changes, applied=False)
 
 
 def reconcile_desired_state(desired: DesiredState) -> ReconcileReport:
     """Apply the desired state to disk."""
-    previous_state = InteropState.from_path(desired.state_path)
+    previous_state = _load_previous_state(desired)
     changes = _compute_changes(desired, previous_state)
     if not changes:
         _write_state_if_needed(desired, previous_state)
@@ -220,6 +220,12 @@ def _compute_changes(
     previous_state: InteropState | None,
 ) -> tuple[Change, ...]:
     """Compute file and directory changes, enforcing ownership safety."""
+    if previous_state is not None and previous_state.project_root != desired.project_root:
+        raise ReconcileError(
+            "Interop state belongs to a different project root: "
+            f"{previous_state.project_root}"
+        )
+
     project_file_map = dict(desired.project_files)
     managed_project_files = set(previous_state.managed_project_files) if previous_state else set()
     invalid_managed_paths = sorted(
@@ -331,6 +337,13 @@ def _atomic_write_file(path: Path, content: bytes) -> None:
         handle.write(content)
         temp_path = Path(handle.name)
     temp_path.replace(path)
+
+
+def _load_previous_state(desired: DesiredState) -> InteropState | None:
+    """Load state only from a regular file at the expected project path."""
+    if desired.state_path.is_symlink():
+        raise ReconcileError(f"Refusing to use symlinked interop state file: {desired.state_path}")
+    return InteropState.from_path(desired.state_path)
 
 
 def _project_relative(desired: DesiredState, path: Path) -> str:

@@ -7,7 +7,6 @@ This repository contains the `cc-codex-bridge` CLI. It reads the Claude Code set
 What it bridges:
 
 - installed Claude Code plugins
-- user-level Claude Code skills and agents that are part of the local Claude setup
 - shared project instructions rooted in `AGENTS.md`
 
 What it generates:
