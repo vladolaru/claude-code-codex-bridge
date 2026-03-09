@@ -8,6 +8,7 @@ import json
 import pytest
 
 from cc_codex_bridge.model import ReconcileError
+from cc_codex_bridge.registry import GlobalSkillEntry, GlobalSkillRegistry
 from cc_codex_bridge.state import InteropState
 
 
@@ -17,7 +18,6 @@ def test_interop_state_round_trips(tmp_path: Path):
     state = InteropState(
         project_root=tmp_path / "project",
         codex_home=tmp_path / "codex-home",
-        selected_plugins=("market/plugin@1.0.0",),
         managed_project_files=("CLAUDE.md", ".codex/config.toml"),
         managed_codex_skill_dirs=("plugin-skill",),
     )
@@ -26,7 +26,7 @@ def test_interop_state_round_trips(tmp_path: Path):
     loaded = InteropState.from_path(path)
 
     assert loaded == state
-    assert json.loads(state.to_json())["version"] == 1
+    assert json.loads(state.to_json())["version"] == 2
 
 
 def test_interop_state_handles_missing_invalid_and_unsupported_files(tmp_path: Path):
@@ -59,10 +59,9 @@ def test_interop_state_rejects_invalid_schema_shapes(tmp_path: Path):
     invalid.write_text(
         json.dumps(
             {
-                "version": 1,
+                "version": 2,
                 "project_root": 1,
                 "codex_home": str(tmp_path / "codex-home"),
-                "selected_plugins": ["market/plugin@1.0.0"],
                 "managed_project_files": [123],
                 "managed_codex_skill_dirs": [],
             }
@@ -79,10 +78,9 @@ def test_interop_state_rejects_non_absolute_paths_and_non_name_skill_entries(tmp
     invalid_paths.write_text(
         json.dumps(
             {
-                "version": 1,
+                "version": 2,
                 "project_root": "relative/project",
                 "codex_home": str(tmp_path / "codex-home"),
-                "selected_plugins": [],
                 "managed_project_files": [],
                 "managed_codex_skill_dirs": [],
             }
@@ -96,10 +94,9 @@ def test_interop_state_rejects_non_absolute_paths_and_non_name_skill_entries(tmp
     invalid_skill_dirs.write_text(
         json.dumps(
             {
-                "version": 1,
+                "version": 2,
                 "project_root": str(tmp_path / "project"),
                 "codex_home": str(tmp_path / "codex-home"),
-                "selected_plugins": [],
                 "managed_project_files": [],
                 "managed_codex_skill_dirs": ["../escape"],
             }
@@ -108,3 +105,62 @@ def test_interop_state_rejects_non_absolute_paths_and_non_name_skill_entries(tmp
 
     with pytest.raises(ReconcileError, match="Invalid interop state file"):
         InteropState.from_path(invalid_skill_dirs)
+
+
+def test_global_skill_registry_round_trips(tmp_path: Path):
+    """A valid global registry serializes and deserializes deterministically."""
+    path = tmp_path / "claude-code-interop-global-state.json"
+    registry = GlobalSkillRegistry(
+        skills={
+            "prompt-engineer-prompt-engineer": GlobalSkillEntry(
+                content_hash="sha256:abc123",
+                owners=(tmp_path / "project-b", tmp_path / "project-a"),
+            )
+        }
+    )
+    path.write_text(registry.to_json())
+
+    loaded = GlobalSkillRegistry.from_path(path)
+
+    assert loaded == GlobalSkillRegistry(
+        skills={
+            "prompt-engineer-prompt-engineer": GlobalSkillEntry(
+                content_hash="sha256:abc123",
+                owners=(tmp_path / "project-a", tmp_path / "project-b"),
+            )
+        }
+    )
+    assert json.loads(registry.to_json())["version"] == 1
+
+
+def test_global_skill_registry_rejects_invalid_schema(tmp_path: Path):
+    """Registry loading fails clearly for malformed content."""
+    missing = tmp_path / "missing.json"
+    assert GlobalSkillRegistry.from_path(missing) is None
+
+    invalid = tmp_path / "invalid.json"
+    invalid.write_text("{")
+    with pytest.raises(ReconcileError, match="Invalid global skill registry file"):
+        GlobalSkillRegistry.from_path(invalid)
+
+    unsupported = tmp_path / "unsupported.json"
+    unsupported.write_text(json.dumps({"version": 999, "skills": {}}))
+    with pytest.raises(ReconcileError, match="Unsupported global skill registry version"):
+        GlobalSkillRegistry.from_path(unsupported)
+
+    invalid_schema = tmp_path / "invalid-schema.json"
+    invalid_schema.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "skills": {
+                    "../escape": {
+                        "content_hash": "not-a-hash",
+                        "owners": ["relative/project"],
+                    }
+                },
+            }
+        )
+    )
+    with pytest.raises(ReconcileError, match="Invalid global skill registry file"):
+        GlobalSkillRegistry.from_path(invalid_schema)

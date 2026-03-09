@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 
 from cc_codex_bridge.discover import discover_latest_plugins
-from cc_codex_bridge.model import TranslationError
+from cc_codex_bridge.model import GeneratedSkill, GeneratedSkillFile, TranslationError
+from cc_codex_bridge.registry import hash_generated_skill
 from cc_codex_bridge.translate_skills import (
     materialize_generated_skills,
     translate_installed_skills,
@@ -182,3 +183,78 @@ def test_translate_installed_skills_handles_name_and_directory_collisions(make_p
         "alpha-shared-plugin-review",
         "beta-shared-plugin-review",
     ]
+
+
+def test_hash_generated_skill_is_order_independent():
+    """Skill hashing depends on normalized content, not caller-provided file order."""
+    first = GeneratedSkill(
+        marketplace="market",
+        plugin_name="prompt-engineer",
+        source_path=Path("/tmp/source"),
+        install_dir_name="prompt-engineer-prompt-engineer",
+        original_skill_name="prompt-engineer",
+        codex_skill_name="prompt-engineer-prompt-engineer",
+        files=(
+            GeneratedSkillFile(
+                relative_path=Path("scripts") / "check.sh",
+                content=b"#!/bin/sh\necho ok\n",
+                mode=0o755,
+            ),
+            GeneratedSkillFile(
+                relative_path=Path("SKILL.md"),
+                content=b"---\nname: prompt-engineer-prompt-engineer\n---\n",
+                mode=0o644,
+            ),
+        ),
+    )
+    second = GeneratedSkill(
+        marketplace=first.marketplace,
+        plugin_name=first.plugin_name,
+        source_path=first.source_path,
+        install_dir_name=first.install_dir_name,
+        original_skill_name=first.original_skill_name,
+        codex_skill_name=first.codex_skill_name,
+        files=tuple(reversed(first.files)),
+    )
+
+    assert hash_generated_skill(first) == hash_generated_skill(second)
+
+
+def test_hash_generated_skill_tracks_bytes_and_mode():
+    """Skill hashing changes when either file content or executable mode changes."""
+    base = GeneratedSkill(
+        marketplace="market",
+        plugin_name="prompt-engineer",
+        source_path=Path("/tmp/source"),
+        install_dir_name="prompt-engineer-prompt-engineer",
+        original_skill_name="prompt-engineer",
+        codex_skill_name="prompt-engineer-prompt-engineer",
+        files=(
+            GeneratedSkillFile(relative_path=Path("SKILL.md"), content=b"alpha\n", mode=0o644),
+        ),
+    )
+    changed_bytes = GeneratedSkill(
+        marketplace=base.marketplace,
+        plugin_name=base.plugin_name,
+        source_path=base.source_path,
+        install_dir_name=base.install_dir_name,
+        original_skill_name=base.original_skill_name,
+        codex_skill_name=base.codex_skill_name,
+        files=(
+            GeneratedSkillFile(relative_path=Path("SKILL.md"), content=b"beta\n", mode=0o644),
+        ),
+    )
+    changed_mode = GeneratedSkill(
+        marketplace=base.marketplace,
+        plugin_name=base.plugin_name,
+        source_path=base.source_path,
+        install_dir_name=base.install_dir_name,
+        original_skill_name=base.original_skill_name,
+        codex_skill_name=base.codex_skill_name,
+        files=(
+            GeneratedSkillFile(relative_path=Path("SKILL.md"), content=b"alpha\n", mode=0o755),
+        ),
+    )
+
+    assert hash_generated_skill(base) != hash_generated_skill(changed_bytes)
+    assert hash_generated_skill(base) != hash_generated_skill(changed_mode)

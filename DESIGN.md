@@ -139,7 +139,6 @@ The state file records:
 
 - project root
 - Codex home path
-- selected plugin identities
 - managed project-relative file paths
 - managed Codex skill directory names
 - state version
@@ -327,7 +326,6 @@ Reconcile lives in `src/cc_codex_bridge/reconcile.py`.
 - Codex home
 - project files with desired bytes
 - generated skills
-- selected plugins
 - path to the state file
 
 ### Diff model
@@ -447,6 +445,8 @@ Current runtime module responsibilities:
   - Claude agent parsing and Codex role translation
 - `render_codex_config.py`
   - prompt-file and inline config rendering
+- `registry.py`
+  - global generated-skill registry serialization and deterministic skill hashing
 - `translate_skills.py`
   - Codex skill translation and skill tree materialization helpers
 - `reconcile.py`

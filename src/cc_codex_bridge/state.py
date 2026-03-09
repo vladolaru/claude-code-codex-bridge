@@ -9,16 +9,15 @@ from pathlib import Path
 from cc_codex_bridge.model import ReconcileError
 
 
-STATE_VERSION = 1
+STATE_VERSION = 2
 
 
 @dataclass(frozen=True)
 class InteropState:
-    """Recorded ownership and source metadata for generated artifacts."""
+    """Recorded ownership metadata for generated artifacts."""
 
     project_root: Path
     codex_home: Path
-    selected_plugins: tuple[str, ...]
     managed_project_files: tuple[str, ...]
     managed_codex_skill_dirs: tuple[str, ...]
     version: int = STATE_VERSION
@@ -42,7 +41,6 @@ class InteropState:
         return cls(
             project_root=_read_absolute_path(data, "project_root", path),
             codex_home=_read_absolute_path(data, "codex_home", path),
-            selected_plugins=tuple(_read_string_list(data, "selected_plugins", path)),
             managed_project_files=tuple(_read_string_list(data, "managed_project_files", path)),
             managed_codex_skill_dirs=tuple(
                 _read_skill_dir_name_list(data, "managed_codex_skill_dirs", path)
@@ -56,7 +54,6 @@ class InteropState:
             "version": self.version,
             "project_root": str(self.project_root),
             "codex_home": str(self.codex_home),
-            "selected_plugins": list(self.selected_plugins),
             "managed_project_files": list(self.managed_project_files),
             "managed_codex_skill_dirs": list(self.managed_codex_skill_dirs),
         }

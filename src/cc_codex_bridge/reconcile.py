@@ -34,7 +34,6 @@ class DesiredState:
     codex_home: Path
     project_files: tuple[tuple[Path, bytes], ...]
     skills: tuple[GeneratedSkill, ...]
-    selected_plugins: tuple[str, ...]
     state_path: Path
 
 
@@ -126,17 +125,11 @@ def build_desired_state(
     _ensure_unique_project_file_paths(project_files)
     _ensure_unique_skill_names(skills_tuple)
 
-    selected_plugins = tuple(
-        f"{plugin.marketplace}/{plugin.plugin_name}@{plugin.version_text}"
-        for plugin in discovery.plugins
-    )
-
     return DesiredState(
         project_root=project_root,
         codex_home=codex_home_path,
         project_files=tuple(project_files),
         skills=skills_tuple,
-        selected_plugins=selected_plugins,
         state_path=project_root / STATE_RELATIVE_PATH,
     )
 
@@ -392,7 +385,6 @@ def _build_state_record(desired: DesiredState) -> InteropState:
     return InteropState(
         project_root=desired.project_root,
         codex_home=desired.codex_home,
-        selected_plugins=desired.selected_plugins,
         managed_project_files=managed_project_files,
         managed_codex_skill_dirs=tuple(sorted(skill.install_dir_name for skill in desired.skills)),
     )
