@@ -7,13 +7,13 @@ from pathlib import Path
 import re
 from typing import Iterable
 
+import cc_codex_bridge.frontmatter as frontmatter
 from cc_codex_bridge.model import (
     GeneratedSkill,
     GeneratedSkillFile,
     InstalledPlugin,
     TranslationError,
 )
-from cc_codex_bridge.translate_agents import parse_markdown_with_frontmatter
 
 
 SIBLING_SKILL_REF_RE = re.compile(r"\.\./(?P<skill>[A-Za-z0-9._-]+)/")
@@ -105,8 +105,8 @@ def materialize_generated_skills(
 
 def _read_required_skill_name(skill_md_path: Path) -> str:
     """Read the canonical skill name from SKILL.md frontmatter."""
-    frontmatter, _ = parse_markdown_with_frontmatter(skill_md_path)
-    skill_name = str(frontmatter.get("name", "")).strip()
+    parsed_frontmatter, _ = frontmatter.parse_markdown_with_frontmatter(skill_md_path)
+    skill_name = str(parsed_frontmatter.get("name", "")).strip()
     if not skill_name:
         raise TranslationError(f"Skill missing required name frontmatter: {skill_md_path}")
     return skill_name

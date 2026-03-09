@@ -8,15 +8,17 @@ import tomllib
 import pytest
 
 from cc_codex_bridge.discover import discover_latest_plugins
+from cc_codex_bridge.frontmatter import (
+    parse_frontmatter_lines,
+    parse_markdown_with_frontmatter,
+)
 from cc_codex_bridge.model import InstalledPlugin, SemVer, TranslationError
 from cc_codex_bridge.render_codex_config import (
     render_inline_codex_config,
     render_prompt_files,
 )
 from cc_codex_bridge.translate_agents import (
-    _parse_frontmatter_lines,
     format_agent_translation_diagnostics,
-    parse_markdown_with_frontmatter,
     translate_tools,
     translate_installed_agents,
     translate_installed_agents_with_diagnostics,
@@ -366,13 +368,13 @@ def test_translate_tools_rejects_invalid_shapes():
 def test_parse_frontmatter_lines_rejects_invalid_indentation():
     """Low-level frontmatter parser rejects invalid list and indentation shapes."""
     with pytest.raises(TranslationError, match="List item found before a frontmatter key"):
-        _parse_frontmatter_lines(["- Read"])
+        parse_frontmatter_lines(["- Read"])
 
     with pytest.raises(TranslationError, match="Unexpected indented frontmatter line"):
-        _parse_frontmatter_lines([" name: bad"])
+        parse_frontmatter_lines([" name: bad"])
 
     with pytest.raises(TranslationError, match="Mixed scalar and list values"):
-        _parse_frontmatter_lines(["name: reviewer", "  - Read"])
+        parse_frontmatter_lines(["name: reviewer", "  - Read"])
 
     with pytest.raises(TranslationError, match="Invalid frontmatter line"):
-        _parse_frontmatter_lines(["broken"])
+        parse_frontmatter_lines(["broken"])

@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 from typing import Iterable
 
+import cc_codex_bridge.frontmatter as frontmatter
 from cc_codex_bridge.model import (
     AgentTranslationDiagnostic,
     AgentTranslationResult,
@@ -74,19 +75,19 @@ def translate_installed_agents_with_diagnostics(
 
     for plugin in plugins:
         for agent_path in plugin.agents:
-            frontmatter, body = parse_markdown_with_frontmatter(agent_path)
-            agent_name = str(frontmatter.get("name", "")).strip()
+            parsed_frontmatter, body = frontmatter.parse_markdown_with_frontmatter(agent_path)
+            agent_name = str(parsed_frontmatter.get("name", "")).strip()
             if not agent_name:
                 raise TranslationError(f"Agent missing required name frontmatter: {agent_path}")
 
-            description = str(frontmatter.get("description", "")).strip()
+            description = str(parsed_frontmatter.get("description", "")).strip()
             if not description:
                 raise TranslationError(
                     f"Agent missing required description frontmatter: {agent_path}"
                 )
 
-            translated_tools = translate_tools(frontmatter.get("tools"))
-            unsupported_tools = _unsupported_tools(frontmatter.get("tools"))
+            translated_tools = translate_tools(parsed_frontmatter.get("tools"))
+            unsupported_tools = _unsupported_tools(parsed_frontmatter.get("tools"))
             if unsupported_tools:
                 diagnostics.append(
                     AgentTranslationDiagnostic(
@@ -103,7 +104,7 @@ def translate_installed_agents_with_diagnostics(
                     plugin_name=plugin.plugin_name,
                     source_path=agent_path,
                     description=description,
-                    original_model_hint=_optional_str(frontmatter.get("model")),
+                    original_model_hint=_optional_str(parsed_frontmatter.get("model")),
                     tools=translated_tools,
                     prompt_body=body.strip() + ("\n" if body.strip() else ""),
                     role_name_base=(
@@ -148,28 +149,6 @@ def translate_installed_agents_with_diagnostics(
     )
 
 
-def parse_markdown_with_frontmatter(path: Path) -> tuple[dict[str, object], str]:
-    """Parse simple YAML-like frontmatter plus markdown body."""
-    content = path.read_text()
-    if not content.startswith("---\n"):
-        return {}, content
-
-    lines = content.splitlines()
-    end_index = None
-    for index in range(1, len(lines)):
-        if lines[index].strip() == "---":
-            end_index = index
-            break
-
-    if end_index is None:
-        raise TranslationError(f"Unclosed frontmatter in: {path}")
-
-    frontmatter_lines = lines[1:end_index]
-    body = "\n".join(lines[end_index + 1 :])
-    frontmatter = _parse_frontmatter_lines(frontmatter_lines)
-    return frontmatter, body
-
-
 def translate_tools(raw_tools: object) -> tuple[str, ...]:
     """Translate Claude tool names into Codex tool identifiers."""
     if raw_tools is None:
@@ -186,6 +165,10 @@ def translate_tools(raw_tools: object) -> tuple[str, ...]:
             translated.append(translated_tool)
 
     return tuple(sorted(translated))
+
+
+parse_markdown_with_frontmatter = frontmatter.parse_markdown_with_frontmatter
+_parse_frontmatter_lines = frontmatter.parse_frontmatter_lines
 
 
 def format_agent_translation_diagnostics(
@@ -297,130 +280,6 @@ def _assign_unique_name(
 def _raw_role_sort_key(raw_role: _RawAgentRole) -> tuple[str, str, str]:
     """Stable ordering for marketplace-based collision resolution."""
     return (raw_role.marketplace, raw_role.plugin_name, raw_role.source_path.name)
-
-
-def _parse_frontmatter_lines(lines: list[str]) -> dict[str, object]:
-    """Parse the YAML frontmatter shapes used by current Claude and Codex assets."""
-    result: dict[str, object] = {}
-    current_key: str | None = None
-    index = 0
-
-    while index < len(lines):
-        line = lines[index].rstrip()
-        if not line.strip():
-            index += 1
-            continue
-
-        indent = len(line) - len(line.lstrip(" "))
-        stripped = line.lstrip()
-        if stripped.startswith("- "):
-            if current_key is None:
-                raise TranslationError("List item found before a frontmatter key")
-            current_value = result.setdefault(current_key, [])
-            if not isinstance(current_value, list):
-                raise TranslationError(f"Mixed scalar and list values for key: {current_key}")
-            current_value.append(stripped[2:].strip())
-            index += 1
-            continue
-
-        if indent:
-            if current_key is None:
-                raise TranslationError(f"Unexpected indented frontmatter line: {line}")
-            current_value = result.get(current_key)
-            if isinstance(current_value, str):
-                block_lines, next_index = _consume_block_scalar(lines, index, indent)
-                separator = "\n" if "\n" in current_value else " "
-                joined = separator.join(part.strip() for part in block_lines if part.strip())
-                result[current_key] = f"{current_value}{separator}{joined}".strip()
-                index = next_index
-                continue
-            if isinstance(current_value, dict):
-                nested_key, nested_value = _parse_key_value(stripped)
-                current_value[nested_key] = nested_value
-                index += 1
-                continue
-            raise TranslationError(f"Unexpected indented frontmatter line: {line}")
-
-        if ":" not in line:
-            raise TranslationError(f"Invalid frontmatter line: {line}")
-
-        key, value = _parse_key_value(line)
-        current_key = key
-        if value in {">", "|"}:
-            block_lines, next_index = _consume_block_scalar(lines, index + 1, min_indent=1)
-            result[current_key] = _join_block_scalar(block_lines, folded=(value == ">"))
-            index = next_index
-            continue
-        if value:
-            result[current_key] = value
-        else:
-            next_line = _next_nonempty_line(lines, index + 1)
-            if next_line is None:
-                result[current_key] = []
-            else:
-                next_indent = len(next_line) - len(next_line.lstrip(" "))
-                next_stripped = next_line.lstrip()
-                if next_indent == 0:
-                    result[current_key] = []
-                elif next_stripped.startswith("- "):
-                    result[current_key] = []
-                else:
-                    result[current_key] = {}
-        index += 1
-
-    return result
-
-
-def _parse_key_value(line: str) -> tuple[str, str]:
-    """Parse one `key: value` line."""
-    if ":" not in line:
-        raise TranslationError(f"Invalid frontmatter line: {line}")
-    key, value = line.split(":", 1)
-    return key.strip(), value.strip()
-
-
-def _next_nonempty_line(lines: list[str], start_index: int) -> str | None:
-    """Return the next non-empty line after `start_index`."""
-    for index in range(start_index, len(lines)):
-        if lines[index].strip():
-            return lines[index]
-    return None
-
-
-def _consume_block_scalar(
-    lines: list[str],
-    start_index: int,
-    min_indent: int,
-) -> tuple[list[str], int]:
-    """Consume consecutive indented lines for a block scalar."""
-    collected: list[str] = []
-    index = start_index
-    base_indent: int | None = None
-
-    while index < len(lines):
-        raw_line = lines[index]
-        if not raw_line.strip():
-            collected.append("")
-            index += 1
-            continue
-
-        indent = len(raw_line) - len(raw_line.lstrip(" "))
-        if indent < min_indent:
-            break
-        if base_indent is None:
-            base_indent = indent
-        collected.append(raw_line[base_indent:].rstrip())
-        index += 1
-
-    return collected, index
-
-
-def _join_block_scalar(lines: list[str], *, folded: bool) -> str:
-    """Join YAML-like block scalar lines."""
-    if folded:
-        joined = " ".join(part.strip() for part in lines if part.strip())
-        return joined.strip()
-    return "\n".join(lines).rstrip()
 
 
 def _optional_str(value: object) -> str | None:

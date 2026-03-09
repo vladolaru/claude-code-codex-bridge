@@ -260,7 +260,9 @@ Current tool translation table:
 
 Unsupported Claude tools are hard diagnostics. They invalidate agent generation for that run instead of being silently dropped.
 
-The frontmatter parser is intentionally minimal and supports the shapes used by current test fixtures and known docs:
+Frontmatter parsing is shared through `src/cc_codex_bridge/frontmatter.py`.
+
+The parser is intentionally minimal and supports the shapes used by current test fixtures and known docs:
 
 - scalar values
 - list values
@@ -463,8 +465,10 @@ Current runtime module responsibilities:
   - core dataclasses and domain-specific error types
 - `claude_shim.py`
   - `CLAUDE.md` ownership-safe shim planning
+- `frontmatter.py`
+  - dependency-free shared frontmatter parsing for Claude/Codex markdown assets
 - `translate_agents.py`
-  - Claude agent parsing and Codex role translation
+  - Claude agent translation and unsupported-tool diagnostics
 - `render_codex_config.py`
   - prompt-file and inline config rendering
 - `locking.py`

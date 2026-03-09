@@ -6,9 +6,11 @@ from pathlib import Path
 
 import pytest
 
+import cc_codex_bridge.frontmatter as frontmatter_module
 from cc_codex_bridge.discover import discover_latest_plugins
 from cc_codex_bridge.model import GeneratedSkill, GeneratedSkillFile, TranslationError
 from cc_codex_bridge.registry import hash_generated_skill
+from cc_codex_bridge.translate_agents import translate_installed_agents
 from cc_codex_bridge.translate_skills import (
     materialize_generated_skills,
     translate_installed_skills,
@@ -258,3 +260,40 @@ def test_hash_generated_skill_tracks_bytes_and_mode():
 
     assert hash_generated_skill(base) != hash_generated_skill(changed_bytes)
     assert hash_generated_skill(base) != hash_generated_skill(changed_mode)
+
+
+def test_agent_and_skill_translation_share_the_same_frontmatter_entrypoint(
+    make_plugin_version,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Both translation modules call through the shared frontmatter parser module."""
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+        agent_names=("reviewer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nPrompt body.\n"
+    )
+    parsed_paths: list[Path] = []
+    original_parse = frontmatter_module.parse_markdown_with_frontmatter
+
+    def record_parse(path: Path):
+        parsed_paths.append(path)
+        return original_parse(path)
+
+    monkeypatch.setattr(frontmatter_module, "parse_markdown_with_frontmatter", record_parse)
+    plugins = discover_latest_plugins(cache_root)
+
+    translate_installed_agents(plugins)
+    translate_installed_skills(plugins)
+
+    assert parsed_paths == [
+        version_dir / "agents" / "reviewer.md",
+        version_dir / "skills" / "prompt-engineer" / "SKILL.md",
+    ]
