@@ -13,7 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Simplified the project-local interop state so it now tracks only project-local managed files plus the last reconciled Codex home.
 - Added project-first/global-second reconcile locking for mutating runs so concurrent reconciles fail fast instead of racing shared project or Codex-home writes.
 - Changed unsupported Claude agent tools from silent drops into hard diagnostics, with `status` now reporting an explicit `invalid` state instead of pretending the project only has pending changes.
-- Extracted the YAML-like frontmatter parser into a shared dependency-free module used by both agent and skill translation, preserving the existing supported syntax surface.
+- Switched shared agent and skill frontmatter parsing to PyYAML safe loading for frontmatter blocks, while keeping strict post-parse validation and explicit errors for unsupported runtime shapes.
 - Removed the old test-only generated-skill materialization helper so reconcile remains the single production path that writes installed Codex skill trees.
 
 ### Fixed

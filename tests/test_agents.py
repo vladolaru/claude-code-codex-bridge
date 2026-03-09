@@ -223,7 +223,7 @@ def test_translate_installed_agents_disambiguates_cross_marketplace_collisions(
 
 
 def test_parse_markdown_with_frontmatter_supports_folded_scalars_and_nested_maps(tmp_path: Path):
-    """The shared frontmatter parser accepts valid YAML-like multiline fields."""
+    """The shared frontmatter parser accepts folded scalars and nested YAML mappings."""
     path = tmp_path / "skill.md"
     path.write_text(
         "---\n"
@@ -232,7 +232,10 @@ def test_parse_markdown_with_frontmatter_supports_folded_scalars_and_nested_maps
         "  Shared dex logic for project discovery,\n"
         "  CLAUDE.md budget management, and promotion flow.\n"
         "metadata:\n"
-        "  short-description: Shared dex guidance\n"
+        "  prompts:\n"
+        "    short-description: Shared dex guidance\n"
+        "    references:\n"
+        "      guide: references/guide.md\n"
         "---\n\n"
         "Body.\n"
     )
@@ -244,7 +247,12 @@ def test_parse_markdown_with_frontmatter_supports_folded_scalars_and_nested_maps
         "Shared dex logic for project discovery, "
         "CLAUDE.md budget management, and promotion flow."
     )
-    assert frontmatter["metadata"] == {"short-description": "Shared dex guidance"}
+    assert frontmatter["metadata"] == {
+        "prompts": {
+            "short-description": "Shared dex guidance",
+            "references": {"guide": "references/guide.md"},
+        }
+    }
     assert body == "\nBody."
 
 
@@ -353,6 +361,20 @@ def test_parse_markdown_with_frontmatter_handles_literal_blocks_and_errors(tmp_p
         parse_markdown_with_frontmatter(unclosed)
 
 
+def test_parse_markdown_with_frontmatter_rejects_malformed_yaml_syntax(tmp_path: Path):
+    """Malformed YAML frontmatter surfaces as a translation error."""
+    broken = tmp_path / "broken.md"
+    broken.write_text(
+        "---\n"
+        "name: [reviewer\n"
+        "description: Review\n"
+        "---\n"
+    )
+
+    with pytest.raises(TranslationError, match="Malformed frontmatter YAML"):
+        parse_markdown_with_frontmatter(broken)
+
+
 def test_translate_tools_rejects_invalid_shapes():
     """Tool translation handles invalid non-list or non-string inputs."""
     assert translate_tools(None) == ()
@@ -392,16 +414,53 @@ def test_translate_installed_agents_accepts_quoted_fields_and_inline_tool_lists(
     assert roles[0].tools == ("read", "write")
 
 
-def test_parse_frontmatter_lines_rejects_invalid_indentation():
-    """Low-level frontmatter parser rejects invalid list and indentation shapes."""
-    with pytest.raises(TranslationError, match="List item found before a frontmatter key"):
+def test_parse_frontmatter_lines_accepts_quoted_strings_and_inline_lists():
+    """Low-level frontmatter parsing keeps quoted strings and inline lists usable."""
+    parsed = parse_frontmatter_lines(
+        [
+            'name: "reviewer"',
+            "description: 'Review: carefully'",
+            "tools: [Write, Read]",
+        ]
+    )
+
+    assert parsed == {
+        "name": "reviewer",
+        "description": "Review: carefully",
+        "tools": ["Write", "Read"],
+    }
+
+
+def test_parse_frontmatter_lines_normalizes_yaml_scalars_to_strings():
+    """Low-level frontmatter parsing keeps scalar runtime values string-shaped."""
+    parsed = parse_frontmatter_lines(
+        [
+            "model: true",
+            "priority: 3",
+            "released: 2026-03-09",
+        ]
+    )
+
+    assert parsed == {
+        "model": "true",
+        "priority": "3",
+        "released": "2026-03-09",
+    }
+
+
+def test_parse_frontmatter_lines_rejects_non_mapping_payloads():
+    """Low-level frontmatter parsing rejects unsupported top-level YAML payloads."""
+    with pytest.raises(TranslationError, match="Frontmatter must be a YAML mapping"):
         parse_frontmatter_lines(["- Read"])
 
-    with pytest.raises(TranslationError, match="Unexpected indented frontmatter line"):
-        parse_frontmatter_lines([" name: bad"])
+    with pytest.raises(TranslationError, match="Frontmatter must be a YAML mapping"):
+        parse_frontmatter_lines(["reviewer"])
 
-    with pytest.raises(TranslationError, match="Mixed scalar and list values"):
-        parse_frontmatter_lines(["name: reviewer", "  - Read"])
 
-    with pytest.raises(TranslationError, match="Invalid frontmatter line"):
-        parse_frontmatter_lines(["broken"])
+def test_parse_frontmatter_lines_rejects_unsupported_yaml_runtime_shapes():
+    """Low-level frontmatter validation rejects non-string/list/mapping YAML values."""
+    with pytest.raises(
+        TranslationError,
+        match="Unsupported frontmatter value at frontmatter.options: set",
+    ):
+        parse_frontmatter_lines(["options: !!set {Read: null}"])

@@ -263,16 +263,16 @@ Unsupported Claude tools are hard diagnostics. They invalidate agent generation 
 
 Frontmatter parsing is shared through `src/cc_codex_bridge/frontmatter.py`.
 
-The parser is intentionally minimal and supports the shapes used by current test fixtures and known docs:
+The parser extracts only frontmatter blocks and parses them with PyYAML's safe
+loader.
 
-- scalar values
-- quoted scalar values
-- list values
-- simple inline lists
-- simple nested maps
-- folded and literal block scalars
+Post-parse validation keeps the runtime contract narrow:
 
-It is not a general YAML parser.
+- top-level frontmatter must be a mapping
+- mapping keys must be strings
+- accepted values are strings plus nested lists/mappings composed of the same
+  allowed value shapes
+- malformed YAML and unsupported runtime shapes are hard translation errors
 
 ### 8.3 Codex config rendering
 
@@ -472,7 +472,8 @@ Current runtime module responsibilities:
 - `claude_shim.py`
   - `CLAUDE.md` ownership-safe shim planning
 - `frontmatter.py`
-  - dependency-free shared frontmatter parsing for Claude/Codex markdown assets
+  - safe YAML frontmatter parsing plus strict runtime-shape validation for
+    Claude/Codex markdown assets
 - `text.py`
   - shared UTF-8 text loading helpers for runtime-managed text files
 - `translate_agents.py`
@@ -518,7 +519,8 @@ These are current implemented simplifications, not necessarily permanent design 
 - user-level Claude skills and agents are described in the repo docs but are not yet implemented as a discovered input source in the current codebase
 - agent model mapping is fixed to one default Codex model
 - unsupported Claude tools are hard errors rather than being preserved or partially translated
-- frontmatter parsing is custom and intentionally narrow
+- frontmatter parsing uses safe YAML loading for frontmatter blocks plus strict
+  post-parse validation of supported runtime shapes
 - generated Codex config is inline rather than split across multiple files
 - exclusion ids are exact-match identifiers, not wildcard/glob patterns
 - LaunchAgent scheduling is supported; watcher mode is not

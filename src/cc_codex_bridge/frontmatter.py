@@ -1,28 +1,59 @@
-"""Dependency-free frontmatter parsing shared by agent and skill translation.
+"""YAML-backed frontmatter parsing shared by agent and skill translation.
 
-Supported shapes:
-- scalar values
-- list values
-- simple nested maps
-- folded and literal block scalars
+Frontmatter blocks are parsed with PyYAML's safe loader, then normalized into
+the narrow runtime shapes the bridge supports:
 
-Not supported:
-- arbitrary YAML features
-- dependency-backed parsing
-- silent widening of accepted syntax without tests
+- top-level mappings
+- string keys
+- string values
+- nested lists and mappings composed of those same value shapes
+
+Unsupported runtime shapes are rejected explicitly instead of being widened
+silently after parsing.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-import json
+
+import yaml
 
 from cc_codex_bridge.model import TranslationError
 from cc_codex_bridge.text import read_utf8_text
 
 
+class _FrontmatterSafeLoader(yaml.SafeLoader):
+    """Safe YAML loader with block-scalar normalization for frontmatter."""
+
+
+def _construct_frontmatter_scalar(
+    _loader: _FrontmatterSafeLoader,
+    node: yaml.nodes.ScalarNode,
+) -> str:
+    """Normalize YAML scalars into the bridge's historical string runtime shape."""
+    value = node.value
+    if node.style in {"|", ">"}:
+        return value.rstrip("\n")
+    return value
+
+
+for _scalar_tag in (
+    "tag:yaml.org,2002:str",
+    "tag:yaml.org,2002:null",
+    "tag:yaml.org,2002:bool",
+    "tag:yaml.org,2002:int",
+    "tag:yaml.org,2002:float",
+    "tag:yaml.org,2002:timestamp",
+    "tag:yaml.org,2002:binary",
+):
+    _FrontmatterSafeLoader.add_constructor(
+        _scalar_tag,
+        _construct_frontmatter_scalar,
+    )
+
+
 def parse_markdown_with_frontmatter(path: Path) -> tuple[dict[str, object], str]:
-    """Parse simple YAML-like frontmatter plus markdown body."""
+    """Parse YAML frontmatter plus markdown body."""
     content = read_utf8_text(path, label="frontmatter file", error_type=TranslationError)
     if not content.startswith("---\n"):
         return {}, content
@@ -44,191 +75,128 @@ def parse_markdown_with_frontmatter(path: Path) -> tuple[dict[str, object], str]
 
 
 def parse_frontmatter_lines(lines: list[str]) -> dict[str, object]:
-    """Parse the YAML frontmatter shapes used by current Claude and Codex assets."""
-    result: dict[str, object] = {}
-    current_key: str | None = None
-    index = 0
+    """Parse frontmatter lines with safe YAML and normalize accepted shapes."""
+    frontmatter_text = "\n".join(lines)
+    if not frontmatter_text.strip():
+        return {}
 
-    while index < len(lines):
-        line = lines[index].rstrip()
-        if not line.strip():
-            index += 1
-            continue
+    try:
+        parsed = yaml.load(frontmatter_text, Loader=_FrontmatterSafeLoader)
+    except yaml.YAMLError as exc:
+        raise TranslationError(_format_yaml_error(exc)) from exc
 
-        indent = len(line) - len(line.lstrip(" "))
-        stripped = line.lstrip()
-        if stripped.startswith("- "):
-            if current_key is None:
-                raise TranslationError("List item found before a frontmatter key")
-            current_value = result.setdefault(current_key, [])
-            if not isinstance(current_value, list):
-                raise TranslationError(f"Mixed scalar and list values for key: {current_key}")
-            current_value.append(stripped[2:].strip())
-            index += 1
-            continue
-
-        if indent:
-            if current_key is None:
-                raise TranslationError(f"Unexpected indented frontmatter line: {line}")
-            current_value = result.get(current_key)
-            if isinstance(current_value, str):
-                block_lines, next_index = _consume_block_scalar(lines, index, indent)
-                separator = "\n" if "\n" in current_value else " "
-                joined = separator.join(part.strip() for part in block_lines if part.strip())
-                result[current_key] = f"{current_value}{separator}{joined}".strip()
-                index = next_index
-                continue
-            if isinstance(current_value, dict):
-                nested_key, nested_value = _parse_key_value(stripped)
-                current_value[nested_key] = nested_value
-                index += 1
-                continue
-            raise TranslationError(f"Unexpected indented frontmatter line: {line}")
-
-        if ":" not in line:
-            raise TranslationError(f"Invalid frontmatter line: {line}")
-
-        raw_value = line.split(":", 1)[1].strip()
-        key, value = _parse_key_value(line)
-        current_key = key
-        if isinstance(value, str) and value in {">", "|"}:
-            block_lines, next_index = _consume_block_scalar(lines, index + 1, min_indent=1)
-            result[current_key] = _join_block_scalar(block_lines, folded=(value == ">"))
-            index = next_index
-            continue
-        if raw_value:
-            result[current_key] = value
-        else:
-            next_line = _next_nonempty_line(lines, index + 1)
-            if next_line is None:
-                result[current_key] = []
-            else:
-                next_indent = len(next_line) - len(next_line.lstrip(" "))
-                next_stripped = next_line.lstrip()
-                if next_indent == 0:
-                    result[current_key] = []
-                elif next_stripped.startswith("- "):
-                    result[current_key] = []
-                else:
-                    result[current_key] = {}
-        index += 1
-
-    return result
+    return _normalize_frontmatter_mapping(parsed)
 
 
-def _parse_key_value(line: str) -> tuple[str, object]:
-    """Parse one `key: value` line."""
-    if ":" not in line:
-        raise TranslationError(f"Invalid frontmatter line: {line}")
-    key, value = line.split(":", 1)
-    return key.strip(), _parse_scalar_value(value.strip())
+def _format_yaml_error(exc: yaml.YAMLError) -> str:
+    """Render a stable user-facing YAML parse error."""
+    problem = getattr(exc, "problem", None)
+    mark = getattr(exc, "problem_mark", None)
+
+    if problem and mark is not None:
+        return (
+            f"Malformed frontmatter YAML: {problem} "
+            f"at line {mark.line + 1}, column {mark.column + 1}"
+        )
+    if problem:
+        return f"Malformed frontmatter YAML: {problem}"
+    return "Malformed frontmatter YAML"
 
 
-def _next_nonempty_line(lines: list[str], start_index: int) -> str | None:
-    """Return the next non-empty line after `start_index`."""
-    for index in range(start_index, len(lines)):
-        if lines[index].strip():
-            return lines[index]
-    return None
+def _normalize_frontmatter_mapping(value: object) -> dict[str, object]:
+    """Normalize the parsed top-level mapping into bridge-supported values."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise TranslationError(
+            f"Frontmatter must be a YAML mapping, got: {type(value).__name__}"
+        )
+
+    normalized: dict[str, object] = {}
+    for key, nested_value in value.items():
+        normalized_key = _normalize_frontmatter_key(key, path="frontmatter")
+        normalized[normalized_key] = _normalize_frontmatter_value(
+            nested_value,
+            path=f"frontmatter.{normalized_key}",
+            active_nodes=set(),
+        )
+    return normalized
 
 
-def _consume_block_scalar(
-    lines: list[str],
-    start_index: int,
-    min_indent: int,
-) -> tuple[list[str], int]:
-    """Consume consecutive indented lines for a block scalar."""
-    collected: list[str] = []
-    index = start_index
-    base_indent: int | None = None
-    while index < len(lines):
-        raw_line = lines[index]
-        if not raw_line.strip():
-            collected.append("")
-            index += 1
-            continue
+def _normalize_frontmatter_value(
+    value: object,
+    *,
+    path: str,
+    active_nodes: set[int],
+) -> object:
+    """Reject runtime shapes outside the bridge's supported frontmatter subset."""
+    if isinstance(value, str):
+        return value
 
-        indent = len(raw_line) - len(raw_line.lstrip(" "))
-        if indent < min_indent:
-            break
-        if base_indent is None:
-            base_indent = indent
-        collected.append(raw_line[base_indent:].rstrip())
-        index += 1
+    if isinstance(value, list):
+        return _normalize_frontmatter_list(value, path=path, active_nodes=active_nodes)
 
-    return collected, index
+    if isinstance(value, dict):
+        return _normalize_frontmatter_nested_mapping(
+            value,
+            path=path,
+            active_nodes=active_nodes,
+        )
+
+    raise TranslationError(
+        f"Unsupported frontmatter value at {path}: {type(value).__name__}"
+    )
 
 
-def _join_block_scalar(lines: list[str], *, folded: bool) -> str:
-    """Join YAML-like block scalar lines."""
-    if folded:
-        joined = " ".join(part.strip() for part in lines if part.strip())
-        return joined.strip()
-    return "\n".join(lines).rstrip()
+def _normalize_frontmatter_list(
+    value: list[object],
+    *,
+    path: str,
+    active_nodes: set[int],
+) -> list[object]:
+    """Normalize one nested frontmatter list with recursion protection."""
+    descended_nodes = _descend(active_nodes, value)
+    return [
+        _normalize_frontmatter_value(
+            item,
+            path=f"{path}[{index}]",
+            active_nodes=descended_nodes,
+        )
+        for index, item in enumerate(value)
+    ]
 
 
-def _parse_scalar_value(value: str) -> object:
-    """Parse one scalar or inline list value from minimal YAML-like frontmatter."""
-    if not value:
-        return ""
-    if value.startswith("[") and value.endswith("]"):
-        return _parse_inline_list(value)
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        return _parse_quoted_scalar(value)
-    return value
+def _normalize_frontmatter_nested_mapping(
+    value: dict[object, object],
+    *,
+    path: str,
+    active_nodes: set[int],
+) -> dict[str, object]:
+    """Normalize one nested frontmatter mapping with recursion protection."""
+    descended_nodes = _descend(active_nodes, value)
+    normalized: dict[str, object] = {}
+    for nested_key, nested_value in value.items():
+        normalized_key = _normalize_frontmatter_key(nested_key, path=path)
+        normalized[normalized_key] = _normalize_frontmatter_value(
+            nested_value,
+            path=f"{path}.{normalized_key}",
+            active_nodes=descended_nodes,
+        )
+    return normalized
 
 
-def _parse_inline_list(value: str) -> list[object]:
-    """Parse a simple inline list such as `[Read, "Write"]`."""
-    inner = value[1:-1].strip()
-    if not inner:
-        return []
-
-    items: list[object] = []
-    token: list[str] = []
-    quote_char: str | None = None
-    index = 0
-    while index < len(inner):
-        char = inner[index]
-        if quote_char is not None:
-            token.append(char)
-            if char == quote_char:
-                if quote_char == "'" and index + 1 < len(inner) and inner[index + 1] == "'":
-                    token.append(inner[index + 1])
-                    index += 2
-                    continue
-                quote_char = None
-            index += 1
-            continue
-
-        if char in {"'", '"'}:
-            quote_char = char
-            token.append(char)
-            index += 1
-            continue
-
-        if char == ",":
-            items.append(_parse_scalar_value("".join(token).strip()))
-            token = []
-            index += 1
-            continue
-
-        token.append(char)
-        index += 1
-
-    if quote_char is not None:
-        raise TranslationError(f"Unclosed quoted frontmatter value: {value}")
-
-    items.append(_parse_scalar_value("".join(token).strip()))
-    return items
+def _normalize_frontmatter_key(key: object, *, path: str) -> str:
+    """Require all frontmatter mapping keys to be strings."""
+    if not isinstance(key, str):
+        raise TranslationError(
+            f"Frontmatter keys must be strings at {path}, got: {key!r}"
+        )
+    return key
 
 
-def _parse_quoted_scalar(value: str) -> str:
-    """Parse one quoted scalar value."""
-    if value.startswith('"'):
-        try:
-            return json.loads(value)
-        except json.JSONDecodeError:
-            return value[1:-1]
-
-    return value[1:-1].replace("''", "'")
+def _descend(active_nodes: set[int], value: object) -> set[int]:
+    """Track active container nodes so recursive YAML aliases fail clearly."""
+    value_id = id(value)
+    if value_id in active_nodes:
+        raise TranslationError("Recursive frontmatter aliases are not supported")
+    return active_nodes | {value_id}
