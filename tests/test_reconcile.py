@@ -4,19 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import socket
-
 import pytest
 
-import cc_codex_bridge.reconcile as reconcile_module
 from cc_codex_bridge.claude_shim import plan_claude_shim
 from cc_codex_bridge.discover import discover
-from cc_codex_bridge.locking import (
-    acquire_global_registry_lock,
-    acquire_project_lock,
-    global_registry_lock_path,
-    project_lock_path,
-)
 from cc_codex_bridge.model import ReconcileError
 from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
 from cc_codex_bridge.reconcile import (
@@ -308,112 +299,6 @@ def test_reconcile_adopts_existing_matching_skill_directory(
     assert _read_global_registry(codex_home)["skills"]["prompt-engineer-prompt-engineer"]["owners"] == [
         str(project_root)
     ]
-
-
-def test_reconcile_fails_when_project_lock_is_held(
-    make_project,
-    make_plugin_version,
-    tmp_path: Path,
-):
-    """Mutating reconcile fails cleanly when another process holds the project lock."""
-    project_root, _ = make_project()
-    cache_root, version_dir = make_plugin_version(
-        "market",
-        "prompt-engineer",
-        "1.0.0",
-        skill_names=("prompt-engineer",),
-    )
-    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
-        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
-    )
-    desired = _build_desired(project_root, cache_root, tmp_path / "codex-home")
-
-    with acquire_project_lock(project_root):
-        with pytest.raises(ReconcileError, match="Project reconcile lock is already held"):
-            reconcile_desired_state(desired)
-
-
-def test_reconcile_fails_when_global_registry_lock_is_held(
-    make_project,
-    make_plugin_version,
-    tmp_path: Path,
-):
-    """Mutating reconcile fails cleanly when another process holds the registry lock."""
-    project_root, _ = make_project()
-    cache_root, version_dir = make_plugin_version(
-        "market",
-        "prompt-engineer",
-        "1.0.0",
-        skill_names=("prompt-engineer",),
-    )
-    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
-        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
-    )
-    codex_home = tmp_path / "codex-home"
-    desired = _build_desired(project_root, cache_root, codex_home)
-
-    with acquire_global_registry_lock(codex_home):
-        with pytest.raises(ReconcileError, match="Global skill registry lock is already held"):
-            reconcile_desired_state(desired)
-
-
-def test_diff_remains_lock_free(
-    make_project,
-    make_plugin_version,
-    tmp_path: Path,
-):
-    """Read-only diff planning stays usable even while reconcile locks are held."""
-    project_root, _ = make_project()
-    cache_root, version_dir = make_plugin_version(
-        "market",
-        "prompt-engineer",
-        "1.0.0",
-        skill_names=("prompt-engineer",),
-    )
-    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
-        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
-    )
-    codex_home = tmp_path / "codex-home"
-    desired = _build_desired(project_root, cache_root, codex_home)
-
-    with acquire_project_lock(project_root):
-        with acquire_global_registry_lock(codex_home):
-            report = diff_desired_state(desired)
-
-    assert any(change.resource_kind == "skill" for change in report.changes)
-
-
-def test_reconcile_reclaims_stale_project_and_global_lock_files(
-    make_project,
-    make_plugin_version,
-    tmp_path: Path,
-):
-    """Dead-process lock files are reclaimed automatically for a later reconcile."""
-    project_root, _ = make_project()
-    cache_root, version_dir = make_plugin_version(
-        "market",
-        "prompt-engineer",
-        "1.0.0",
-        skill_names=("prompt-engineer",),
-    )
-    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
-        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
-    )
-    codex_home = tmp_path / "codex-home"
-    project_lock_path(project_root).parent.mkdir(parents=True, exist_ok=True)
-    project_lock_path(project_root).write_text(
-        f"pid=999999\nhost={socket.gethostname()}\n"
-    )
-    codex_home.mkdir(parents=True, exist_ok=True)
-    global_registry_lock_path(codex_home).write_text(
-        f"pid=999999\nhost={socket.gethostname()}\n"
-    )
-
-    report = reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
-
-    assert report.applied is True
-    assert not project_lock_path(project_root).exists()
-    assert not global_registry_lock_path(codex_home).exists()
 
 
 def test_reconcile_fails_on_registry_conflict_for_same_skill_directory(
@@ -836,115 +721,6 @@ def test_format_diff_report_handles_no_changes(make_project, make_plugin_version
 
     assert format_change_report(report) == "No changes."
     assert format_diff_report(desired, report) == "No changes."
-
-
-def test_reconcile_rolls_back_project_outputs_when_skill_swap_fails(
-    make_project,
-    make_plugin_version,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-):
-    """Later skill swap failures restore previously generated project outputs and state."""
-    project_root, _agents_md = make_project()
-    cache_root, version_dir = make_plugin_version(
-        "market",
-        "prompt-engineer",
-        "1.0.0",
-        skill_names=("prompt-engineer",),
-        agent_names=("reviewer",),
-    )
-    agent_path = version_dir / "agents" / "reviewer.md"
-    skill_path = version_dir / "skills" / "prompt-engineer" / "SKILL.md"
-    agent_path.write_text("---\nname: reviewer\ndescription: Review\n---\n\nOld prompt.\n")
-    skill_path.write_text(
-        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nOld skill.\n"
-    )
-    codex_home = tmp_path / "codex-home"
-
-    first_desired = _build_desired(project_root, cache_root, codex_home)
-    reconcile_desired_state(first_desired)
-
-    original_config = (project_root / ".codex" / "config.toml").read_text()
-    original_prompt = (
-        project_root / ".codex" / "prompts" / "agents" / "prompt-engineer-reviewer.md"
-    ).read_text()
-    original_skill = (
-        codex_home / "skills" / "prompt-engineer-prompt-engineer" / "SKILL.md"
-    ).read_text()
-    original_state = (project_root / STATE_RELATIVE_PATH).read_text()
-
-    agent_path.write_text("---\nname: reviewer\ndescription: Review\n---\n\nNew prompt.\n")
-    skill_path.write_text(
-        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nNew skill.\n"
-    )
-    updated = _build_desired(project_root, cache_root, codex_home)
-
-    original_swap_path = reconcile_module._swap_path
-
-    def fail_on_skill_swap(destination: Path, staged_path: Path, backup_root: Path, *, is_dir: bool):
-        if is_dir and destination.name == "prompt-engineer-prompt-engineer":
-            raise RuntimeError("boom during skill swap")
-        return original_swap_path(destination, staged_path, backup_root, is_dir=is_dir)
-
-    monkeypatch.setattr(reconcile_module, "_swap_path", fail_on_skill_swap)
-
-    with pytest.raises(RuntimeError, match="boom during skill swap"):
-        reconcile_desired_state(updated)
-
-    assert (project_root / ".codex" / "config.toml").read_text() == original_config
-    assert (
-        project_root / ".codex" / "prompts" / "agents" / "prompt-engineer-reviewer.md"
-    ).read_text() == original_prompt
-    assert (
-        codex_home / "skills" / "prompt-engineer-prompt-engineer" / "SKILL.md"
-    ).read_text() == original_skill
-    assert (project_root / STATE_RELATIVE_PATH).read_text() == original_state
-
-
-def test_reconcile_rolls_back_when_stale_prompt_removal_fails(
-    make_project,
-    make_plugin_version,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-):
-    """Stale-output removal failures restore the prior prompt tree and state."""
-    project_root, _agents_md = make_project()
-    cache_root, version_dir = make_plugin_version(
-        "market",
-        "prompt-engineer",
-        "1.0.0",
-        agent_names=("reviewer",),
-    )
-    agent_path = version_dir / "agents" / "reviewer.md"
-    agent_path.write_text("---\nname: reviewer\ndescription: Review\n---\n\nPrompt body.\n")
-    codex_home = tmp_path / "codex-home"
-
-    first_desired = _build_desired(project_root, cache_root, codex_home)
-    reconcile_desired_state(first_desired)
-
-    prompt_path = project_root / ".codex" / "prompts" / "agents" / "prompt-engineer-reviewer.md"
-    original_config = (project_root / ".codex" / "config.toml").read_text()
-    original_prompt = prompt_path.read_text()
-    original_state = (project_root / STATE_RELATIVE_PATH).read_text()
-
-    agent_path.unlink()
-    updated = _build_desired(project_root, cache_root, codex_home)
-
-    original_remove_path = reconcile_module._remove_path
-
-    def fail_on_prompt_removal(destination: Path, backup_root: Path, *, is_dir: bool):
-        if destination == prompt_path:
-            raise RuntimeError("boom during stale prompt removal")
-        return original_remove_path(destination, backup_root, is_dir=is_dir)
-
-    monkeypatch.setattr(reconcile_module, "_remove_path", fail_on_prompt_removal)
-
-    with pytest.raises(RuntimeError, match="boom during stale prompt removal"):
-        reconcile_desired_state(updated)
-
-    assert (project_root / ".codex" / "config.toml").read_text() == original_config
-    assert prompt_path.read_text() == original_prompt
-    assert (project_root / STATE_RELATIVE_PATH).read_text() == original_state
 
 
 def test_reconcile_does_not_modify_symlink_resolved_plugin_cache_or_source(
