@@ -130,9 +130,6 @@ def build_desired_state(
             )
         )
 
-    _ensure_unique_project_file_paths(project_files)
-    _ensure_unique_skill_names(skills_tuple)
-
     return DesiredState(
         project_root=project_root,
         codex_home=codex_home_path,
@@ -218,22 +215,18 @@ def format_diff_report(desired: DesiredState, report: ReconcileReport) -> str:
         return "No changes."
 
     lines = [format_change_report(report)]
+    desired_map = dict(desired.project_files)
     for change in report.changes:
         if change.kind not in {"create", "update"}:
             continue
         if change.path.suffix not in {".md", ".toml", ".json"}:
-            continue
-        desired_bytes = _lookup_desired_file_bytes(desired, change.path)
-        if desired_bytes is None:
             continue
         existing_text = (
             read_utf8_text(change.path, label="managed text file", error_type=ReconcileError)
             if change.path.exists()
             else ""
         )
-        desired_text = desired_bytes.decode()
-        if existing_text == desired_text:
-            continue
+        desired_text = desired_map[change.path].decode()
         diff = difflib.unified_diff(
             existing_text.splitlines(),
             desired_text.splitlines(),
@@ -372,8 +365,6 @@ def _plan_skill_mutations(
             continue
         if _directory_matches_skill(destination, skill):
             continue
-        if not registry_owned:
-            raise AssertionError("Conflicting adopted skill directories should already fail")
         changes.append(Change("update", destination, resource_kind="skill"))
 
     previously_owned_current = _owned_skill_names(
@@ -434,8 +425,6 @@ def _build_registry_write(
 ) -> _RegistryWrite | None:
     """Return one registry write when the desired registry differs from disk."""
     if updated_registry == snapshot.registry:
-        return None
-    if not snapshot.existed and not updated_registry.skills:
         return None
     return _RegistryWrite(
         destination=snapshot.path,
@@ -514,14 +503,6 @@ def _project_relative(desired: DesiredState, path: Path) -> str:
     ).as_posix()
 
 
-def _lookup_desired_file_bytes(desired: DesiredState, path: Path) -> bytes | None:
-    """Look up desired bytes for a project file path."""
-    for candidate_path, content in desired.project_files:
-        if candidate_path == path:
-            return content
-    return None
-
-
 def _cleanup_empty_parents(path: Path, stop_at: Path) -> None:
     """Remove empty directories up to stop_at."""
     current = path
@@ -576,14 +557,7 @@ def _is_allowed_managed_project_relative(relative: str) -> bool:
 def _resolve_managed_project_path(project_root: Path, relative_path: Path) -> Path:
     """Resolve and validate one generated project-relative output path."""
     normalized = _normalize_relative_path(relative_path, label="managed project output")
-    if not _is_allowed_managed_project_relative(normalized.as_posix()):
-        raise ReconcileError(f"Unexpected managed project output path: {normalized}")
-
-    candidate = project_root / normalized
-    resolved_candidate = candidate.resolve()
-    if not _is_relative_to(resolved_candidate, project_root):
-        raise ReconcileError(f"Managed project output escapes the project root: {normalized}")
-    return candidate
+    return project_root / normalized
 
 
 def _normalize_relative_path(path: Path, *, label: str) -> Path:
@@ -605,30 +579,3 @@ def _normalize_relative_path(path: Path, *, label: str) -> Path:
     return Path(*normalized_parts)
 
 
-def _ensure_unique_project_file_paths(project_files: list[tuple[Path, bytes]]) -> None:
-    """Reject duplicate generated project output paths."""
-    seen_paths: set[Path] = set()
-    for path, _content in project_files:
-        if path in seen_paths:
-            raise ReconcileError(f"Duplicate generated project file path: {path}")
-        seen_paths.add(path)
-
-
-def _ensure_unique_skill_names(skills: tuple[GeneratedSkill, ...]) -> None:
-    """Reject duplicate generated skill install directory names."""
-    seen_names: set[str] = set()
-    for skill in skills:
-        if skill.install_dir_name in seen_names:
-            raise ReconcileError(
-                f"Duplicate generated Codex skill directory name: {skill.install_dir_name}"
-            )
-        seen_names.add(skill.install_dir_name)
-
-
-def _is_relative_to(path: Path, root: Path) -> bool:
-    """Return True when `path` is within `root` after resolution."""
-    try:
-        path.relative_to(root)
-        return True
-    except ValueError:
-        return False

@@ -1114,6 +1114,94 @@ def test_reconcile_rejects_traversal_paths_in_corrupted_state(
         diff_desired_state(desired)
 
 
+def test_diff_report_skips_skill_create_changes(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Skill create changes are excluded from unified diff output."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    desired = _build_desired(project_root, cache_root, codex_home)
+    report = diff_desired_state(desired)
+
+    rendered = format_diff_report(desired, report)
+
+    assert "CREATE:" in rendered
+    assert "(skill)" in rendered
+    skill_path = str(codex_home / "skills" / "prompt-engineer-prompt-engineer")
+    assert f"--- {skill_path}" not in rendered
+
+
+def test_reconcile_rejects_absolute_paths_in_corrupted_state(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Corrupted state with absolute paths is rejected."""
+    project_root, _agents_md = make_project()
+    cache_root, _version_dir = make_plugin_version("market", "prompt-engineer", "1.0.0")
+    state_path = project_root / STATE_RELATIVE_PATH
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "project_root": str(project_root),
+                "codex_home": str(tmp_path / "codex-home"),
+                "managed_project_files": ["/etc/passwd", STATE_RELATIVE_PATH.as_posix()],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+    desired = _build_desired(project_root, cache_root, tmp_path / "codex-home")
+
+    with pytest.raises(ReconcileError, match="unexpected managed project files"):
+        diff_desired_state(desired)
+
+
+def test_reconcile_rejects_empty_paths_in_corrupted_state(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Corrupted state with empty managed path is rejected."""
+    project_root, _agents_md = make_project()
+    cache_root, _version_dir = make_plugin_version("market", "prompt-engineer", "1.0.0")
+    state_path = project_root / STATE_RELATIVE_PATH
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "project_root": str(project_root),
+                "codex_home": str(tmp_path / "codex-home"),
+                "managed_project_files": [".", STATE_RELATIVE_PATH.as_posix()],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+    desired = _build_desired(project_root, cache_root, tmp_path / "codex-home")
+
+    with pytest.raises(ReconcileError, match="unexpected managed project files"):
+        diff_desired_state(desired)
+
+
 def _build_desired(project_root: Path, cache_root: Path, codex_home: Path):
     """Build desired state from fixture project and cache roots."""
     discovery = discover(project_path=project_root, cache_dir=cache_root)
