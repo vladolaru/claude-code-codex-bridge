@@ -858,6 +858,262 @@ def test_reconcile_cleans_empty_prompt_parents_but_stops_at_non_empty(
     assert (project_root / ".codex").exists()
 
 
+def test_build_desired_state_fails_for_hand_authored_claude_md(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """build_desired_state raises when the shim decision is 'fail'."""
+    project_root, _agents_md = make_project()
+    (project_root / "CLAUDE.md").write_text("# My hand-authored config\n")
+    cache_root, _version_dir = make_plugin_version("market", "prompt-engineer", "1.0.0")
+
+    discovery = discover(project_path=project_root, cache_dir=cache_root)
+    shim_decision = plan_claude_shim(discovery.project)
+    assert shim_decision.action == "fail"
+
+    with pytest.raises(ReconcileError, match="CLAUDE.md"):
+        build_desired_state(
+            discovery,
+            shim_decision,
+            {},
+            "",
+            (),
+            codex_home=tmp_path / "codex-home",
+        )
+
+
+def test_diff_report_skips_remove_and_skill_changes_in_diff_output(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Diff output omits unified diffs for remove changes and non-text skill changes."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nPrompt body.\n"
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
+
+    (version_dir / "agents" / "reviewer.md").unlink()
+    updated = _build_desired(project_root, cache_root, codex_home)
+    report = diff_desired_state(updated)
+    rendered = format_diff_report(updated, report)
+
+    assert "REMOVE:" in rendered
+    prompt_path = str(
+        project_root / ".codex" / "prompts" / "agents" / "prompt-engineer-reviewer.md"
+    )
+    assert f"--- {prompt_path}" not in rendered
+
+
+def test_reconcile_detects_skill_directory_with_extra_files(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Pre-existing skill directory with extra files is not adopted."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    desired = _build_desired(project_root, cache_root, codex_home)
+    _write_skill_directory(
+        codex_home / "skills" / "prompt-engineer-prompt-engineer",
+        desired.skills[0],
+    )
+    (codex_home / "skills" / "prompt-engineer-prompt-engineer" / "EXTRA.md").write_text(
+        "extra file\n"
+    )
+
+    with pytest.raises(ReconcileError, match="adopt conflicting existing skill directory"):
+        reconcile_desired_state(desired)
+
+
+def test_reconcile_detects_skill_directory_with_wrong_file_mode(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Pre-existing skill directory with wrong file mode triggers an update."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+
+    first_desired = _build_desired(project_root, cache_root, codex_home)
+    reconcile_desired_state(first_desired)
+    installed = codex_home / "skills" / "prompt-engineer-prompt-engineer" / "SKILL.md"
+    installed.chmod(0o777)
+
+    report = reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
+
+    assert any(
+        change.resource_kind == "skill" and change.kind == "update"
+        for change in report.changes
+    )
+    assert (installed.stat().st_mode & 0o777) != 0o777
+
+
+def test_reconcile_rejects_symlinked_global_registry(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Symlinked global registry files are rejected."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir(parents=True)
+    real_registry = tmp_path / "real-registry.json"
+    real_registry.write_text("{}\n")
+    (codex_home / "claude-code-interop-global-state.json").symlink_to(real_registry)
+
+    desired = _build_desired(project_root, cache_root, codex_home)
+
+    with pytest.raises(ReconcileError, match="symlinked global skill registry"):
+        diff_desired_state(desired)
+
+
+def test_cleanup_empty_parents_stops_when_sibling_prompt_exists(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Removing one prompt keeps the agents/ dir when another prompt still exists."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        agent_names=("reviewer", "helper"),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nReview prompt.\n"
+    )
+    (version_dir / "agents" / "helper.md").write_text(
+        "---\nname: helper\ndescription: Help\n---\n\nHelper prompt.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+
+    reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
+    agents_dir = project_root / ".codex" / "prompts" / "agents"
+    assert len(list(agents_dir.glob("*.md"))) == 2
+
+    (version_dir / "agents" / "reviewer.md").unlink()
+    reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
+
+    assert agents_dir.exists()
+    remaining = list(agents_dir.glob("*.md"))
+    assert len(remaining) == 1
+    assert "helper" in remaining[0].name
+
+
+def test_reconcile_codex_home_migration_preserves_other_owners_in_previous_registry(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Moving codex home preserves other projects' ownership in the previous registry."""
+    first_project, _ = make_project("project-a")
+    second_project, _ = make_project("project-b")
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    first_home = tmp_path / "codex-home-one"
+    second_home = tmp_path / "codex-home-two"
+
+    reconcile_desired_state(_build_desired(first_project, cache_root, first_home))
+    reconcile_desired_state(_build_desired(second_project, cache_root, first_home))
+
+    original_registry = _read_global_registry(first_home)
+    assert sorted(
+        original_registry["skills"]["prompt-engineer-prompt-engineer"]["owners"]
+    ) == sorted([str(first_project), str(second_project)])
+
+    reconcile_desired_state(_build_desired(first_project, cache_root, second_home))
+
+    previous_registry = _read_global_registry(first_home)
+    assert previous_registry["skills"]["prompt-engineer-prompt-engineer"]["owners"] == [
+        str(second_project)
+    ]
+    new_registry = _read_global_registry(second_home)
+    assert new_registry["skills"]["prompt-engineer-prompt-engineer"]["owners"] == [
+        str(first_project)
+    ]
+    assert (first_home / "skills" / "prompt-engineer-prompt-engineer").exists()
+    assert (second_home / "skills" / "prompt-engineer-prompt-engineer").exists()
+
+
+def test_reconcile_rejects_traversal_paths_in_corrupted_state(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Corrupted state with parent traversal paths is rejected."""
+    project_root, _agents_md = make_project()
+    cache_root, _version_dir = make_plugin_version("market", "prompt-engineer", "1.0.0")
+    state_path = project_root / STATE_RELATIVE_PATH
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "project_root": str(project_root),
+                "codex_home": str(tmp_path / "codex-home"),
+                "managed_project_files": ["..", STATE_RELATIVE_PATH.as_posix()],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+    desired = _build_desired(project_root, cache_root, tmp_path / "codex-home")
+
+    with pytest.raises(ReconcileError, match="unexpected managed project files"):
+        diff_desired_state(desired)
+
+
 def _build_desired(project_root: Path, cache_root: Path, codex_home: Path):
     """Build desired state from fixture project and cache roots."""
     discovery = discover(project_path=project_root, cache_dir=cache_root)
