@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 
+import cc_codex_bridge.reconcile as reconcile_module
 from cc_codex_bridge.claude_shim import plan_claude_shim
 from cc_codex_bridge.discover import discover
 from cc_codex_bridge.model import ReconcileError
@@ -753,6 +756,106 @@ def test_reconcile_does_not_modify_symlink_resolved_plugin_cache_or_source(
 
     assert _snapshot_tree(cache_root) == before_cache
     assert _snapshot_tree(repo_root) == before_repo
+
+
+def test_reconcile_updates_skill_directory_when_sole_owner_changes_content(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Sole-owner skill content change replaces the installed skill directory."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    skill_path = version_dir / "skills" / "prompt-engineer" / "SKILL.md"
+    skill_path.write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nVersion A.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    installed_skill = codex_home / "skills" / "prompt-engineer-prompt-engineer" / "SKILL.md"
+
+    reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
+    assert "Version A." in installed_skill.read_text()
+
+    skill_path.write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nVersion B.\n"
+    )
+    report = reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
+
+    assert any(
+        change.resource_kind == "skill" and change.kind == "update"
+        for change in report.changes
+    )
+    assert "Version B." in installed_skill.read_text()
+
+
+def test_atomic_write_cleans_up_temp_file_on_failure(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """A write failure in _atomic_write_file removes the temp file and re-raises."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nPrompt body.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    desired = _build_desired(project_root, cache_root, codex_home)
+
+    original_rename = Path.rename
+
+    def fail_on_first_rename(self, target):
+        if self.name.startswith(".interop-"):
+            raise OSError("disk full")
+        return original_rename(self, target)
+
+    with patch.object(Path, "rename", fail_on_first_rename):
+        with pytest.raises(OSError, match="disk full"):
+            reconcile_desired_state(desired)
+
+    interop_temps = list(project_root.rglob(".interop-*"))
+    assert interop_temps == []
+
+
+def test_reconcile_cleans_empty_prompt_parents_but_stops_at_non_empty(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Stale prompt removal cleans empty parent dirs but stops at .codex."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nPrompt body.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+
+    reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
+    prompts_dir = project_root / ".codex" / "prompts"
+    agents_dir = prompts_dir / "agents"
+    assert agents_dir.exists()
+
+    (version_dir / "agents" / "reviewer.md").unlink()
+    reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
+
+    assert not agents_dir.exists()
+    assert not prompts_dir.exists()
+    assert (project_root / ".codex").exists()
 
 
 def _build_desired(project_root: Path, cache_root: Path, codex_home: Path):
