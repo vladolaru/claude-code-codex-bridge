@@ -6,11 +6,9 @@ from dataclasses import dataclass
 import difflib
 from pathlib import Path
 import shutil
-import tempfile
 from typing import Iterable
 from uuid import uuid4
 
-from cc_codex_bridge.locking import acquire_global_registry_lock, acquire_project_lock
 from cc_codex_bridge.model import (
     ClaudeShimDecision,
     DiscoveryResult,
@@ -87,34 +85,6 @@ class _MutationPlan:
     registry_writes: tuple[_RegistryWrite, ...]
 
 
-@dataclass(frozen=True)
-class _PendingSwap:
-    """One staged replacement waiting to be committed."""
-
-    destination: Path
-    staged_path: Path
-    backup_root: Path
-    is_dir: bool
-
-
-@dataclass(frozen=True)
-class _PendingRemoval:
-    """One path that should be removed transactionally."""
-
-    destination: Path
-    backup_root: Path
-    is_dir: bool
-
-
-@dataclass
-class _AppliedChange:
-    """One committed path mutation that can be rolled back."""
-
-    destination: Path
-    backup_path: Path | None
-    is_dir: bool
-
-
 def build_desired_state(
     discovery: DiscoveryResult,
     shim_decision: ClaudeShimDecision,
@@ -182,32 +152,54 @@ def diff_desired_state(desired: DesiredState) -> ReconcileReport:
 
 def reconcile_desired_state(desired: DesiredState) -> ReconcileReport:
     """Apply the desired state to disk."""
-    with acquire_project_lock(desired.project_root):
-        with acquire_global_registry_lock(desired.codex_home):
-            previous_state = _load_previous_state(desired)
-            plan = _plan_mutations(desired, previous_state)
-            if not plan.changes and not plan.registry_writes and not _state_write_needed(desired):
-                return ReconcileReport(changes=(), applied=True)
+    previous_state = _load_previous_state(desired)
+    plan = _plan_mutations(desired, previous_state)
+    if not plan.changes and not plan.registry_writes and not _state_write_needed(desired):
+        return ReconcileReport(changes=(), applied=True)
 
-            pending_swaps, pending_removals, stage_roots = _stage_transaction(
-                desired,
-                plan.changes,
-                plan.registry_writes,
-            )
-            applied_changes: list[_AppliedChange] = []
-            try:
-                _apply_transaction(pending_swaps, pending_removals, applied_changes)
-            except Exception:
-                _rollback_transaction(applied_changes, desired)
-                raise
-            else:
-                _finalize_transaction(applied_changes, desired)
-            finally:
-                for stage_root in stage_roots:
-                    if stage_root.exists():
-                        shutil.rmtree(stage_root)
+    _apply_changes(desired, plan)
+    return ReconcileReport(changes=plan.changes, applied=True)
 
-            return ReconcileReport(changes=plan.changes, applied=True)
+
+def _apply_changes(desired: DesiredState, plan: _MutationPlan) -> None:
+    """Write all planned changes to disk."""
+    desired_map = dict(desired.project_files)
+    skills_by_name = {skill.install_dir_name: skill for skill in desired.skills}
+
+    for change in plan.changes:
+        if change.resource_kind == "skill":
+            if change.kind in ("create", "update"):
+                if change.path.exists():
+                    shutil.rmtree(change.path)
+                change.path.mkdir(parents=True, exist_ok=True)
+                _write_skill_tree(change.path, skills_by_name[change.path.name])
+            elif change.kind == "remove":
+                if change.path.exists():
+                    shutil.rmtree(change.path)
+        else:
+            if change.kind in ("create", "update"):
+                _atomic_write_file(change.path, desired_map[change.path])
+            elif change.kind == "remove":
+                change.path.unlink(missing_ok=True)
+                _cleanup_empty_parents(change.path.parent, desired.project_root / ".codex")
+
+    for registry_write in plan.registry_writes:
+        _atomic_write_file(registry_write.destination, registry_write.content)
+
+    state_bytes = _build_state_record(desired).to_json().encode()
+    _atomic_write_file(desired.state_path, state_bytes)
+
+
+def _atomic_write_file(path: Path, content: bytes) -> None:
+    """Write a file atomically via temp-file-then-rename."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.parent / f".interop-{uuid4().hex}"
+    try:
+        tmp.write_bytes(content)
+        tmp.rename(path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def format_change_report(report: ReconcileReport) -> str:
@@ -530,17 +522,8 @@ def _lookup_desired_file_bytes(desired: DesiredState, path: Path) -> bytes | Non
     return None
 
 
-def _is_project_path(desired: DesiredState, path: Path) -> bool:
-    """Return True when a path is inside the target project."""
-    try:
-        path.relative_to(desired.project_root)
-        return True
-    except ValueError:
-        return False
-
-
-def _cleanup_empty_project_dirs(path: Path, stop_at: Path) -> None:
-    """Remove empty generated directories up to `.codex`."""
+def _cleanup_empty_parents(path: Path, stop_at: Path) -> None:
+    """Remove empty directories up to stop_at."""
     current = path
     while current != stop_at and current.exists():
         try:
@@ -588,250 +571,6 @@ def _is_allowed_managed_project_relative(relative: str) -> bool:
         return True
 
     return normalized.parent == PROMPTS_RELATIVE_ROOT and normalized.suffix == ".md"
-
-
-def _stage_transaction(
-    desired: DesiredState,
-    changes: tuple[Change, ...],
-    registry_writes: tuple[_RegistryWrite, ...],
-) -> tuple[tuple[_PendingSwap, ...], tuple[_PendingRemoval, ...], tuple[Path, ...]]:
-    """Stage all create/update artifacts before mutating any live outputs."""
-    stage_roots: list[Path] = []
-    pending_swaps: list[_PendingSwap] = []
-    pending_removals: list[_PendingRemoval] = []
-
-    desired_map = dict(desired.project_files)
-    project_stage_root = Path(tempfile.mkdtemp(prefix=".interop-project-stage-", dir=desired.project_root))
-    stage_roots.append(project_stage_root)
-    project_backup_root = Path(tempfile.mkdtemp(prefix=".interop-project-backup-", dir=desired.project_root))
-    stage_roots.append(project_backup_root)
-
-    for change in sorted(changes, key=lambda item: str(item.path)):
-        if change.resource_kind == "skill":
-            continue
-        if not _is_project_path(desired, change.path):
-            continue
-        if change.kind == "remove":
-            pending_removals.append(
-                _PendingRemoval(
-                    destination=change.path,
-                    backup_root=project_backup_root,
-                    is_dir=False,
-                )
-            )
-            continue
-        relative = _project_relative(desired, change.path)
-        staged_path = project_stage_root / relative
-        _write_staged_file(staged_path, desired_map[change.path])
-        pending_swaps.append(
-            _PendingSwap(
-                destination=change.path,
-                staged_path=staged_path,
-                backup_root=project_backup_root,
-                is_dir=False,
-            )
-        )
-
-    state_bytes = _build_state_record(desired).to_json().encode()
-    if not desired.state_path.exists() or desired.state_path.read_bytes() != state_bytes:
-        staged_state_path = project_stage_root / STATE_RELATIVE_PATH
-        _write_staged_file(staged_state_path, state_bytes)
-        pending_swaps.append(
-            _PendingSwap(
-                destination=desired.state_path,
-                staged_path=staged_state_path,
-                backup_root=project_backup_root,
-                is_dir=False,
-            )
-        )
-
-    for registry_write in registry_writes:
-        registry_destination = registry_write.destination
-        registry_destination.parent.mkdir(parents=True, exist_ok=True)
-        registry_stage_root = Path(
-            tempfile.mkdtemp(
-                prefix=".interop-registry-stage-",
-                dir=registry_destination.parent,
-            )
-        )
-        stage_roots.append(registry_stage_root)
-        registry_backup_root = Path(
-            tempfile.mkdtemp(
-                prefix=".interop-registry-backup-",
-                dir=registry_destination.parent,
-            )
-        )
-        stage_roots.append(registry_backup_root)
-        staged_registry_path = registry_stage_root / registry_destination.name
-        _write_staged_file(staged_registry_path, registry_write.content)
-        pending_swaps.append(
-            _PendingSwap(
-                destination=registry_destination,
-                staged_path=staged_registry_path,
-                backup_root=registry_backup_root,
-                is_dir=False,
-            )
-        )
-
-    skills_root = desired.codex_home / "skills"
-    desired.codex_home.mkdir(parents=True, exist_ok=True)
-    skill_stage_root = Path(tempfile.mkdtemp(prefix=".interop-skill-stage-", dir=skills_root.parent))
-    stage_roots.append(skill_stage_root)
-    skill_backup_roots: dict[Path, Path] = {}
-    skills_by_name = {skill.install_dir_name: skill for skill in desired.skills}
-
-    def _skill_backup_root_for(destination: Path) -> Path:
-        backup_parent = destination.parent.parent
-        backup_root = skill_backup_roots.get(backup_parent)
-        if backup_root is not None:
-            return backup_root
-
-        backup_root = Path(
-            tempfile.mkdtemp(prefix=".interop-skill-backup-", dir=backup_parent)
-        )
-        skill_backup_roots[backup_parent] = backup_root
-        stage_roots.append(backup_root)
-        return backup_root
-
-    for change in sorted(changes, key=lambda item: str(item.path)):
-        if change.resource_kind != "skill":
-            continue
-        if change.kind == "remove":
-            pending_removals.append(
-                _PendingRemoval(
-                    destination=change.path,
-                    backup_root=_skill_backup_root_for(change.path),
-                    is_dir=True,
-                )
-            )
-            continue
-
-        skill = skills_by_name[change.path.name]
-        staged_dir = skill_stage_root / change.path.name
-        staged_dir.mkdir(parents=True, exist_ok=True)
-        _write_skill_tree(staged_dir, skill)
-        pending_swaps.append(
-            _PendingSwap(
-                destination=change.path,
-                staged_path=staged_dir,
-                backup_root=_skill_backup_root_for(change.path),
-                is_dir=True,
-            )
-        )
-
-    return tuple(pending_swaps), tuple(pending_removals), tuple(stage_roots)
-
-
-def _apply_transaction(
-    pending_swaps: tuple[_PendingSwap, ...],
-    pending_removals: tuple[_PendingRemoval, ...],
-    applied_changes: list[_AppliedChange],
-) -> None:
-    """Apply all staged replacements and removals with rollback metadata."""
-    for swap in pending_swaps:
-        backup_path = _swap_path(swap.destination, swap.staged_path, swap.backup_root, is_dir=swap.is_dir)
-        applied_changes.append(
-            _AppliedChange(
-                destination=swap.destination,
-                backup_path=backup_path,
-                is_dir=swap.is_dir,
-            )
-        )
-
-    for removal in pending_removals:
-        backup_path = _remove_path(removal.destination, removal.backup_root, is_dir=removal.is_dir)
-        applied_changes.append(
-            _AppliedChange(
-                destination=removal.destination,
-                backup_path=backup_path,
-                is_dir=removal.is_dir,
-            )
-        )
-
-
-def _finalize_transaction(applied_changes: list[_AppliedChange], desired: DesiredState) -> None:
-    """Discard backups after the transaction has completed successfully."""
-    for applied_change in reversed(applied_changes):
-        if applied_change.backup_path is None:
-            continue
-        _remove_existing_path(applied_change.backup_path, is_dir=applied_change.is_dir)
-        if not applied_change.is_dir and _is_project_path(desired, applied_change.destination):
-            _cleanup_empty_project_dirs(
-                applied_change.backup_path.parent,
-                desired.project_root,
-            )
-
-    for applied_change in applied_changes:
-        if applied_change.backup_path is not None:
-            continue
-        if not applied_change.destination.exists():
-            continue
-        if applied_change.is_dir or not _is_project_path(desired, applied_change.destination):
-            continue
-        _cleanup_empty_project_dirs(
-            applied_change.destination.parent,
-            desired.project_root / ".codex",
-        )
-
-
-def _rollback_transaction(applied_changes: list[_AppliedChange], desired: DesiredState) -> None:
-    """Restore the last known good outputs after a failed apply."""
-    for applied_change in reversed(applied_changes):
-        if applied_change.destination.exists():
-            _remove_existing_path(applied_change.destination, is_dir=applied_change.is_dir)
-        if applied_change.backup_path is not None and applied_change.backup_path.exists():
-            applied_change.destination.parent.mkdir(parents=True, exist_ok=True)
-            applied_change.backup_path.rename(applied_change.destination)
-
-    for applied_change in applied_changes:
-        if applied_change.is_dir or not _is_project_path(desired, applied_change.destination):
-            continue
-        if applied_change.backup_path is None:
-            _cleanup_empty_project_dirs(
-                applied_change.destination.parent,
-                desired.project_root / ".codex",
-            )
-        else:
-            _cleanup_empty_project_dirs(
-                applied_change.backup_path.parent,
-                desired.project_root,
-            )
-
-
-def _swap_path(destination: Path, staged_path: Path, backup_root: Path, *, is_dir: bool) -> Path | None:
-    """Replace a live path with a staged one, returning the backup path when replaced."""
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    backup_path = None
-    if destination.exists():
-        backup_path = backup_root / uuid4().hex / destination.name
-        backup_path.parent.mkdir(parents=True, exist_ok=True)
-        destination.rename(backup_path)
-    staged_path.rename(destination)
-    return backup_path
-
-
-def _remove_path(destination: Path, backup_root: Path, *, is_dir: bool) -> Path | None:
-    """Move a live path aside so it can be restored if the transaction fails."""
-    if not destination.exists():
-        return None
-    backup_path = backup_root / uuid4().hex / destination.name
-    backup_path.parent.mkdir(parents=True, exist_ok=True)
-    destination.rename(backup_path)
-    return backup_path
-
-
-def _write_staged_file(path: Path, content: bytes) -> None:
-    """Write one staged file inside a transaction staging directory."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(content)
-
-
-def _remove_existing_path(path: Path, *, is_dir: bool) -> None:
-    """Remove an existing file or directory."""
-    if is_dir:
-        shutil.rmtree(path)
-    else:
-        path.unlink()
 
 
 def _resolve_managed_project_path(project_root: Path, relative_path: Path) -> Path:
