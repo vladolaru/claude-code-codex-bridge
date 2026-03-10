@@ -169,13 +169,10 @@ The global registry records:
 - existing skill directories are adopted only when their content matches the desired generated tree exactly
 - conflicting content for an existing generated skill directory is a hard error
 - generated skill directories are removed only when the global registry shows no remaining owners
-- mutating reconcile acquires a project lock first and a global registry lock second
-- same-host stale lock files are reclaimed when their recorded pid is no longer running
-- read-only diff/status planning remains lock-free
+- project files are written atomically via temp-file-then-rename to avoid partial reads
+- if a write fails mid-apply, the next idempotent reconcile run self-heals
 - stale managed outputs are removed when no longer desired
 - if the configured Codex home changes, the current project's old registry claims are released from the previous Codex home during the same reconcile
-- writes are staged and then swapped into place
-- failures during apply trigger rollback of already-applied changes
 
 ## 7. Discovery Architecture
 
@@ -364,27 +361,23 @@ Supported kinds in current reporting:
 
 ### Reconcile flow
 
-1. acquire the project reconcile lock under the target project root
-2. acquire the global generated-skill registry lock under the resolved Codex home
-3. load previous state if present
-4. load the current global skill registry under the resolved Codex home
-5. compute desired project file changes
-6. compute desired generated-skill claims and reconcile changes from registry ownership plus on-disk content hashes
-7. validate ownership constraints
-8. stage all file and directory replacements in temporary roots
-9. write or update the project-local state file and any affected global registry files as part of the same transaction
-10. swap staged content into place
-11. remove stale managed outputs whose last owner released them
-12. finalize by deleting backups
-13. rollback if any apply step fails
+1. load previous state if present
+2. load the current global skill registry under the resolved Codex home
+3. compute desired project file changes
+4. compute desired generated-skill claims and reconcile changes from registry ownership plus on-disk content hashes
+5. validate ownership constraints
+6. write project file and skill directory changes directly
+7. write updated global registry files
+8. write the project-local state file
+9. remove stale managed outputs whose last owner released them
 
-### Atomicity model
+### Write model
 
-Project files are written atomically with temporary files in the destination directory.
+Project files and registry files are written atomically using temp-file-then-rename in the same directory.
 
-Skill directories are staged as full directory trees, then swapped using rename-based replacement with backups. This is transactional within the assumptions of a local filesystem and the current process boundaries.
+Skill directories are written directly. On update, the old directory is removed before the new one is written.
 
-Global registry files are staged and swapped through the same transaction path as project-local state.
+If a write fails mid-apply, the next reconcile run detects the mismatch and repairs it. The reconcile pipeline is idempotent by design.
 
 ### Idempotence rule
 
@@ -489,14 +482,12 @@ Current runtime module responsibilities:
   - Claude agent translation and unsupported-tool diagnostics
 - `render_codex_config.py`
   - prompt-file and inline config rendering
-- `locking.py`
-  - exclusive project and global-registry lock helpers for mutating reconcile flows
 - `registry.py`
   - global generated-skill registry serialization and deterministic skill hashing
 - `translate_skills.py`
   - Codex skill translation plus relocation and vendoring helpers
 - `reconcile.py`
-  - desired-state modeling, diffing, apply, rollback, report formatting
+  - desired-state modeling, diffing, atomic apply, report formatting
 - `state.py`
   - project-local managed-state serialization and validation
 - `install_launchagent.py`
@@ -516,7 +507,7 @@ The suite currently verifies:
 - `CLAUDE.md` shim safety
 - agent translation and deterministic rendering
 - skill translation, relocation rewriting, vendoring, and collision handling
-- reconcile idempotence, stale cleanup, rollback safety conditions, and diff reporting
+- reconcile idempotence, stale cleanup, ownership safety, and diff reporting
 - CLI command behavior
 - LaunchAgent rendering and installation
 - doctor reporting and release-bundle generation
