@@ -14,7 +14,6 @@ from cc_codex_bridge.text import read_utf8_text
 
 GLOBAL_REGISTRY_VERSION = 1
 GLOBAL_REGISTRY_FILENAME = "claude-code-interop-global-state.json"
-GLOBAL_REGISTRY_LOCK_FILENAME = "claude-code-interop-global-state.lock"
 
 
 @dataclass(frozen=True)
