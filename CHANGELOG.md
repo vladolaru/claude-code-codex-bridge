@@ -14,6 +14,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Simplified the reconcile engine by replacing the transaction staging, rollback,
+  and dual-lock machinery with direct atomic writes. Mid-apply failures are
+  self-healed by the next idempotent reconcile run.
 - Started reconcile hardening with a validated global skill-registry model, deterministic generated-skill hashing, and a trimmed project-local state payload that no longer records selected plugin identities.
 - Moved generated Codex skill ownership into a global registry under the resolved Codex home, allowing identical skills to be shared safely across projects and keeping last-owner cleanup aligned with registry claims.
 - Simplified the project-local interop state so it now tracks only project-local managed files plus the last reconciled Codex home.
