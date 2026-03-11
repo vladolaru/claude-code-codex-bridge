@@ -629,3 +629,67 @@ def test_setup_evolves_over_time(make_project, tmp_path: Path):
     # Config regenerated
     config_v5 = (project_root / ".codex" / "config.toml").read_text()
     assert "project_reviewer" in config_v5  # project agent survived plugin change
+
+
+def test_two_projects_share_user_setup(make_project, tmp_path: Path):
+    """Two projects share the same user-level skills and CLAUDE.md.
+
+    The global skill registry correctly shares ownership. Project-local
+    artifacts (config.toml, prompt files, project skills) are isolated.
+    Removing one project's claim does not remove the shared skill.
+    """
+    project_a, _agents_a = make_project("project-a")
+    project_b, _agents_b = make_project("project-b")
+    claude_home = tmp_path / "claude-home"
+    codex_home = tmp_path / "codex-home"
+    cache_root = claude_home / "plugins" / "cache"
+
+    # Shared user setup
+    build_plugin(cache_root, "vlad-plugins", "review-tools", "1.12.0")
+    build_user_skill_simple(claude_home, "url-shorthand")
+    build_user_claude_md(claude_home)
+
+    # Project A has its own project agent
+    build_project_agent(project_a, "deployer", tools=("Bash",))
+
+    # Project B has its own project skill
+    build_project_skill(project_b, "lint-check")
+
+    # Reconcile both projects
+    assert reconcile(project_a, claude_home, codex_home) == 0
+    assert reconcile(project_b, claude_home, codex_home) == 0
+
+    # -- Global skills shared (single copy) --
+    user_skill = codex_home / "skills" / "user-url-shorthand" / "SKILL.md"
+    assert user_skill.exists()
+    plugin_skill = codex_home / "skills" / "vlad-plugins-review-tools-code-review" / "SKILL.md"
+    assert plugin_skill.exists()
+
+    # -- Global CLAUDE.md shared --
+    assert (codex_home / "AGENTS.md").exists()
+
+    # -- Project A has its agent, not project B's skill --
+    config_a = (project_a / ".codex" / "config.toml").read_text()
+    assert "project_deployer" in config_a
+    assert not (project_a / ".codex" / "skills" / "lint-check").exists()
+
+    # -- Project B has its skill, not project A's agent --
+    config_b = (project_b / ".codex" / "config.toml").read_text()
+    assert "project_deployer" not in config_b
+    assert (project_b / ".codex" / "skills" / "lint-check" / "SKILL.md").exists()
+
+    # -- Both projects have the plugin agents --
+    assert "vlad-plugins_review-tools_security_reviewer" in config_a
+    assert "vlad-plugins_review-tools_security_reviewer" in config_b
+
+    # -- Re-reconcile project A without the plugin → shared skill survives --
+    import shutil
+    shutil.rmtree(cache_root / "vlad-plugins")
+    (cache_root / "vlad-plugins").mkdir(parents=True)  # empty marketplace
+    assert reconcile(project_a, claude_home, codex_home) == 0
+
+    # Plugin skills still exist because project B still claims them
+    assert plugin_skill.exists()
+
+    # User skill still exists — both projects still claim it
+    assert user_skill.exists()
