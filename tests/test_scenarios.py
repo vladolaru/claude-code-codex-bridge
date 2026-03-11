@@ -486,3 +486,84 @@ def test_rich_plugin_ecosystem(make_project, tmp_path: Path):
     sec_content = sec_prompt.read_text()
     assert "SQL injection" in sec_content
     assert "nonces" in sec_content
+
+
+def test_power_user_full_stack(make_project, tmp_path: Path):
+    """A power user with all source types: plugin, user skills/agents, project skills/agents, CLAUDE.md.
+
+    Verifies the routing split, content fidelity, naming conventions,
+    global instructions bridging, and that all sources coexist without conflict.
+    """
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "claude-home"
+    codex_home = tmp_path / "codex-home"
+    cache_root = claude_home / "plugins" / "cache"
+
+    # Marketplace plugin
+    build_plugin(cache_root, "vlad-plugins", "review-tools", "1.12.0")
+
+    # User skills (simple + with references)
+    build_user_skill_simple(claude_home, "a8c-url-shorthand")
+    build_user_skill_with_references(claude_home, "write-like-a-pirategoat")
+
+    # User agent
+    build_user_agent(claude_home, "thinking-partner", tools=("Read", "Glob", "Grep", "Bash"))
+
+    # Project skills
+    build_project_skill(project_root, "run-tests")
+    build_project_skill(project_root, "deploy-staging")
+
+    # Project agents
+    build_project_agent(project_root, "code-reviewer", tools=("Read", "Glob", "Grep", "Bash", "Write"))
+    build_project_agent(project_root, "test-writer", tools=("Read", "Write", "Bash"))
+
+    # User CLAUDE.md
+    build_user_claude_md(claude_home)
+
+    assert reconcile(project_root, claude_home, codex_home) == 0
+
+    # -- Plugin skills → global registry (marketplace-prefixed) --
+    assert (codex_home / "skills" / "vlad-plugins-review-tools-code-review" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "vlad-plugins-review-tools-software-architecture" / "SKILL.md").exists()
+
+    # -- User skills → global registry (user-prefixed) --
+    user_url = codex_home / "skills" / "user-a8c-url-shorthand" / "SKILL.md"
+    assert user_url.exists()
+    user_write = codex_home / "skills" / "user-write-like-a-pirategoat"
+    assert (user_write / "SKILL.md").exists()
+    # References dir preserved
+    assert (user_write / "references" / "examples.md").exists()
+    assert (user_write / "references" / "guidelines.md").exists()
+    assert "advanced usage" in (user_write / "references" / "examples.md").read_text()
+
+    # -- Project skills → project-local (raw name, no prefix) --
+    assert (project_root / ".codex" / "skills" / "run-tests" / "SKILL.md").exists()
+    assert (project_root / ".codex" / "skills" / "deploy-staging" / "SKILL.md").exists()
+    # NOT in global registry
+    assert not (codex_home / "skills" / "run-tests").exists()
+    assert not (codex_home / "skills" / "project-run-tests").exists()
+
+    # -- All agents in config.toml --
+    config = (project_root / ".codex" / "config.toml").read_text()
+    # Plugin agents (marketplace-prefixed)
+    assert "vlad-plugins_review-tools_security_reviewer" in config
+    # User agent (scope-prefixed)
+    assert "user_thinking_partner" in config
+    # Project agents (scope-prefixed)
+    assert "project_code_reviewer" in config
+    assert "project_test_writer" in config
+
+    # -- User CLAUDE.md → ~/.codex/AGENTS.md --
+    global_agents = codex_home / "AGENTS.md"
+    assert global_agents.exists()
+    content = global_agents.read_text()
+    assert "Conventional Commits" in content
+    assert "Automattic" in content
+
+    # -- Project shim untouched --
+    assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
+
+    # -- Source inputs untouched --
+    assert (claude_home / "CLAUDE.md").exists()
+    assert (claude_home / "skills" / "a8c-url-shorthand" / "SKILL.md").exists()
+    assert (project_root / ".claude" / "skills" / "run-tests" / "SKILL.md").exists()
