@@ -29,6 +29,7 @@ class DoctorCheck:
 def run_doctor(
     *,
     cache_dir: str | Path | None = None,
+    claude_home: str | Path | None = None,
     codex_home: str | Path | None = None,
     launchagents_dir: str | Path | None = None,
     command_name: str = "cc-codex-bridge",
@@ -39,9 +40,9 @@ def run_doctor(
     """Run the machine-level doctor checks."""
     resolved_python = Path(python_executable or sys.executable).expanduser().resolve()
     version_info = tuple(python_version or tuple(sys.version_info[:3]))
-    resolved_cache_dir = Path(
-        cache_dir or discover_module.CLAUDE_PLUGIN_CACHE_DIR
-    ).expanduser().resolve()
+    resolved_cache_dir = discover_module._resolve_cache_dir(
+        cache_dir, claude_home
+    )
     resolved_codex_home = Path(codex_home or DEFAULT_CODEX_HOME).expanduser().resolve()
     resolved_launchagents_dir = Path(
         launchagents_dir or launchagent_module.DEFAULT_LAUNCHAGENTS_DIR

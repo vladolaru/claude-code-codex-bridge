@@ -769,6 +769,7 @@ def test_cli_handles_unsupported_command(
                 command="mystery",
                 project=project_root,
                 cache_dir=None,
+                claude_home=None,
                 codex_home=None,
             )
 
@@ -779,6 +780,35 @@ def test_cli_handles_unsupported_command(
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "unsupported command" in captured.err
+
+
+def _make_minimal_plugin(cache_root: Path, marketplace: str, plugin_name: str, version: str):
+    """Create a bare-minimum plugin in the cache for CLI tests."""
+    version_dir = cache_root / marketplace / plugin_name / version
+    version_dir.mkdir(parents=True, exist_ok=True)
+    skills_dir = version_dir / "skills" / "minimal"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "SKILL.md").write_text(
+        "---\nname: minimal\ndescription: test\n---\n"
+    )
+
+
+def test_validate_with_claude_home_flag(make_project, tmp_path: Path, capsys):
+    """The --claude-home flag overrides the Claude home for plugin discovery."""
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "custom-claude-home"
+    cache_root = claude_home / "plugins" / "cache"
+    _make_minimal_plugin(cache_root, "market", "test-plugin", "1.0.0")
+
+    exit_code = cli.main([
+        "validate",
+        "--project", str(project_root),
+        "--claude-home", str(claude_home),
+    ])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "PLUGINS_FOUND: 1" in captured.out
 
 
 def test_module_entrypoint_invokes_cli_main(monkeypatch: pytest.MonkeyPatch):

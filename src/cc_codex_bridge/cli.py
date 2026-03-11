@@ -67,6 +67,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override the Claude plugin cache path (mainly for testing).",
     )
     common.add_argument(
+        "--claude-home",
+        type=Path,
+        help="Override the Claude home path (~/.claude) for discovery.",
+    )
+    common.add_argument(
         "--codex-home",
         type=Path,
         help="Override the Codex home path (mainly for testing).",
@@ -176,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in UTILITY_COMMANDS:
         checks = run_doctor(
             cache_dir=args.cache_dir,
+            claude_home=args.claude_home,
             codex_home=args.codex_home,
             launchagents_dir=args.launchagents_dir,
         )
@@ -193,7 +199,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        result = discover(project_path=args.project, cache_dir=args.cache_dir)
+        result = discover(
+            project_path=args.project,
+            cache_dir=args.cache_dir,
+            claude_home=args.claude_home,
+        )
         config_exclusions = load_project_exclusions(result.project.root)
         exclusions = resolve_effective_exclusions(
             config_exclusions,
@@ -290,6 +300,7 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
             project_root=resolved_project,
             interval_seconds=args.interval,
             cache_dir=args.cache_dir,
+            claude_home=args.claude_home,
             codex_home=args.codex_home,
             python_executable=args.python_executable,
             cli_path=args.cli_path,

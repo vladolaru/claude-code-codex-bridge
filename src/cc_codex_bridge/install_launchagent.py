@@ -31,6 +31,7 @@ def build_launchagent_plist(
     project_root: str | Path,
     interval_seconds: int = DEFAULT_START_INTERVAL,
     cache_dir: str | Path | None = None,
+    claude_home: str | Path | None = None,
     codex_home: str | Path | None = None,
     python_executable: str | Path | None = None,
     cli_path: str | Path | None = None,
@@ -60,6 +61,8 @@ def build_launchagent_plist(
     ]
     if cache_dir is not None:
         program_arguments.extend(["--cache-dir", str(Path(cache_dir).expanduser().resolve())])
+    if claude_home is not None:
+        program_arguments.extend(["--claude-home", str(Path(claude_home).expanduser().resolve())])
     if codex_home is not None:
         program_arguments.extend(["--codex-home", str(Path(codex_home).expanduser().resolve())])
 

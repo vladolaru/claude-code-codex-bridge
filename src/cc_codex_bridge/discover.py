@@ -16,7 +16,8 @@ from cc_codex_bridge.model import (
 
 
 AGENTS_MD = "AGENTS.md"
-CLAUDE_PLUGIN_CACHE_DIR = Path.home() / ".claude" / "plugins" / "cache"
+DEFAULT_CLAUDE_HOME = Path.home() / ".claude"
+CLAUDE_PLUGIN_CACHE_DIR = DEFAULT_CLAUDE_HOME / "plugins" / "cache"
 
 
 def resolve_project_root(start_path: str | Path | None = None) -> ProjectContext:
@@ -38,21 +39,38 @@ def resolve_project_root(start_path: str | Path | None = None) -> ProjectContext
     )
 
 
+def _resolve_cache_dir(
+    cache_dir: str | Path | None = None,
+    claude_home: str | Path | None = None,
+) -> Path:
+    """Resolve the plugin cache directory.
+
+    An explicit *cache_dir* takes priority.  Otherwise the cache path is
+    derived from *claude_home* (defaulting to ``DEFAULT_CLAUDE_HOME``).
+    """
+    if cache_dir is not None:
+        return Path(cache_dir).expanduser().resolve()
+    home = Path(claude_home or DEFAULT_CLAUDE_HOME).expanduser().resolve()
+    return home / "plugins" / "cache"
+
+
 def discover(
     project_path: str | Path | None = None,
     cache_dir: str | Path | None = None,
+    claude_home: str | Path | None = None,
 ) -> DiscoveryResult:
     """Resolve the target project and latest installed Claude plugins."""
     project = resolve_project_root(project_path)
-    plugins = discover_latest_plugins(cache_dir)
+    plugins = discover_latest_plugins(cache_dir=cache_dir, claude_home=claude_home)
     return DiscoveryResult(project=project, plugins=plugins)
 
 
 def discover_latest_plugins(
     cache_dir: str | Path | None = None,
+    claude_home: str | Path | None = None,
 ) -> tuple[InstalledPlugin, ...]:
     """Discover the latest installed version of each Claude plugin."""
-    root = Path(cache_dir or CLAUDE_PLUGIN_CACHE_DIR).expanduser().resolve()
+    root = _resolve_cache_dir(cache_dir, claude_home)
     if not root.is_dir():
         raise DiscoveryError(f"Claude plugin cache not found: {root}")
 
