@@ -129,6 +129,7 @@ Also check `DESIGN.md` for the canonical description of the current implemented 
 - Review `.claude/docs/analysis/` for prior investigations and technical findings.
 - Review spec documents in `.claude/docs/plans/`, such as `*-spec.md`, for the intended contract and constraints.
 - Review implementation plans in `.claude/docs/plans/`, such as `*-implementation-plan.md`, for sequencing, scope, and expected milestones.
+- Review `.claude/docs/research/2026-03-11-codex-native-architecture.md` for Codex CLI native behavior (skill discovery, instructions loading, configuration layers). This is the authoritative reference for how Codex discovers skills and loads `AGENTS.md` — consult it before making design decisions that depend on Codex's native conventions.
 - Update `DESIGN.md` whenever the implemented architecture changes materially.
 - Update the relevant analysis, spec, or plan docs when the command surface, architecture, or implementation direction changes materially.
 

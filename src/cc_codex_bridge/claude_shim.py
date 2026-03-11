@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from cc_codex_bridge.model import ClaudeShimDecision, ProjectContext, ReconcileError
 from cc_codex_bridge.text import read_utf8_text
 
