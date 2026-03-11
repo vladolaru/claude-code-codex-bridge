@@ -56,29 +56,31 @@ def test_generated_skills_copy_bundled_resources(make_plugin_version, tmp_path: 
     assert (installed_root / "scripts" / "check.sh").stat().st_mode & 0o777 == 0o755
 
 
-def test_translate_installed_skills_rewrites_plugin_root_script_paths(
+def test_translate_installed_skills_resolves_sibling_directory_references(
     make_plugin_version,
     tmp_path: Path,
 ):
-    """Plugin-root script references are rewritten and vendored locally."""
+    """Sibling directory references are resolved and copied directly into the skill."""
     cache_root, version_dir = make_plugin_version(
         "market",
         "pirategoat-tools",
         "1.0.0",
         skill_names=("decision-critic",),
     )
+    # Create a shared scripts directory as a sibling of the skills directory
+    # At skill level, ../shared-scripts/ resolves to skills/shared-scripts/
+    shared_scripts = version_dir / "skills" / "shared-scripts"
+    shared_scripts.mkdir(parents=True)
+    (shared_scripts / "decision-critic.py").write_text("print('ok')\n")
+
     skill_dir = version_dir / "skills" / "decision-critic"
     (skill_dir / "SKILL.md").write_text(
         "---\n"
         "name: decision-critic\n"
         "description: Criticize decisions\n"
         "---\n\n"
-        'PLUGIN_ROOT="<skill base directory>/../.."\n'
-        'python3 "$PLUGIN_ROOT/scripts/decision-critic.py"\n'
+        'python3 "../shared-scripts/decision-critic.py"\n'
     )
-    plugin_scripts_dir = version_dir / "scripts"
-    plugin_scripts_dir.mkdir()
-    (plugin_scripts_dir / "decision-critic.py").write_text("print('ok')\n")
 
     skills = translate_installed_skills(discover_latest_plugins(cache_root))
     for skill in skills:
@@ -86,15 +88,16 @@ def test_translate_installed_skills_rewrites_plugin_root_script_paths(
 
     installed_root = tmp_path / "codex-home" / "skills" / "market-pirategoat-tools-decision-critic"
     skill_md = (installed_root / "SKILL.md").read_text()
-    assert 'PLUGIN_ROOT="<skill base directory>/_plugin"' in skill_md
-    assert (installed_root / "_plugin" / "scripts" / "decision-critic.py").read_text() == "print('ok')\n"
+    # Reference is rewritten from ../shared-scripts/ to shared-scripts/
+    assert 'python3 "shared-scripts/decision-critic.py"' in skill_md
+    assert (installed_root / "shared-scripts" / "decision-critic.py").read_text() == "print('ok')\n"
 
 
 def test_translate_installed_skills_vendors_referenced_sibling_skills(
     make_plugin_version,
     tmp_path: Path,
 ):
-    """Cross-skill relative references are rewritten to vendored sibling copies."""
+    """Cross-skill relative references are rewritten and copied directly."""
     cache_root, version_dir = make_plugin_version(
         "market",
         "pirategoat-tools",
@@ -127,14 +130,14 @@ def test_translate_installed_skills_vendors_referenced_sibling_skills(
 
     installed_root = tmp_path / "codex-home" / "skills" / "market-pirategoat-tools-e2e-testing-patterns"
     skill_md = (installed_root / "SKILL.md").read_text()
-    assert "_plugin/skills/testing-patterns/references/test-philosophy.md" in skill_md
+    assert "testing-patterns/references/test-philosophy.md" in skill_md
     assert (
-        installed_root / "_plugin" / "skills" / "testing-patterns" / "references" / "test-philosophy.md"
+        installed_root / "testing-patterns" / "references" / "test-philosophy.md"
     ).read_text() == "Behavior over implementation.\n"
 
 
 def test_translate_installed_skills_rejects_missing_sibling_skill_references(make_plugin_version):
-    """Relocated sibling-skill references must resolve to a real sibling skill."""
+    """Relocated sibling-skill references must resolve to a real sibling."""
     cache_root, version_dir = make_plugin_version(
         "market",
         "pirategoat-tools",
@@ -150,7 +153,39 @@ def test_translate_installed_skills_rejects_missing_sibling_skill_references(mak
         "Read `../testing-patterns/references/test-philosophy.md` first.\n"
     )
 
-    with pytest.raises(TranslationError, match="missing sibling skill"):
+    with pytest.raises(TranslationError, match="missing sibling"):
+        translate_installed_skills(discover_latest_plugins(cache_root))
+
+
+def test_translate_installed_skills_rejects_colliding_sibling_reference(
+    make_plugin_version,
+):
+    """Sibling references that collide with existing skill directories are rejected."""
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "pirategoat-tools",
+        "1.0.0",
+        skill_names=("my-skill",),
+    )
+    skill_dir = version_dir / "skills" / "my-skill"
+    # Create a references/ dir inside the skill (one of OPTIONAL_SKILL_DIRS)
+    (skill_dir / "references").mkdir(parents=True)
+    (skill_dir / "references" / "guide.md").write_text("Guide.\n")
+
+    # Also create a references/ sibling directory and reference it
+    sibling_refs = version_dir / "skills" / "references"
+    sibling_refs.mkdir(parents=True)
+    (sibling_refs / "other.md").write_text("Other.\n")
+
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: my-skill\n"
+        "description: test\n"
+        "---\n\n"
+        "Read `../references/other.md`.\n"
+    )
+
+    with pytest.raises(TranslationError, match="collides with an existing directory"):
         translate_installed_skills(discover_latest_plugins(cache_root))
 
 

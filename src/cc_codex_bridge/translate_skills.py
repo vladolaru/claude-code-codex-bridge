@@ -17,8 +17,6 @@ from cc_codex_bridge.text import read_utf8_text
 
 
 SIBLING_SKILL_REF_RE = re.compile(r"\.\./(?P<skill>[A-Za-z0-9._-]+)/")
-SKILL_BASE_PLUGIN_ROOT = "<skill base directory>/../.."
-RELOCATED_PLUGIN_ROOT = "<skill base directory>/_plugin"
 IGNORED_NAMES = {".DS_Store", "__pycache__"}
 OPTIONAL_SKILL_DIRS = {"scripts", "references", "assets", "agents"}
 
@@ -95,33 +93,18 @@ def _build_generated_skill(
 
     skill_md_path = raw_skill.skill_path / "SKILL.md"
     skill_content = read_utf8_text(skill_md_path, label="skill file", error_type=TranslationError)
-    rewritten_content, sibling_skills, needs_plugin_scripts = _rewrite_skill_content(
-        skill_content,
-        codex_skill_name=install_dir_name,
-        plugin_root=raw_skill.plugin_root,
+    rewritten, referenced_sources = _resolve_relative_references(
+        raw_skill.skill_path, skill_content,
     )
+    rewritten = _rewrite_frontmatter_name(rewritten, install_dir_name)
     generated_files[Path("SKILL.md")] = (
-        rewritten_content.encode(),
+        rewritten.encode(),
         (skill_md_path.stat().st_mode & 0o777),
     )
 
-    plugin_scripts = raw_skill.plugin_root / "scripts"
-    if plugin_scripts.is_dir() and needs_plugin_scripts:
-        _copy_tree(plugin_scripts, Path("_plugin") / "scripts", generated_files)
-
-    if sibling_skills:
-        plugin_skills_root = raw_skill.plugin_root / "skills"
-        for sibling_skill_name in sibling_skills:
-            sibling_path = plugin_skills_root / sibling_skill_name
-            if not sibling_path.is_dir():
-                raise TranslationError(
-                    f"Skill references missing sibling skill `{sibling_skill_name}`: {skill_md_path}"
-                )
-            _copy_skill_tree(
-                sibling_path,
-                Path("_plugin") / "skills" / sibling_skill_name,
-                generated_files,
-            )
+    # Copy referenced sibling trees directly into the generated skill
+    for target_name, source_path in referenced_sources.items():
+        _copy_tree(source_path, Path(target_name), generated_files)
 
     files = tuple(
         GeneratedSkillFile(
@@ -143,40 +126,40 @@ def _build_generated_skill(
     )
 
 
-def _rewrite_skill_content(
+def _resolve_relative_references(
+    skill_dir: Path,
     content: str,
-    *,
-    codex_skill_name: str,
-    plugin_root: Path,
-) -> tuple[str, tuple[str, ...], bool]:
-    """Rewrite a relocated SKILL.md and report vendored sibling skill names."""
-    rewritten = _rewrite_frontmatter_name(content, codex_skill_name)
-    needs_plugin_scripts = SKILL_BASE_PLUGIN_ROOT in rewritten
+) -> tuple[str, dict[str, Path]]:
+    """Resolve ../references in skill content relative to the skill's disk location.
 
-    sibling_skills = tuple(
-        sorted({match.group("skill") for match in SIBLING_SKILL_REF_RE.finditer(rewritten)})
-    )
-    missing_sibling_skills = [
-        sibling_skill_name
-        for sibling_skill_name in sibling_skills
-        if not (plugin_root / "skills" / sibling_skill_name).is_dir()
-    ]
-    if missing_sibling_skills:
-        raise TranslationError(
-            "Skill references missing sibling skill(s): "
-            + ", ".join(missing_sibling_skills)
-        )
+    Returns rewritten content and a mapping of target directory names to
+    source paths on disk.  Missing referenced paths are a hard error.
+    """
+    matches = set(SIBLING_SKILL_REF_RE.findall(content))
+    if not matches:
+        return content, {}
 
-    for sibling_skill_name in sibling_skills:
-        rewritten = rewritten.replace(
-            f"../{sibling_skill_name}/",
-            f"_plugin/skills/{sibling_skill_name}/",
-        )
+    referenced_sources: dict[str, Path] = {}
+    rewritten = content
+    existing_dirs = {
+        entry.name for entry in skill_dir.iterdir()
+        if entry.is_dir() and entry.name in OPTIONAL_SKILL_DIRS
+    }
 
-    if SKILL_BASE_PLUGIN_ROOT in rewritten:
-        rewritten = rewritten.replace(SKILL_BASE_PLUGIN_ROOT, RELOCATED_PLUGIN_ROOT)
+    for ref_name in sorted(matches):
+        resolved = (skill_dir / ".." / ref_name).resolve()
+        if not resolved.is_dir():
+            raise TranslationError(
+                f"Skill references missing sibling `{ref_name}`: {skill_dir / 'SKILL.md'}"
+            )
+        if ref_name in existing_dirs:
+            raise TranslationError(
+                f"Referenced sibling `{ref_name}` collides with an existing directory in skill: {skill_dir / 'SKILL.md'}"
+            )
+        referenced_sources[ref_name] = resolved
+        rewritten = rewritten.replace(f"../{ref_name}/", f"{ref_name}/")
 
-    return rewritten, sibling_skills, needs_plugin_scripts
+    return rewritten, referenced_sources
 
 
 def _rewrite_frontmatter_name(content: str, codex_skill_name: str) -> str:
