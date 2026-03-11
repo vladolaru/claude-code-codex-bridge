@@ -11,7 +11,7 @@ from cc_codex_bridge.discover import discover_latest_plugins
 from cc_codex_bridge.model import GeneratedSkill, GeneratedSkillFile, TranslationError
 from cc_codex_bridge.registry import hash_generated_skill
 from cc_codex_bridge.translate_agents import translate_installed_agents
-from cc_codex_bridge.translate_skills import translate_installed_skills
+from cc_codex_bridge.translate_skills import translate_installed_skills, translate_standalone_skills
 
 
 def test_generated_skills_copy_bundled_resources(make_plugin_version, tmp_path: Path):
@@ -334,6 +334,67 @@ def test_agent_and_skill_translation_share_the_same_frontmatter_entrypoint(
         version_dir / "agents" / "reviewer.md",
         version_dir / "skills" / "prompt-engineer" / "SKILL.md",
     ]
+
+
+def test_translate_user_skill(tmp_path: Path):
+    """User-level skills are translated with a user- prefix."""
+    skill_dir = tmp_path / "skills" / "my-tool"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: my-tool\ndescription: A tool\n---\n\nUse this.\n"
+    )
+
+    result = translate_standalone_skills((skill_dir,), scope="user")
+
+    assert len(result) == 1
+    assert result[0].install_dir_name == "user-my-tool"
+    assert result[0].codex_skill_name == "user-my-tool"
+    skill_md = next(f for f in result[0].files if f.relative_path == Path("SKILL.md"))
+    assert b"name: user-my-tool" in skill_md.content
+
+
+def test_translate_project_skill(tmp_path: Path):
+    """Project-level skills use raw names (no scope prefix)."""
+    skill_dir = tmp_path / "skills" / "run-tests"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: run-tests\ndescription: Run the test suite\n---\n\nRun tests.\n"
+    )
+
+    result = translate_standalone_skills((skill_dir,), scope="project")
+
+    assert len(result) == 1
+    assert result[0].install_dir_name == "run-tests"
+    assert result[0].codex_skill_name == "run-tests"
+    skill_md = next(f for f in result[0].files if f.relative_path == Path("SKILL.md"))
+    assert b"name: run-tests" in skill_md.content
+
+
+def test_translate_standalone_skill_with_sibling_reference(tmp_path: Path):
+    """Standalone skills resolve ../references to filesystem siblings."""
+    skills_dir = tmp_path / "skills"
+    skill_dir = skills_dir / "my-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: my-skill\ndescription: test\n---\n\nRead `../shared/guide.md`.\n"
+    )
+    shared = skills_dir / "shared"
+    shared.mkdir()
+    (shared / "guide.md").write_text("Guide content.\n")
+
+    result = translate_standalone_skills((skill_dir,), scope="user")
+
+    assert len(result) == 1
+    skill_md = next(f for f in result[0].files if f.relative_path == Path("SKILL.md"))
+    assert b"shared/guide.md" in skill_md.content
+    guide = next(f for f in result[0].files if f.relative_path == Path("shared") / "guide.md")
+    assert guide.content == b"Guide content.\n"
+
+
+def test_translate_standalone_skill_empty_input():
+    """Empty skill paths produce empty result."""
+    result = translate_standalone_skills((), scope="user")
+    assert result == ()
 
 
 def _write_skill_directory(destination: Path, skill: GeneratedSkill) -> Path:

@@ -73,6 +73,70 @@ def translate_installed_skills(
     return tuple(sorted(generated, key=lambda item: item.install_dir_name))
 
 
+def translate_standalone_skills(
+    skill_paths: Iterable[Path],
+    *,
+    scope: str,
+) -> tuple[GeneratedSkill, ...]:
+    """Translate user-level or project-level Claude skills into Codex skills.
+
+    User-level skills get a ``user-`` prefix for the install directory name
+    to avoid collisions in the global ``~/.codex/skills/`` registry.
+
+    Project-level skills keep their raw directory name because they are
+    installed to project-local ``.codex/skills/`` where project scope
+    provides natural isolation.
+    """
+    generated: list[GeneratedSkill] = []
+
+    for skill_path in skill_paths:
+        original_name = _read_required_skill_name(skill_path / "SKILL.md")
+
+        if scope == "project":
+            install_dir_name = skill_path.name
+        else:
+            install_dir_name = f"{scope}-{skill_path.name}"
+
+        generated_files: dict[Path, tuple[bytes, int]] = {}
+        _copy_skill_tree(skill_path, Path(), generated_files)
+
+        skill_content = read_utf8_text(
+            skill_path / "SKILL.md", label="skill file", error_type=TranslationError
+        )
+        rewritten, referenced_sources = _resolve_relative_references(
+            skill_path, skill_content,
+        )
+        rewritten = _rewrite_frontmatter_name(rewritten, install_dir_name)
+        generated_files[Path("SKILL.md")] = (
+            rewritten.encode(),
+            (skill_path / "SKILL.md").stat().st_mode & 0o777,
+        )
+
+        for target_name, source_path in referenced_sources.items():
+            _copy_tree(source_path, Path(target_name), generated_files)
+
+        files = tuple(
+            GeneratedSkillFile(
+                relative_path=path,
+                content=generated_files[path][0],
+                mode=generated_files[path][1],
+            )
+            for path in sorted(generated_files)
+        )
+
+        generated.append(GeneratedSkill(
+            marketplace=f"_{scope}",
+            plugin_name="personal" if scope == "user" else "local",
+            source_path=skill_path,
+            install_dir_name=install_dir_name,
+            original_skill_name=original_name,
+            codex_skill_name=install_dir_name,
+            files=files,
+        ))
+
+    return tuple(sorted(generated, key=lambda s: s.install_dir_name))
+
+
 def _read_required_skill_name(skill_md_path: Path) -> str:
     """Read the canonical skill name from SKILL.md frontmatter."""
     parsed_frontmatter, _ = frontmatter.parse_markdown_with_frontmatter(skill_md_path)
