@@ -16,6 +16,7 @@ from cc_codex_bridge.model import ReconcileError
 DEFAULT_START_INTERVAL = 300
 DEFAULT_LAUNCHAGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
 DEFAULT_LOGS_DIR = Path.home() / "Library" / "Logs" / "codex-bridge"
+BRIDGE_LABEL_PREFIX = "com.openai.codex-bridge."
 
 
 def build_launchagent_label(project_root: str | Path) -> str:
@@ -23,7 +24,7 @@ def build_launchagent_label(project_root: str | Path) -> str:
     project_path = Path(project_root).expanduser().resolve()
     slug = re.sub(r"[^A-Za-z0-9]+", "-", project_path.name).strip("-").lower() or "project"
     stable_hash = uuid5(NAMESPACE_URL, str(project_path)).hex[:10]
-    return f"com.openai.codex-bridge.{slug}.{stable_hash}"
+    return f"{BRIDGE_LABEL_PREFIX}{slug}.{stable_hash}"
 
 
 def build_launchagent_plist(
@@ -94,3 +95,21 @@ def install_launchagent(
         temp_path = Path(handle.name)
     temp_path.replace(destination)
     return destination
+
+
+def find_bridge_launchagents(
+    *,
+    launchagents_dir: str | Path | None = None,
+) -> tuple[Path, ...]:
+    """Return paths of bridge LaunchAgent plists in the given directory."""
+    root = Path(launchagents_dir or DEFAULT_LAUNCHAGENTS_DIR).expanduser().resolve()
+    if not root.is_dir():
+        return ()
+    return tuple(
+        sorted(
+            p for p in root.iterdir()
+            if p.is_file()
+            and p.name.startswith(BRIDGE_LABEL_PREFIX)
+            and p.name.endswith(".plist")
+        )
+    )
