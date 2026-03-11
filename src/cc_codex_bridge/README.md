@@ -168,6 +168,21 @@ Apply generated outputs:
 cc-codex-bridge reconcile --project .
 ```
 
+Remove bridge artifacts from a single project:
+
+```bash
+cc-codex-bridge clean --project .
+cc-codex-bridge clean --dry-run --project .
+```
+
+Remove all bridge artifacts from the machine:
+
+```bash
+cc-codex-bridge uninstall --dry-run
+cc-codex-bridge uninstall --dry-run --json
+cc-codex-bridge uninstall
+```
+
 Useful overrides:
 
 - `--cache-dir /path/to/claude/plugins/cache`
@@ -294,12 +309,13 @@ This implementation covers:
 - agent translation
 - skill translation
 - reconcile and state tracking
+- project-level artifact cleanup via `clean`
+- machine-level full artifact removal via `uninstall`
 - macOS LaunchAgent generation/installation
 
 It intentionally does not cover:
 
 - a filesystem watcher mode
-- a `clean` command
 - changing Claude Code’s native runtime model
 
 This README is the practical summary.

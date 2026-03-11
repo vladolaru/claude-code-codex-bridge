@@ -53,6 +53,21 @@ cc-codex-bridge status --project .
 cc-codex-bridge reconcile --project .
 ```
 
+Remove bridge artifacts from a single project:
+
+```bash
+cc-codex-bridge clean --project .
+cc-codex-bridge clean --dry-run --project .
+```
+
+Remove all bridge artifacts from the machine:
+
+```bash
+cc-codex-bridge uninstall --dry-run
+cc-codex-bridge uninstall --dry-run --json
+cc-codex-bridge uninstall
+```
+
 ## Install From A Local Checkout
 
 For direct installation from a local clone, install the package non-editably:

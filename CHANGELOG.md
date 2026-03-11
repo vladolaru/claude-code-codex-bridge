@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Added `clean` command to remove all bridge-generated artifacts from one project, release global skill registry claims, and delete last-owner skill directories.
+- Added `uninstall` command to remove all bridge artifacts from the machine: discovers projects from the global registry, cleans each accessible one, removes remaining global skills/registry/AGENTS.md, and removes bridge LaunchAgent plists.
+- Added `--dry-run` support for both `clean` and `uninstall`.
+- Added `--json` output for `uninstall --dry-run`.
+- Added `find_bridge_launchagents()` for discovering bridge LaunchAgent plists by label prefix.
+
 ## [0.4.0] - 2026-03-11
 
 ### Added

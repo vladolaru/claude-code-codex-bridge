@@ -75,6 +75,8 @@ If a behavior is described differently in multiple docs:
 - translation of Claude skills into self-contained Codex skills
 - safe reconcile of generated project files and generated Codex skill directories
 - state tracking for generator-owned outputs
+- project-level artifact cleanup via `clean`
+- machine-level full artifact removal via `uninstall`
 - macOS LaunchAgent rendering and installation for scheduled reconcile runs
 
 ### Out of scope
@@ -447,6 +449,21 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
   - fail before any writes on unsupported-agent diagnostics
   - apply the desired state to disk
   - print summary and applied changes
+- `clean`
+  - remove all bridge-generated artifacts from one project
+  - release global skill registry claims for the project
+  - delete last-owner skill directories
+  - preserve hand-authored files (AGENTS.md, bridge.toml)
+  - do not touch global instructions (~/.codex/AGENTS.md)
+  - support `--dry-run` for preview
+- `uninstall`
+  - discover all projects from the global skill registry
+  - clean each accessible project (skip and report inaccessible ones)
+  - remove remaining global skills, registry, and AGENTS.md
+  - remove bridge LaunchAgent plists
+  - support `--dry-run` for preview
+  - support `--dry-run --json` for structured output
+  - support `--launchagents-dir` override
 
 Pipeline commands (`validate`, `status`, `reconcile`) support:
 
@@ -523,10 +540,13 @@ Current runtime module responsibilities:
   - Codex skill translation for plugins and standalone sources, plus relative-reference resolution and vendoring helpers
 - `reconcile.py`
   - desired-state modeling, diffing, atomic apply, report formatting
+  - project-level cleanup via `clean_project()`
+  - machine-level uninstall via `uninstall_all()`
 - `state.py`
   - project-local managed-state serialization and validation
 - `install_launchagent.py`
   - LaunchAgent label generation, plist rendering, plist installation
+  - bridge LaunchAgent plist discovery via `find_bridge_launchagents()`
 - `release_bundle.py`
   - GitHub Release installer asset generation for offline wheelhouse installs
 
@@ -547,6 +567,7 @@ The suite currently verifies:
 - CLI command behavior including multi-source integration
 - end-to-end multi-source scenario testing with all discovery scopes
 - LaunchAgent rendering and installation
+- project-level clean and machine-level uninstall
 - doctor reporting and release-bundle generation
 
 The test suite is the executable check for the invariants described in this file.
