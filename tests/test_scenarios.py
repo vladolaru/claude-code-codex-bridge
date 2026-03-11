@@ -693,3 +693,73 @@ def test_two_projects_share_user_setup(make_project, tmp_path: Path):
 
     # User skill still exists — both projects still claim it
     assert user_skill.exists()
+
+
+def test_selective_exclusion_via_config_and_cli(make_project, tmp_path: Path):
+    """Exclude specific skills and agents via bridge.toml and CLI flags.
+
+    Verifies:
+    - Excluded plugin skill is not in global registry
+    - Excluded plugin agent is not in config.toml or prompt files
+    - Non-excluded sources are unaffected
+    - CLI --exclude-plugin removes entire plugin
+    """
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "claude-home"
+    codex_home = tmp_path / "codex-home"
+    cache_root = claude_home / "plugins" / "cache"
+
+    build_plugin(cache_root, "vlad-plugins", "review-tools", "1.12.0")
+    build_user_skill_simple(claude_home, "url-shorthand")
+    build_project_agent(project_root, "reviewer", tools=("Read", "Grep"))
+
+    # bridge.toml: exclude one plugin skill and one plugin agent
+    build_bridge_toml(project_root, (
+        "[exclude]\n"
+        'skills = ["vlad-plugins/review-tools/software-architecture"]\n'
+        'agents = ["vlad-plugins/review-tools/performance-reviewer.md"]\n'
+    ))
+
+    assert reconcile(project_root, claude_home, codex_home) == 0
+
+    # -- Excluded skill NOT in global registry --
+    assert not (codex_home / "skills" / "vlad-plugins-review-tools-software-architecture").exists()
+
+    # -- Other skills still present --
+    assert (codex_home / "skills" / "vlad-plugins-review-tools-code-review" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "user-url-shorthand" / "SKILL.md").exists()
+
+    # -- Excluded agent NOT in config or prompts --
+    config = (project_root / ".codex" / "config.toml").read_text()
+    assert "performance_reviewer" not in config
+
+    # -- Other agents still present --
+    assert "vlad-plugins_review-tools_security_reviewer" in config
+    assert "vlad-plugins_review-tools_a11y_reviewer" in config
+    assert "project_reviewer" in config
+
+    prompts = project_root / ".codex" / "prompts" / "agents"
+    prompt_names = sorted(p.name for p in prompts.glob("*.md"))
+    assert not any("performance" in n for n in prompt_names)
+    assert len(prompt_names) == 3  # security + a11y + project reviewer
+
+    # --- Now test CLI --exclude-plugin overrides ---
+    exit_code = cli.main([
+        "reconcile",
+        "--project", str(project_root),
+        "--claude-home", str(claude_home),
+        "--codex-home", str(codex_home),
+        "--exclude-plugin", "vlad-plugins/review-tools",
+    ])
+    assert exit_code == 0
+
+    # -- Plugin skills removed from global registry --
+    assert not (codex_home / "skills" / "vlad-plugins-review-tools-code-review").exists()
+    assert not (codex_home / "skills" / "vlad-plugins-review-tools-accessible-frontend").exists()
+
+    # -- User skill and project agent still present --
+    assert (codex_home / "skills" / "user-url-shorthand" / "SKILL.md").exists()
+    config_after = (project_root / ".codex" / "config.toml").read_text()
+    assert "project_reviewer" in config_after
+    # Plugin agents removed
+    assert "security_reviewer" not in config_after
