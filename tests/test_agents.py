@@ -19,6 +19,7 @@ from cc_codex_bridge.render_codex_config import (
 )
 from cc_codex_bridge.translate_agents import (
     format_agent_translation_diagnostics,
+    translate_standalone_agents,
     translate_tools,
     translate_installed_agents,
     translate_installed_agents_with_diagnostics,
@@ -464,3 +465,61 @@ def test_parse_frontmatter_lines_rejects_unsupported_yaml_runtime_shapes():
         match="Unsupported frontmatter value at frontmatter.options: set",
     ):
         parse_frontmatter_lines(["options: !!set {Read: null}"])
+
+
+def test_translate_user_agent(tmp_path: Path):
+    """User-level agents are translated with a user_ role prefix."""
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
+    (agents_dir / "my-helper.md").write_text(
+        "---\nname: my-helper\ndescription: Helps with tasks\ntools:\n  - Read\n  - Bash\n---\n\nYou help.\n"
+    )
+
+    result = translate_standalone_agents((agents_dir / "my-helper.md",), scope="user")
+
+    assert len(result.roles) == 1
+    role = result.roles[0]
+    assert role.role_name == "user_my_helper"
+    assert role.prompt_body == "You help.\n"
+    assert "bash" in role.tools
+    assert "read" in role.tools
+    assert role.prompt_relpath.as_posix() == "prompts/agents/user-my-helper.md"
+
+
+def test_translate_project_agent(tmp_path: Path):
+    """Project-level agents are translated with a project_ role prefix."""
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
+    (agents_dir / "code-reviewer.md").write_text(
+        "---\nname: code-reviewer\ndescription: Reviews code\ntools:\n  - Read\n  - Grep\n---\n\nYou review code.\n"
+    )
+
+    result = translate_standalone_agents((agents_dir / "code-reviewer.md",), scope="project")
+
+    assert len(result.roles) == 1
+    role = result.roles[0]
+    assert role.role_name == "project_code_reviewer"
+    assert role.prompt_relpath.as_posix() == "prompts/agents/project-code-reviewer.md"
+    assert role.tools == ("grep", "read")
+
+
+def test_translate_standalone_agent_with_unsupported_tools(tmp_path: Path):
+    """Standalone agents with unsupported tools produce diagnostics."""
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
+    (agents_dir / "broken.md").write_text(
+        "---\nname: broken\ndescription: Review\ntools:\n  - Read\n  - NotebookEdit\n---\n\nPrompt.\n"
+    )
+
+    result = translate_standalone_agents((agents_dir / "broken.md",), scope="user")
+
+    assert result.roles == ()
+    assert len(result.diagnostics) == 1
+    assert result.diagnostics[0].unsupported_tools == ("NotebookEdit",)
+
+
+def test_translate_standalone_agent_empty_input():
+    """Empty agent paths produce empty result."""
+    result = translate_standalone_agents((), scope="user")
+    assert result.roles == ()
+    assert result.diagnostics == ()

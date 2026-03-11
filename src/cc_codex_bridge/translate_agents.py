@@ -30,6 +30,66 @@ ROLE_AGENT_RE = re.compile(r"[^A-Za-z0-9_]+")
 PROMPT_COMPONENT_RE = re.compile(r"[^A-Za-z0-9-]+")
 
 
+def translate_standalone_agents(
+    agent_paths: Iterable[Path],
+    *,
+    scope: str,
+    default_model: str = "gpt-5.3-codex",
+) -> AgentTranslationResult:
+    """Translate user-level or project-level Claude agent files into Codex roles.
+
+    Standalone agents use a scope prefix (user_ or project_) instead of
+    a marketplace prefix for role names and prompt file stems.
+    """
+    roles: list[GeneratedAgentRole] = []
+    diagnostics: list[AgentTranslationDiagnostic] = []
+
+    for agent_path in agent_paths:
+        parsed_fm, body = frontmatter.parse_markdown_with_frontmatter(agent_path)
+        agent_name = str(parsed_fm.get("name", "")).strip()
+        if not agent_name:
+            raise TranslationError(f"Agent missing required name frontmatter: {agent_path}")
+
+        description = str(parsed_fm.get("description", "")).strip()
+        if not description:
+            raise TranslationError(f"Agent missing required description frontmatter: {agent_path}")
+
+        unsupported = _unsupported_tools(parsed_fm.get("tools"))
+        if unsupported:
+            diagnostics.append(
+                AgentTranslationDiagnostic(
+                    source_path=agent_path,
+                    agent_name=agent_name,
+                    unsupported_tools=unsupported,
+                )
+            )
+            continue
+
+        translated_tools = translate_tools(parsed_fm.get("tools"))
+        normalized_name = _normalize_name(agent_name)
+        role_name = f"{scope}_{normalized_name}"
+        prompt_stem = f"{scope}-{_normalize_prompt_component(agent_name, kind='agent name')}"
+
+        roles.append(
+            GeneratedAgentRole(
+                plugin_name=f"_{scope}",
+                source_path=agent_path,
+                role_name=role_name,
+                description=description,
+                original_model_hint=_optional_str(parsed_fm.get("model")),
+                model=default_model,
+                tools=translated_tools,
+                prompt_relpath=Path("prompts") / "agents" / f"{prompt_stem}.md",
+                prompt_body=body.strip() + ("\n" if body.strip() else ""),
+            )
+        )
+
+    return AgentTranslationResult(
+        roles=tuple(sorted(roles, key=lambda r: r.role_name)),
+        diagnostics=tuple(sorted(diagnostics, key=lambda d: str(d.source_path))),
+    )
+
+
 def translate_installed_agents(
     plugins: Iterable[InstalledPlugin],
     *,
