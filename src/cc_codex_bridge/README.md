@@ -302,9 +302,4 @@ It intentionally does not cover:
 - a `clean` command
 - changing Claude Code’s native runtime model
 
-This README is the practical summary. The full decision record remains in the spec and implementation plan linked below.
-
-For deeper design context, see:
-
-- [generator spec](/Users/vladolaru/Work/a8c/claude-code-plugins/.claude/docs/plans/2026-03-03-codex-interop-generator-spec.md)
-- [implementation plan](/Users/vladolaru/Work/a8c/claude-code-plugins/.claude/docs/plans/2026-03-03-codex-interop-generator-implementation-plan.md)
+This README is the practical summary.
