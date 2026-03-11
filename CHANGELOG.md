@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Added `reconcile-all` command to reconcile all registered projects in one pass.
+- Added `projects` list to global registry for tracking reconciled project roots.
+- Added single global LaunchAgent that runs `reconcile-all` every 30 minutes.
+
+### Changed
+
+- Changed `install-launchagent` to produce a global plist instead of per-project plists.
+- Changed `uninstall` project discovery to use the registry projects list.
+- Changed default LaunchAgent interval from 300 to 1800 seconds.
+
+### Removed
+
+- Removed per-project LaunchAgent support from CLI commands.
+
 ## [0.5.0] - 2026-03-11
 
 ### Added

@@ -53,6 +53,14 @@ cc-codex-bridge status --project .
 cc-codex-bridge reconcile --project .
 ```
 
+Reconcile all registered projects at once:
+
+```bash
+cc-codex-bridge reconcile-all
+cc-codex-bridge reconcile-all --dry-run
+cc-codex-bridge reconcile-all --dry-run --json
+```
+
 Remove bridge artifacts from a single project:
 
 ```bash
@@ -66,6 +74,13 @@ Remove all bridge artifacts from the machine:
 cc-codex-bridge uninstall --dry-run
 cc-codex-bridge uninstall --dry-run --json
 cc-codex-bridge uninstall
+```
+
+Install the global LaunchAgent to run reconcile-all every 30 minutes:
+
+```bash
+cc-codex-bridge install-launchagent
+cc-codex-bridge print-launchagent
 ```
 
 ## Install From A Local Checkout

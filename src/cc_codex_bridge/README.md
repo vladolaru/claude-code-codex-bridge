@@ -220,6 +220,12 @@ The normal workflow is:
 8. Run `cc-codex-bridge reconcile --project .`
 9. Use the generated Codex artifacts from `.codex/*`, `CLAUDE.md`, and `~/.codex/skills/*`
 
+To reconcile all previously reconciled projects at once:
+
+```bash
+cc-codex-bridge reconcile-all
+```
+
 If you do not want to install the console script, either install the package and use `python3 -m cc_codex_bridge ...` or run from a raw checkout with `PYTHONPATH=src`.
 
 Important:
@@ -246,29 +252,29 @@ That is also a deliberate decision:
 - watcher mode is deferred
 - installed Claude plugin state remains the source of truth
 
-Print a LaunchAgent plist:
+Print the global LaunchAgent plist:
 
 ```bash
-cc-codex-bridge print-launchagent --project .
+cc-codex-bridge print-launchagent
 ```
 
-Install a LaunchAgent plist into `~/Library/LaunchAgents/`:
+Install the global LaunchAgent plist into `~/Library/LaunchAgents/`:
 
 ```bash
-cc-codex-bridge install-launchagent --project .
+cc-codex-bridge install-launchagent
 ```
+
+The global LaunchAgent runs `reconcile-all` every 30 minutes (1800 seconds).
 
 Optional scheduling overrides:
 
 - `--interval 900`
-- `--cache-dir ...`
-- `--codex-home ...`
 - `--logs-dir ...`
 - `--python-executable ...`
 - `--cli-path ...`
 - `--label ...`
 
-`install-launchagent` writes the plist and prints the next `launchctl bootstrap` command. It does not run `launchctl` automatically.
+`install-launchagent` writes the plist and prints the next `launchctl bootstrap` command. It does not run `launchctl` automatically. If existing per-project plists are found, it warns and prints `launchctl bootout` commands.
 
 ## Implementation Notes
 

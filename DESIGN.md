@@ -169,6 +169,7 @@ The global registry records:
 - generated skill install directory names
 - deterministic content hashes for generated skill trees
 - owning project roots for each generated skill directory
+- a sorted list of all reconciled project roots (the `projects` list)
 
 ### Safety rules
 
@@ -457,13 +458,20 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
   - do not touch global instructions (~/.codex/AGENTS.md)
   - support `--dry-run` for preview
 - `uninstall`
-  - discover all projects from the global skill registry
+  - discover all projects from the global registry projects list (with fallback to skill owners for backwards compatibility)
   - clean each accessible project (skip and report inaccessible ones)
   - remove remaining global skills, registry, and AGENTS.md
   - remove bridge LaunchAgent plists
   - support `--dry-run` for preview
   - support `--dry-run --json` for structured output
   - support `--launchagents-dir` override
+- `reconcile-all`
+  - read the projects list from the global registry
+  - run the full discover-translate-reconcile pipeline for each registered project using default paths
+  - skip inaccessible or invalid projects with an error entry in the report
+  - exit code 0 if all succeed, 1 if any error
+  - support `--dry-run` for preview
+  - support `--json` for structured output
 
 Pipeline commands (`validate`, `status`, `reconcile`) support:
 
@@ -479,11 +487,12 @@ All exclusion flags are repeatable. `.codex/bridge.toml` can define persistent e
 ### LaunchAgent commands
 
 - `print-launchagent`
-  - render a LaunchAgent plist to stdout
+  - render the global reconcile-all LaunchAgent plist to stdout
 - `install-launchagent`
-  - write the plist into a LaunchAgents directory and print the `launchctl bootstrap` next step
+  - write the global plist into a LaunchAgents directory and print the `launchctl bootstrap` next step
+  - warn about existing per-project plists with removal commands
 
-LaunchAgent commands resolve the target project root with the same upward `AGENTS.md` discovery used by the main pipeline.
+LaunchAgent commands no longer require `--project` and produce a global plist that runs `reconcile-all`.
 
 ### CLI invariants
 
@@ -501,13 +510,17 @@ LaunchAgent support lives in `src/cc_codex_bridge/install_launchagent.py`.
 Current design:
 
 - macOS scheduling is supported through `launchd`
-- the generated job runs `reconcile`
-- the job always includes `--project <resolved-project-root>`
-- optional `--cache-dir` and `--codex-home` overrides are embedded when supplied
+- a single global LaunchAgent runs `reconcile-all` to reconcile all registered projects
+- the global plist label is `com.openai.codex-bridge.reconcile-all`
+- the default interval is 1800 seconds (30 minutes)
 - the plist uses `RunAtLoad` and `StartInterval`
 - logs go to `~/Library/Logs/codex-bridge/` by default
+- `install-launchagent` does not require `--project` — it produces the global plist
+- `install-launchagent` warns about existing per-project plists and prints `launchctl bootout` commands
 
 The tool installs the plist file but does not run `launchctl` automatically.
+
+Per-project LaunchAgent plists are no longer generated. The legacy `build_launchagent_plist()` function is preserved for backwards compatibility but is not used by the CLI.
 
 ## 12. Module Map
 
@@ -541,6 +554,7 @@ Current runtime module responsibilities:
 - `reconcile.py`
   - desired-state modeling, diffing, atomic apply, report formatting
   - project-level cleanup via `clean_project()`
+  - multi-project reconcile via `reconcile_all()`
   - machine-level uninstall via `uninstall_all()`
 - `state.py`
   - project-local managed-state serialization and validation
@@ -566,8 +580,10 @@ The suite currently verifies:
 - reconcile idempotence, stale cleanup, ownership safety, diff reporting, and global instructions bridging
 - CLI command behavior including multi-source integration
 - end-to-end multi-source scenario testing with all discovery scopes
-- LaunchAgent rendering and installation
+- LaunchAgent rendering and installation (global plist model)
 - project-level clean and machine-level uninstall
+- multi-project reconcile-all with missing project error handling
+- global registry projects list round-tripping and backwards compatibility
 - doctor reporting and release-bundle generation
 
 The test suite is the executable check for the invariants described in this file.
