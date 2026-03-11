@@ -62,6 +62,34 @@ class ReconcileReport:
 
 
 @dataclass(frozen=True)
+class LaunchAgentRemoval:
+    """One LaunchAgent plist to remove."""
+
+    path: Path
+    bootout_command: str
+
+
+@dataclass(frozen=True)
+class UninstallProjectResult:
+    """Result of cleaning one project during uninstall."""
+
+    root: Path
+    status: str  # "cleaned" | "skipped" | "no_state"
+    changes: tuple[Change, ...]
+    skip_reason: str = ""
+
+
+@dataclass(frozen=True)
+class UninstallReport:
+    """Full uninstall result."""
+
+    projects: tuple[UninstallProjectResult, ...]
+    global_removals: tuple[Change, ...]
+    launchagent_removals: tuple[LaunchAgentRemoval, ...]
+    applied: bool
+
+
+@dataclass(frozen=True)
 class _RegistrySnapshot:
     """One loaded global-registry snapshot."""
 
@@ -172,6 +200,218 @@ def reconcile_desired_state(desired: DesiredState) -> ReconcileReport:
 
     _apply_changes(desired, plan)
     return ReconcileReport(changes=plan.changes, applied=True)
+
+
+def clean_project(
+    project_root: str | Path,
+    *,
+    codex_home: str | Path | None = None,
+    dry_run: bool = False,
+) -> ReconcileReport:
+    """Remove all bridge-generated artifacts from one project.
+
+    Loads the existing bridge state to determine what is managed, releases
+    global skill registry claims, and deletes managed project files plus the
+    state file.  Returns a report of what was (or would be) removed.
+    """
+    project_root_path = Path(project_root).expanduser().resolve()
+    codex_home_path = Path(codex_home or DEFAULT_CODEX_HOME).expanduser().resolve()
+    state_path = project_root_path / STATE_RELATIVE_PATH
+
+    if state_path.is_symlink():
+        raise ReconcileError(f"Refusing to use symlinked bridge state file: {state_path}")
+    previous_state = BridgeState.from_path(state_path)
+    if previous_state is None:
+        return ReconcileReport(changes=(), applied=True)
+
+    if previous_state.project_root != project_root_path:
+        raise ReconcileError(
+            "Bridge state belongs to a different project root: "
+            f"{previous_state.project_root}"
+        )
+
+    changes: list[Change] = []
+
+    # Remove managed project files (except the state file itself — removed last)
+    for relative in sorted(previous_state.managed_project_files):
+        if relative == STATE_RELATIVE_PATH.as_posix():
+            continue
+        path = project_root_path / relative
+        if path.exists() and not path.is_symlink():
+            changes.append(Change("remove", path))
+
+    # Release skill ownership claims from the global registry
+    registry_path = codex_home_path / GLOBAL_REGISTRY_FILENAME
+    if registry_path.is_symlink():
+        raise ReconcileError(
+            f"Refusing to use symlinked global skill registry file: {registry_path}"
+        )
+    registry = GlobalSkillRegistry.from_path(registry_path)
+
+    registry_changed = False
+    if registry is not None:
+        updated_skills = dict(registry.skills)
+        for install_dir_name in sorted(registry.skills):
+            entry = registry.skills[install_dir_name]
+            if project_root_path not in entry.owners:
+                continue
+            remaining_owners = tuple(
+                owner for owner in entry.owners if owner != project_root_path
+            )
+            if remaining_owners:
+                updated_skills[install_dir_name] = GlobalSkillEntry(
+                    content_hash=entry.content_hash,
+                    owners=remaining_owners,
+                )
+            else:
+                del updated_skills[install_dir_name]
+                skill_path = codex_home_path / "skills" / install_dir_name
+                if skill_path.exists():
+                    changes.append(Change("remove", skill_path, resource_kind="skill"))
+            registry_changed = True
+
+        if registry_changed:
+            updated_registry = GlobalSkillRegistry(skills=updated_skills)
+    else:
+        updated_registry = None
+
+    if dry_run:
+        return ReconcileReport(changes=tuple(changes), applied=False)
+
+    # Apply removals
+    for change in changes:
+        if change.resource_kind == "skill":
+            if change.path.exists():
+                shutil.rmtree(change.path)
+        else:
+            change.path.unlink(missing_ok=True)
+            _cleanup_empty_parents(change.path.parent, project_root_path / ".codex")
+
+    # Update the registry
+    if registry_changed and updated_registry is not None:
+        _atomic_write_file(registry_path, updated_registry.to_json().encode())
+
+    # Remove the state file last
+    state_path.unlink(missing_ok=True)
+
+    return ReconcileReport(changes=tuple(changes), applied=True)
+
+
+def uninstall_all(
+    *,
+    codex_home: str | Path | None = None,
+    launchagents_dir: str | Path | None = None,
+    dry_run: bool = False,
+) -> UninstallReport:
+    """Remove all bridge-generated artifacts from the machine.
+
+    Discovers projects from the global skill registry, cleans each accessible
+    one, then removes global artifacts and LaunchAgent plists.
+    """
+    from cc_codex_bridge.install_launchagent import find_bridge_launchagents
+
+    codex_home_path = Path(codex_home or DEFAULT_CODEX_HOME).expanduser().resolve()
+    registry_path = codex_home_path / GLOBAL_REGISTRY_FILENAME
+
+    # Step 1: Discover project roots from the registry
+    project_roots: set[Path] = set()
+    if registry_path.exists() and not registry_path.is_symlink():
+        registry = GlobalSkillRegistry.from_path(registry_path)
+        if registry is not None:
+            for entry in registry.skills.values():
+                project_roots.update(entry.owners)
+
+    # Step 2: Clean each discovered project
+    project_results: list[UninstallProjectResult] = []
+    for root in sorted(project_roots, key=str):
+        if not root.is_dir():
+            project_results.append(UninstallProjectResult(
+                root=root,
+                status="skipped",
+                changes=(),
+                skip_reason="directory not found",
+            ))
+            continue
+
+        state_path = root / STATE_RELATIVE_PATH
+        if not state_path.exists():
+            project_results.append(UninstallProjectResult(
+                root=root,
+                status="no_state",
+                changes=(),
+            ))
+            continue
+
+        try:
+            report = clean_project(root, codex_home=codex_home_path, dry_run=dry_run)
+            project_results.append(UninstallProjectResult(
+                root=root,
+                status="cleaned",
+                changes=report.changes,
+            ))
+        except (ReconcileError, OSError, UnicodeError) as exc:
+            project_results.append(UninstallProjectResult(
+                root=root,
+                status="skipped",
+                changes=(),
+                skip_reason=str(exc),
+            ))
+
+    # Step 3: Remove remaining global artifacts
+    global_removals: list[Change] = []
+
+    # Force-remove any remaining skill directories still in the registry
+    # (handles skills owned by skipped projects)
+    if registry_path.exists() and not registry_path.is_symlink():
+        registry = GlobalSkillRegistry.from_path(registry_path)
+        if registry is not None:
+            for install_dir_name in sorted(registry.skills):
+                skill_path = codex_home_path / "skills" / install_dir_name
+                if skill_path.exists():
+                    global_removals.append(
+                        Change("remove", skill_path, resource_kind="skill")
+                    )
+
+    # Remove global AGENTS.md
+    global_agents_md = codex_home_path / "AGENTS.md"
+    if global_agents_md.exists() and not global_agents_md.is_symlink():
+        global_removals.append(
+            Change("remove", global_agents_md, resource_kind="global_instructions")
+        )
+
+    # Remove the registry file itself
+    if registry_path.exists():
+        global_removals.append(Change("remove", registry_path))
+
+    # Step 4: Discover LaunchAgent plists
+    bridge_plists = find_bridge_launchagents(launchagents_dir=launchagents_dir)
+    launchagent_removals = tuple(
+        LaunchAgentRemoval(
+            path=plist_path,
+            bootout_command=f"launchctl bootout gui/$(id -u) {plist_path}",
+        )
+        for plist_path in bridge_plists
+    )
+
+    if not dry_run:
+        # Apply global removals
+        for change in global_removals:
+            if change.resource_kind == "skill":
+                if change.path.exists():
+                    shutil.rmtree(change.path)
+            else:
+                change.path.unlink(missing_ok=True)
+
+        # Remove LaunchAgent plists
+        for removal in launchagent_removals:
+            removal.path.unlink(missing_ok=True)
+
+    return UninstallReport(
+        projects=tuple(project_results),
+        global_removals=tuple(global_removals),
+        launchagent_removals=launchagent_removals,
+        applied=not dry_run,
+    )
 
 
 def _apply_changes(desired: DesiredState, plan: _MutationPlan) -> None:
