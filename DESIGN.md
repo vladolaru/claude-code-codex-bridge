@@ -36,6 +36,11 @@ These are authoritative inputs:
 - installed Claude plugin skills discovered from the local Claude plugin cache
 - installed Claude plugin agents discovered from the local Claude plugin cache
 - plugin-local resources attached to those skills, such as `scripts/`, `references/`, `assets/`, and `agents/`
+- user-level Claude skills from `~/.claude/skills/`
+- user-level Claude agents from `~/.claude/agents/`
+- project-level Claude skills from `.claude/skills/`
+- project-level Claude agents from `.claude/agents/`
+- user-level global instructions from `~/.claude/CLAUDE.md`
 
 ### Generated outputs
 
@@ -62,6 +67,9 @@ If a behavior is described differently in multiple docs:
 
 - project discovery from the current directory or `--project`
 - Claude plugin discovery from the installed local Claude cache
+- user-level skill and agent discovery from `~/.claude/skills/` and `~/.claude/agents/`
+- project-level skill and agent discovery from `.claude/skills/` and `.claude/agents/`
+- user-level global instructions discovery from `~/.claude/CLAUDE.md`
 - selection of the latest installed plugin version by semantic version
 - translation of Claude agents into Codex role prompts and config entries
 - translation of Claude skills into self-contained Codex skills
@@ -73,7 +81,6 @@ If a behavior is described differently in multiple docs:
 
 - changing Claude Code behavior
 - hand-authored Codex-specific skills
-- project-local Codex skill mirrors
 - filesystem-wide project discovery
 - watcher mode
 - automatic `launchctl bootstrap`
@@ -86,14 +93,18 @@ The runtime is a deterministic pipeline:
 1. resolve the target project root by searching upward for `AGENTS.md`
 2. discover installed Claude plugins from `~/.claude/plugins/cache` or `--cache-dir`
 3. choose the highest semantic version for each `<marketplace>/<plugin>`
-4. load optional `.codex/bridge.toml` exclusions and merge any CLI exclusion flags
-5. filter discovered plugins/skills/agents by the effective exclusion set
-6. translate plugin agents into `GeneratedAgentRole` objects
-7. translate plugin skills into `GeneratedSkill` trees
-8. render project-local Codex prompt files and `.codex/config.toml`
-9. decide whether `CLAUDE.md` can be created or preserved as an `@AGENTS.md` shim
-10. build a full desired state for project files plus Codex skill directories
-11. inspect/preview or reconcile that desired state with ownership and rollback protections
+4. discover user-level skills, agents, and global instructions from `~/.claude/` (or `--claude-home`)
+5. discover project-level skills and agents from `.claude/`
+6. load optional `.codex/bridge.toml` exclusions and merge any CLI exclusion flags
+7. filter discovered plugins/skills/agents by the effective exclusion set
+8. translate plugin agents into `GeneratedAgentRole` objects
+9. translate standalone user and project agents into `GeneratedAgentRole` objects
+10. translate plugin and user skills into `GeneratedSkill` trees (global registry)
+11. translate project skills into project-local `GeneratedSkill` trees
+12. merge all agent roles and render project-local Codex prompt files and `.codex/config.toml`
+13. decide whether `CLAUDE.md` can be created or preserved as an `@AGENTS.md` shim
+14. build a full desired state for project files, Codex skill directories, and global instructions
+15. inspect/preview or reconcile that desired state with ownership and rollback protections
 
 The reconcile pipeline is shared by `validate`, `status`, and `reconcile`.
 
@@ -117,7 +128,11 @@ Utility commands such as `doctor` and the LaunchAgent commands are intentionally
 - `~/.codex/claude-code-interop-global-state.json`
   - global generated-skill ownership registry keyed by install directory name
 - `~/.codex/skills/<generated-skill-name>/`
-  - self-contained Codex skill directories derived from Claude skills
+  - self-contained Codex skill directories derived from Claude plugin and user skills
+- `~/.codex/AGENTS.md`
+  - user-global Codex instructions bridged from `~/.claude/CLAUDE.md`
+- `.codex/skills/<skill-name>/`
+  - project-local Codex skill directories derived from Claude project skills
 
 ### Local-only rule
 
@@ -192,7 +207,21 @@ Discovery lives in `src/cc_codex_bridge/discover.py`.
 - only directories with valid semantic-version names are considered plugin versions
 - malformed version directories are ignored
 - if a plugin has no valid semantic versions, discovery fails
-- if the cache is empty, discovery fails
+- an empty or missing plugin cache returns an empty tuple (non-fatal) when other sources exist
+
+### User-level discovery
+
+- user-level skills are read from `~/.claude/skills/` (or `--claude-home`)
+- each subdirectory containing `SKILL.md` is a discovered skill
+- user-level agents are read from `~/.claude/agents/` as `*.md` files
+- user-level global instructions are read from `~/.claude/CLAUDE.md` if present
+- `--claude-home` overrides the `~/.claude` base path for all user-level discovery
+
+### Project-level discovery
+
+- project-level skills are read from `<project>/.claude/skills/`
+- each subdirectory containing `SKILL.md` is a discovered skill
+- project-level agents are read from `<project>/.claude/agents/` as `*.md` files
 
 ### Version selection
 
@@ -240,10 +269,9 @@ Optional handled fields:
 
 Current mapping rules:
 
-- role name base = `<normalized_plugin_name>_<normalized_agent_name>`
-- role-name collisions are resolved by prefixing the normalized marketplace: `<marketplace>_<plugin>_<agent>`
-- prompt file path base = `.codex/prompts/agents/<normalized-plugin>-<normalized-agent>.md`
-- prompt-path collisions are resolved by prefixing the normalized marketplace: `.codex/prompts/agents/<marketplace>-<plugin>-<agent>.md`
+- plugin agents: role name = `<marketplace>_<plugin>_<normalized_agent>`, prompt path = `.codex/prompts/agents/<marketplace>-<plugin>-<agent>.md`
+- user agents: role name = `user_<normalized_agent>`, prompt path = `.codex/prompts/agents/user-<agent>.md`
+- project agents: role name = `project_<normalized_agent>`, prompt path = `.codex/prompts/agents/project-<agent>.md`
 - normalized generated names reject absolute paths, `..` traversal, and values that collapse to an empty identifier
 - prompt body = markdown body after frontmatter, normalized to end with a trailing newline when non-empty
 - model = fixed default `gpt-5.3-codex`
@@ -315,21 +343,22 @@ Current skill rules:
 
 Current relocation behavior:
 
-- references to `<skill base directory>/../..` are rewritten to `<skill base directory>/_plugin`
-- if plugin-root scripts are referenced this way, the plugin `scripts/` tree is vendored into `_plugin/scripts`
-- sibling skill references matching `../<skill>/...` are rewritten to `_plugin/skills/<skill>/...`
-- referenced sibling skill trees are vendored into `_plugin/skills/<skill>/`
-- missing referenced sibling skills are treated as a hard translation error
+- sibling skill references matching `../<name>/` are resolved relative to the skill's disk location
+- referenced sibling trees are vendored directly into the generated skill directory
+- collisions between referenced sibling names and existing skill subdirectories are a hard error
+- missing referenced siblings are treated as a hard translation error
 
 ### Skill naming
 
-Base generated install directory:
+All skill install directory names are always-prefixed and deterministic:
 
-- `<plugin_name>-<skill_directory_name>`
+- plugin skills: `<marketplace>-<plugin>-<skill_directory_name>` → global `~/.codex/skills/`
+- user skills: `user-<skill_directory_name>` → global `~/.codex/skills/`
+- project skills: `<skill_directory_name>` (raw, no prefix) → project-local `.codex/skills/`
 
-Conflict handling:
+### Skill routing
 
-- if multiple generated skills would share the same base directory name, the name is expanded to `<marketplace>-<plugin_name>-<skill_directory_name>`
+User-level and plugin skills are installed to the global Codex skill registry at `~/.codex/skills/`. Project-level skills are installed to project-local `.codex/skills/` directories as additional managed project files.
 
 ## 9. Reconcile Architecture
 
@@ -341,8 +370,9 @@ Reconcile lives in `src/cc_codex_bridge/reconcile.py`.
 
 - project root
 - Codex home
-- project files with desired bytes
-- generated skills
+- project files with desired bytes (includes project-local skill files)
+- generated skills (global registry)
+- global instructions content (for `~/.codex/AGENTS.md`)
 - path to the state file
 
 ### Diff model
@@ -363,13 +393,15 @@ Supported kinds in current reporting:
 
 1. load previous state if present
 2. load the current global skill registry under the resolved Codex home
-3. compute desired project file changes
+3. compute desired project file changes (including project-local skill files)
 4. compute desired generated-skill claims and reconcile changes from registry ownership plus on-disk content hashes
-5. validate ownership constraints
-6. write project file and skill directory changes directly
-7. write updated global registry files
-8. write the project-local state file
-9. remove stale managed outputs whose last owner released them
+5. compute desired global instructions changes for `~/.codex/AGENTS.md`
+6. validate ownership constraints
+7. write project file and skill directory changes directly
+8. write global instructions file if needed
+9. write updated global registry files
+10. write the project-local state file
+11. remove stale managed outputs whose last owner released them
 
 ### Write model
 
@@ -416,11 +448,14 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
   - apply the desired state to disk
   - print summary and applied changes
 
-Pipeline commands (`validate`, `status`, `reconcile`) support exclusion controls:
+Pipeline commands (`validate`, `status`, `reconcile`) support:
 
+- `--claude-home` to override the `~/.claude` base path for user-level discovery
 - `--exclude-plugin marketplace/plugin`
-- `--exclude-skill marketplace/plugin/skill`
-- `--exclude-agent marketplace/plugin/agent.md`
+- `--exclude-skill name` or `scope/name` or `marketplace/plugin/skill`
+- `--exclude-agent name.md` or `scope/name.md` or `marketplace/plugin/agent.md`
+
+Exclusion IDs use part-count disambiguation: 1 part matches all scopes, 2 parts match by scope (`user` or `project`), 3 parts match plugin sources.
 
 All exclusion flags are repeatable. `.codex/bridge.toml` can define persistent exclusions, and CLI exclusions override config values for the same entity kind in the current run.
 
@@ -464,11 +499,11 @@ Current runtime module responsibilities:
 - `cli.py`
   - argument parsing, command dispatch, summary/error reporting
 - `discover.py`
-  - project root resolution and installed-plugin discovery
+  - project root resolution, installed-plugin discovery, user/project skill and agent discovery, and user-level CLAUDE.md discovery
 - `doctor.py`
   - machine-level environment checks and doctor report rendering
 - `exclusions.py`
-  - exclusion config loading, validation, CLI-override resolution, and discovery filtering
+  - exclusion config loading, validation, CLI-override resolution, and discovery filtering for plugins and standalone sources
 - `model.py`
   - core dataclasses and domain-specific error types
 - `claude_shim.py`
@@ -485,7 +520,7 @@ Current runtime module responsibilities:
 - `registry.py`
   - global generated-skill registry serialization and deterministic skill hashing
 - `translate_skills.py`
-  - Codex skill translation plus relocation and vendoring helpers
+  - Codex skill translation for plugins and standalone sources, plus relative-reference resolution and vendoring helpers
 - `reconcile.py`
   - desired-state modeling, diffing, atomic apply, report formatting
 - `state.py`
@@ -506,9 +541,11 @@ The suite currently verifies:
 - plugin symlink resolution
 - `CLAUDE.md` shim safety
 - agent translation and deterministic rendering
-- skill translation, relocation rewriting, vendoring, and collision handling
-- reconcile idempotence, stale cleanup, ownership safety, and diff reporting
-- CLI command behavior
+- skill translation, relocation rewriting, vendoring, and standalone skill translation
+- exclusion filtering for plugins and standalone sources with part-count disambiguation
+- reconcile idempotence, stale cleanup, ownership safety, diff reporting, and global instructions bridging
+- CLI command behavior including multi-source integration
+- end-to-end multi-source scenario testing with all discovery scopes
 - LaunchAgent rendering and installation
 - doctor reporting and release-bundle generation
 
@@ -518,8 +555,6 @@ The test suite is the executable check for the invariants described in this file
 
 These are current implemented simplifications, not necessarily permanent design ideals:
 
-- only installed Claude plugins are inputs
-- user-level Claude skills and agents are described in the repo docs but are not yet implemented as a discovered input source in the current codebase
 - agent model mapping is fixed to one default Codex model
 - unsupported Claude tools are hard errors rather than being preserved or partially translated
 - frontmatter parsing uses safe YAML loading for frontmatter blocks plus strict

@@ -8,12 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Added discovery and translation of user-level skills (`~/.claude/skills/`) and agents (`~/.claude/agents/`).
+- Added discovery and translation of project-level skills (`.claude/skills/`) and agents (`.claude/agents/`).
+- Added bridging of user-level `~/.claude/CLAUDE.md` to `~/.codex/AGENTS.md` (Codex's native user-global instructions file).
+- Added `--claude-home` CLI flag to override the Claude home path for user-level discovery.
+- Allowed the bridge to operate without any marketplace plugins when user-level or project-level sources are present.
 - Added a machine-level `doctor` command with text and JSON output so installs can verify Python, Codex-home, Claude-cache, LaunchAgents, and PATH visibility before the project pipeline runs.
 - Added self-contained GitHub Release installer assets: a generated `install.sh`, a bundled macOS wheelhouse archive, and release checksums for GitHub-only installs without PyPI access.
 - Added a maintainer-facing `make release VERSION=X.Y.Z` command that verifies a clean worktree, runs tests, tags the release, and hands artifact publishing off to GitHub Actions.
 
 ### Changed
 
+- Simplified plugin skill naming to always use `<marketplace>-<plugin>-<skill>` prefix, removing context-dependent collision resolution.
+- Extended exclusion IDs to support 1-part (all scopes), 2-part (scope-specific), and 3-part (plugin-specific) formats via part-count disambiguation.
 - Simplified the reconcile engine by replacing the transaction staging, rollback,
   and dual-lock machinery with direct atomic writes. Mid-apply failures are
   self-healed by the next idempotent reconcile run.
