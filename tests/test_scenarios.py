@@ -400,3 +400,89 @@ def reconcile(project_root: Path, claude_home: Path, codex_home: Path) -> int:
         "--claude-home", str(claude_home),
         "--codex-home", str(codex_home),
     ])
+
+
+# ===========================================================================
+# Scenario tests
+# ===========================================================================
+
+
+def test_rich_plugin_ecosystem(make_project, tmp_path: Path):
+    """A plugin with multiple skills (scripts, references, sibling refs) and agents.
+
+    Models a real review-orchestration plugin like pirategoat-tools.
+    Verifies that all skills land in the global registry with correct content,
+    sibling references are vendored, scripts preserve permissions, .DS_Store
+    noise is filtered, and all agents appear in config.toml with correct tools.
+    """
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "claude-home"
+    codex_home = tmp_path / "codex-home"
+    cache_root = claude_home / "plugins" / "cache"
+
+    build_plugin(cache_root, "vlad-plugins", "review-tools", "1.12.0")
+
+    assert reconcile(project_root, claude_home, codex_home) == 0
+
+    skills_root = codex_home / "skills"
+
+    # -- code-review skill: scripts/ preserved with permissions --
+    cr_dir = skills_root / "vlad-plugins-review-tools-code-review"
+    cr_skill = cr_dir / "SKILL.md"
+    assert cr_skill.exists()
+    assert "multi-agent code review" in cr_skill.read_text()
+    cr_script = cr_dir / "scripts" / "run-review.py"
+    assert cr_script.exists()
+    assert cr_script.stat().st_mode & 0o111  # executable bit preserved
+
+    # -- software-architecture skill: companion files + nested references --
+    arch_dir = skills_root / "vlad-plugins-review-tools-software-architecture"
+    assert (arch_dir / "SKILL.md").exists()
+    assert (arch_dir / "solid-principles.md").exists()
+    assert "Single Responsibility" in (arch_dir / "solid-principles.md").read_text()
+    assert (arch_dir / "references" / "patterns" / "strategy.md").exists()
+    assert (arch_dir / "references" / "patterns" / "observer.md").exists()
+
+    # -- accessible-frontend skill: sibling vendored into generated tree --
+    a11y_dir = skills_root / "vlad-plugins-review-tools-accessible-frontend"
+    a11y_skill = a11y_dir / "SKILL.md"
+    assert a11y_skill.exists()
+    skill_content = a11y_skill.read_text()
+    # References rewritten from ../shared-references/ to shared-references/
+    assert "../shared-references/" not in skill_content
+    assert "shared-references/" in skill_content
+    # Sibling tree vendored
+    assert (a11y_dir / "shared-references" / "aria-patterns.md").exists()
+    assert "Combobox" in (a11y_dir / "shared-references" / "aria-patterns.md").read_text()
+
+    # -- shared-references also translated as its own skill --
+    sr_dir = skills_root / "vlad-plugins-review-tools-shared-references"
+    assert (sr_dir / "SKILL.md").exists()
+
+    # -- .DS_Store noise filtered --
+    all_files = list(skills_root.rglob("*"))
+    ds_store_files = [f for f in all_files if f.name == ".DS_Store"]
+    assert len(ds_store_files) == 0
+
+    # -- SKILL.md frontmatter name rewritten for all skills --
+    assert "name: vlad-plugins-review-tools-code-review" in cr_skill.read_text()
+    assert "name: vlad-plugins-review-tools-software-architecture" in (
+        arch_dir / "SKILL.md"
+    ).read_text()
+
+    # -- All agents in config.toml with correct tools --
+    config = (project_root / ".codex" / "config.toml").read_text()
+    assert "vlad-plugins_review-tools_security_reviewer" in config
+    assert "vlad-plugins_review-tools_a11y_reviewer" in config
+    assert "vlad-plugins_review-tools_performance_reviewer" in config
+
+    # -- Prompt files exist for all agents --
+    prompts = project_root / ".codex" / "prompts" / "agents"
+    prompt_files = sorted(p.name for p in prompts.glob("*.md"))
+    assert len(prompt_files) == 3
+
+    # -- Security reviewer prompt has full content --
+    sec_prompt = [p for p in prompts.glob("*security*")][0]
+    sec_content = sec_prompt.read_text()
+    assert "SQL injection" in sec_content
+    assert "nonces" in sec_content
