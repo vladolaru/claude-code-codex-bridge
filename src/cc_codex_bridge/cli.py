@@ -28,8 +28,11 @@ from cc_codex_bridge.exclusions import (
 )
 from cc_codex_bridge.install_launchagent import (
     DEFAULT_START_INTERVAL,
+    GLOBAL_LAUNCHAGENT_LABEL,
+    build_global_launchagent_plist,
     build_launchagent_label,
     build_launchagent_plist,
+    find_bridge_launchagents,
     install_launchagent,
 )
 from cc_codex_bridge.model import DiscoveryError, ReconcileError, TranslationError
@@ -576,20 +579,15 @@ def _format_uninstall_report(report, *, dry_run: bool = False) -> str:
 def _handle_launchagent_command(args: argparse.Namespace) -> int:
     """Handle LaunchAgent rendering or installation commands."""
     try:
-        resolved_project = resolve_project_root(args.project or Path.cwd()).root
-        label = args.label or build_launchagent_label(resolved_project)
-        plist_bytes = build_launchagent_plist(
-            project_root=resolved_project,
+        label = args.label or GLOBAL_LAUNCHAGENT_LABEL
+        plist_bytes = build_global_launchagent_plist(
             interval_seconds=args.interval,
-            cache_dir=args.cache_dir,
-            claude_home=args.claude_home,
-            codex_home=args.codex_home,
             python_executable=args.python_executable,
             cli_path=args.cli_path,
             label=label,
             logs_dir=args.logs_dir,
         )
-    except (DiscoveryError, ReconcileError, OSError, UnicodeError) as exc:
+    except (ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
@@ -605,6 +603,19 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
     print(f"LAUNCHAGENT_LABEL: {label}")
     print(f"LAUNCHAGENT_PATH: {destination}")
     print(f"NEXT_STEP: launchctl bootstrap gui/$(id -u) {destination}")
+
+    # Warn about existing per-project plists
+    la_dir = args.launchagents_dir if hasattr(args, "launchagents_dir") and args.launchagents_dir else None
+    existing_plists = find_bridge_launchagents(launchagents_dir=la_dir)
+    per_project_plists = [p for p in existing_plists if p != destination]
+    if per_project_plists:
+        print("")
+        print("WARNING: Found existing per-project LaunchAgent plists.")
+        print("These are no longer needed with the global reconcile-all plist.")
+        print("Remove them with:")
+        for plist_path in per_project_plists:
+            print(f"  launchctl bootout gui/$(id -u) {plist_path} && rm {plist_path}")
+
     return 0
 
 

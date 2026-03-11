@@ -13,10 +13,11 @@ from uuid import uuid5, NAMESPACE_URL
 from cc_codex_bridge.model import ReconcileError
 
 
-DEFAULT_START_INTERVAL = 300
+DEFAULT_START_INTERVAL = 1800
 DEFAULT_LAUNCHAGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
 DEFAULT_LOGS_DIR = Path.home() / "Library" / "Logs" / "codex-bridge"
 BRIDGE_LABEL_PREFIX = "com.openai.codex-bridge."
+GLOBAL_LAUNCHAGENT_LABEL = "com.openai.codex-bridge.reconcile-all"
 
 
 def build_launchagent_label(project_root: str | Path) -> str:
@@ -71,6 +72,44 @@ def build_launchagent_plist(
         "Label": label_value,
         "ProgramArguments": program_arguments,
         "WorkingDirectory": str(project_path),
+        "RunAtLoad": True,
+        "StartInterval": interval_seconds,
+        "StandardOutPath": str(stdout_path),
+        "StandardErrorPath": str(stderr_path),
+        "ProcessType": "Background",
+    }
+    return plistlib.dumps(payload, sort_keys=True)
+
+
+def build_global_launchagent_plist(
+    *,
+    interval_seconds: int = DEFAULT_START_INTERVAL,
+    python_executable: str | Path | None = None,
+    cli_path: str | Path | None = None,
+    label: str | None = None,
+    logs_dir: str | Path | None = None,
+) -> bytes:
+    """Render a global LaunchAgent plist that periodically runs reconcile-all."""
+    if interval_seconds <= 0:
+        raise ReconcileError("LaunchAgent interval must be a positive integer")
+
+    label_value = label or GLOBAL_LAUNCHAGENT_LABEL
+    python_path = str(Path(python_executable or sys.executable).expanduser().resolve())
+    cli_script_path = str(Path(cli_path or (Path(__file__).resolve().parent / "cli.py")).resolve())
+    log_root = Path(logs_dir or DEFAULT_LOGS_DIR).expanduser().resolve()
+    stdout_path = log_root / f"{label_value}.out.log"
+    stderr_path = log_root / f"{label_value}.err.log"
+
+    program_arguments = [
+        python_path,
+        cli_script_path,
+        "reconcile-all",
+    ]
+
+    payload: dict[str, Any] = {
+        "Label": label_value,
+        "ProgramArguments": program_arguments,
+        "WorkingDirectory": str(Path.home()),
         "RunAtLoad": True,
         "StartInterval": interval_seconds,
         "StandardOutPath": str(stdout_path),

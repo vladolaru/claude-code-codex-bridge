@@ -94,17 +94,14 @@ def test_reconcile_and_dry_run_respect_fake_codex_home(
     assert (codex_home / "skills" / "market-prompt-engineer-prompt-engineer").exists()
 
 
-def test_install_launchagent_cli_writes_plist(make_project, tmp_path: Path):
-    """CLI install-launchagent writes a plist into the requested LaunchAgents directory."""
-    project_root, _agents_md = make_project()
+def test_install_launchagent_cli_writes_plist(tmp_path: Path):
+    """CLI install-launchagent writes a global plist into the requested LaunchAgents directory."""
     launchagents_dir = tmp_path / "LaunchAgents"
     logs_dir = tmp_path / "logs"
 
     exit_code = cli.main(
         [
             "install-launchagent",
-            "--project",
-            str(project_root),
             "--launchagents-dir",
             str(launchagents_dir),
             "--logs-dir",
@@ -126,39 +123,19 @@ def test_install_launchagent_cli_writes_plist(make_project, tmp_path: Path):
     assert payload["ProgramArguments"][:3] == [
         "/usr/bin/python3",
         str(Path("/tmp/cc_codex_bridge/cli.py").resolve()),
-        "reconcile",
+        "reconcile-all",
     ]
 
 
-def test_print_launchagent_cli_requires_valid_project(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
-    """LaunchAgent commands surface project validation errors."""
-    project_root = tmp_path / "missing-agents"
-    project_root.mkdir()
-
-    exit_code = cli.main(["print-launchagent", "--project", str(project_root)])
-
-    captured = capsys.readouterr()
-    assert exit_code == 1
-    assert "Could not resolve a project root with AGENTS.md" in captured.err
-
-
-def test_print_launchagent_cli_resolves_project_root_from_nested_path(
-    make_project,
-    capsys: pytest.CaptureFixture[str],
-):
-    """LaunchAgent commands reuse project-root discovery instead of requiring the repo root."""
-    project_root, _agents_md = make_project()
-    nested_file = project_root / "nested" / "notes.txt"
-    nested_file.parent.mkdir(parents=True)
-    nested_file.write_text("note\n")
-
-    exit_code = cli.main(["print-launchagent", "--project", str(nested_file)])
+def test_print_launchagent_cli_produces_global_plist(capsys: pytest.CaptureFixture[str]):
+    """print-launchagent produces a global reconcile-all plist without requiring --project."""
+    exit_code = cli.main(["print-launchagent"])
 
     captured = capsys.readouterr()
     payload = plistlib.loads(captured.out.encode())
     assert exit_code == 0
-    assert payload["WorkingDirectory"] == str(project_root)
-    assert payload["ProgramArguments"][4] == str(project_root)
+    assert "reconcile-all" in payload["Label"]
+    assert "reconcile-all" in payload["ProgramArguments"]
 
 
 def test_reconcile_dry_run_with_diff_flag_reports_file_diff(
@@ -1190,6 +1167,34 @@ def test_find_bridge_launchagents_missing_dir(tmp_path: Path):
 
     results = find_bridge_launchagents(launchagents_dir=tmp_path / "nonexistent")
     assert results == ()
+
+
+def test_print_launchagent_renders_global_plist(tmp_path: Path, capsys):
+    """print-launchagent produces a global reconcile-all plist."""
+    exit_code = cli.main(["print-launchagent"])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    payload = plistlib.loads(captured.out.encode() if isinstance(captured.out, str) else captured.out)
+    assert "reconcile-all" in payload["Label"]
+    assert "reconcile-all" in payload["ProgramArguments"]
+    assert payload["StartInterval"] == 1800
+
+
+def test_install_launchagent_warns_about_per_project_plists(tmp_path: Path, capsys):
+    """install-launchagent warns when existing per-project plists are found."""
+    la_dir = tmp_path / "home" / "Library" / "LaunchAgents"
+    la_dir.mkdir(parents=True)
+    (la_dir / "com.openai.codex-bridge.old-project.abc123.plist").write_bytes(b"<plist/>")
+
+    exit_code = cli.main([
+        "install-launchagent",
+        "--launchagents-dir", str(la_dir),
+    ])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    assert "per-project" in captured.out.lower() or "bootout" in captured.out.lower()
 
 
 def test_reconcile_all_command_dispatches(
