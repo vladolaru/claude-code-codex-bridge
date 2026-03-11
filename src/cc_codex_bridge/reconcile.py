@@ -307,6 +307,125 @@ def clean_project(
     return ReconcileReport(changes=tuple(changes), applied=True)
 
 
+@dataclass(frozen=True)
+class ReconcileAllProjectResult:
+    """Result of reconciling one project in a reconcile-all run."""
+
+    project_root: Path
+    report: ReconcileReport
+
+
+@dataclass(frozen=True)
+class ReconcileAllError:
+    """One project that failed during reconcile-all."""
+
+    project_root: Path
+    error: str
+
+
+@dataclass(frozen=True)
+class ReconcileAllReport:
+    """Full reconcile-all result."""
+
+    results: tuple[ReconcileAllProjectResult, ...]
+    errors: tuple[ReconcileAllError, ...]
+
+
+def reconcile_all(
+    *,
+    codex_home: str | Path | None = None,
+    dry_run: bool = False,
+) -> ReconcileAllReport:
+    """Reconcile all registered projects."""
+    from cc_codex_bridge.claude_shim import plan_claude_shim
+    from cc_codex_bridge.discover import discover
+    from cc_codex_bridge.exclusions import (
+        apply_sync_exclusions,
+        load_project_exclusions,
+        resolve_effective_exclusions,
+    )
+    from cc_codex_bridge.render_codex_config import render_inline_codex_config, render_prompt_files
+    from cc_codex_bridge.translate_agents import (
+        format_agent_translation_diagnostics,
+        translate_installed_agents_with_diagnostics,
+        translate_standalone_agents,
+    )
+    from cc_codex_bridge.translate_skills import translate_installed_skills, translate_standalone_skills
+
+    codex_home_path = Path(codex_home or DEFAULT_CODEX_HOME).expanduser().resolve()
+    registry_path = codex_home_path / GLOBAL_REGISTRY_FILENAME
+
+    registry = None
+    if registry_path.exists() and not registry_path.is_symlink():
+        registry = GlobalSkillRegistry.from_path(registry_path)
+
+    project_roots = list(registry.projects) if registry else []
+
+    results: list[ReconcileAllProjectResult] = []
+    errors: list[ReconcileAllError] = []
+
+    for project_root in sorted(project_roots, key=str):
+        if not project_root.is_dir():
+            errors.append(ReconcileAllError(project_root=project_root, error="directory not found"))
+            continue
+        if not (project_root / "AGENTS.md").is_file():
+            errors.append(ReconcileAllError(project_root=project_root, error="AGENTS.md not found"))
+            continue
+
+        try:
+            result = discover(project_path=project_root)
+            config_exclusions = load_project_exclusions(result.project.root)
+            exclusions = resolve_effective_exclusions(config_exclusions)
+            result, _ = apply_sync_exclusions(result, exclusions)
+            shim_decision = plan_claude_shim(result.project)
+
+            agent_result = translate_installed_agents_with_diagnostics(result.plugins)
+            user_agent_result = translate_standalone_agents(result.user_agents, scope="user")
+            project_agent_result = translate_standalone_agents(result.project_agents, scope="project")
+
+            all_diagnostics = (
+                *agent_result.diagnostics,
+                *user_agent_result.diagnostics,
+                *project_agent_result.diagnostics,
+            )
+            if all_diagnostics:
+                errors.append(ReconcileAllError(
+                    project_root=project_root,
+                    error=format_agent_translation_diagnostics(all_diagnostics),
+                ))
+                continue
+
+            all_roles = (*agent_result.roles, *user_agent_result.roles, *project_agent_result.roles)
+            plugin_skills = translate_installed_skills(result.plugins)
+            user_skills = translate_standalone_skills(result.user_skills, scope="user")
+            all_global_skills = (*plugin_skills, *user_skills)
+            project_skills = translate_standalone_skills(result.project_skills, scope="project")
+            extra_project_files: list[tuple[Path, bytes]] = []
+            for gen_skill in project_skills:
+                for f in gen_skill.files:
+                    rel = Path(".codex") / "skills" / gen_skill.install_dir_name / f.relative_path
+                    extra_project_files.append((rel, f.content))
+
+            prompt_files = render_prompt_files(all_roles)
+            rendered_config = render_inline_codex_config(all_roles)
+            desired_state = build_desired_state(
+                result, shim_decision, prompt_files, rendered_config,
+                all_global_skills, codex_home=codex_home_path,
+                extra_project_files=extra_project_files,
+            )
+
+            if dry_run:
+                report = diff_desired_state(desired_state)
+            else:
+                report = reconcile_desired_state(desired_state)
+
+            results.append(ReconcileAllProjectResult(project_root=project_root, report=report))
+        except Exception as exc:
+            errors.append(ReconcileAllError(project_root=project_root, error=str(exc)))
+
+    return ReconcileAllReport(results=tuple(results), errors=tuple(errors))
+
+
 def uninstall_all(
     *,
     codex_home: str | Path | None = None,

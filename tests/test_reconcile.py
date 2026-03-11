@@ -1560,6 +1560,71 @@ def test_clean_does_not_touch_global_agents_md(
     assert (codex_home / "AGENTS.md").read_text() == "# Global instructions\n"
 
 
+def test_reconcile_all_empty_registry(tmp_path: Path):
+    """reconcile_all with no registered projects succeeds with empty results."""
+    from cc_codex_bridge.reconcile import reconcile_all
+
+    codex_home = tmp_path / "codex-home"
+    report = reconcile_all(codex_home=codex_home)
+    assert report.results == ()
+    assert report.errors == ()
+
+
+def test_reconcile_all_skips_inaccessible_project(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """reconcile_all reports error for deleted project, continues with the rest."""
+    import shutil
+
+    from cc_codex_bridge.reconcile import reconcile_all
+
+    project_a, _ = make_project("project-a")
+    project_b, _ = make_project("project-b")
+    cache_root, _ = make_plugin_version("m", "p", "1.0.0", skill_names=("s",))
+    codex_home = tmp_path / "codex-home"
+
+    # Reconcile both to register them
+    desired_a = _build_desired(project_a, cache_root, codex_home)
+    reconcile_desired_state(desired_a)
+    desired_b = _build_desired(project_b, cache_root, codex_home)
+    reconcile_desired_state(desired_b)
+
+    # Delete project A
+    shutil.rmtree(project_a)
+
+    report = reconcile_all(codex_home=codex_home)
+    assert len(report.errors) == 1
+    assert report.errors[0].project_root == project_a
+    # Project B should have been reconciled
+    assert any(r.project_root == project_b for r in report.results)
+
+
+def test_reconcile_all_dry_run_no_side_effects(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """reconcile_all --dry-run does not modify anything."""
+    from cc_codex_bridge.reconcile import reconcile_all
+
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("m", "p", "1.0.0", skill_names=("s",))
+    codex_home = tmp_path / "codex-home"
+
+    desired = _build_desired(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    # Modify a managed file to create a pending change
+    config = project_root / ".codex" / "config.toml"
+    config.write_text("# tampered\n")
+
+    report = reconcile_all(codex_home=codex_home, dry_run=True)
+    # File was not restored
+    assert config.read_text() == "# tampered\n"
+
+
 def test_clean_removes_project_from_registry_projects_list(
     make_project,
     make_plugin_version,
