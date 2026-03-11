@@ -135,6 +135,10 @@ class DiscoveryResult:
 
     project: ProjectContext
     plugins: tuple[InstalledPlugin, ...]
+    user_skills: tuple[Path, ...] = ()
+    user_agents: tuple[Path, ...] = ()
+    project_skills: tuple[Path, ...] = ()
+    project_agents: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -62,7 +62,14 @@ def discover(
     """Resolve the target project and latest installed Claude plugins."""
     project = resolve_project_root(project_path)
     plugins = discover_latest_plugins(cache_dir=cache_dir, claude_home=claude_home)
-    return DiscoveryResult(project=project, plugins=plugins)
+    return DiscoveryResult(
+        project=project,
+        plugins=plugins,
+        user_skills=discover_user_skills(claude_home),
+        user_agents=discover_user_agents(claude_home),
+        project_skills=discover_project_skills(project.root),
+        project_agents=discover_project_agents(project.root),
+    )
 
 
 def discover_latest_plugins(
@@ -106,6 +113,52 @@ def discover_latest_plugins(
         )
 
     return tuple(latest_plugins)
+
+
+def discover_user_skills(claude_home: str | Path | None = None) -> tuple[Path, ...]:
+    """Discover user-level skills from ~/.claude/skills/."""
+    home = Path(claude_home or DEFAULT_CLAUDE_HOME).expanduser().resolve()
+    skills_dir = home / "skills"
+    if not skills_dir.is_dir():
+        return ()
+    return tuple(sorted(
+        skill_dir for skill_dir in _iter_dirs(skills_dir)
+        if (skill_dir / "SKILL.md").is_file()
+    ))
+
+
+def discover_user_agents(claude_home: str | Path | None = None) -> tuple[Path, ...]:
+    """Discover user-level agents from ~/.claude/agents/."""
+    home = Path(claude_home or DEFAULT_CLAUDE_HOME).expanduser().resolve()
+    agents_dir = home / "agents"
+    if not agents_dir.is_dir():
+        return ()
+    return tuple(sorted(
+        path for path in agents_dir.iterdir()
+        if path.is_file() and path.suffix == ".md"
+    ))
+
+
+def discover_project_skills(project_root: Path) -> tuple[Path, ...]:
+    """Discover project-level skills from .claude/skills/."""
+    skills_dir = project_root / ".claude" / "skills"
+    if not skills_dir.is_dir():
+        return ()
+    return tuple(sorted(
+        skill_dir for skill_dir in _iter_dirs(skills_dir)
+        if (skill_dir / "SKILL.md").is_file()
+    ))
+
+
+def discover_project_agents(project_root: Path) -> tuple[Path, ...]:
+    """Discover project-level agents from .claude/agents/."""
+    agents_dir = project_root / ".claude" / "agents"
+    if not agents_dir.is_dir():
+        return ()
+    return tuple(sorted(
+        path for path in agents_dir.iterdir()
+        if path.is_file() and path.suffix == ".md"
+    ))
 
 
 def _collect_plugin_versions(

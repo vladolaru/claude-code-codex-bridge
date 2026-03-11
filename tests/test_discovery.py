@@ -210,3 +210,120 @@ def test_semver_prerelease_ordering_and_type_guards():
 
     assert alpha1 < alpha2 < beta < stable
     assert SemVer.__lt__(stable, "1.2.4") is NotImplemented
+
+
+# ---------------------------------------------------------------------------
+# User-level and project-level skill/agent discovery
+# ---------------------------------------------------------------------------
+
+
+def _make_minimal_plugin(
+    cache_root: Path,
+    marketplace: str = "market",
+    plugin_name: str = "test-plugin",
+    version: str = "1.0.0",
+) -> None:
+    """Create a minimal valid plugin in the cache so discover() succeeds."""
+    version_dir = cache_root / marketplace / plugin_name / version
+    version_dir.mkdir(parents=True, exist_ok=True)
+    skills_dir = version_dir / "skills" / "minimal"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "SKILL.md").write_text(
+        "---\nname: minimal\ndescription: test\n---\n"
+    )
+
+
+def test_discover_finds_user_level_skills_and_agents(make_project, tmp_path: Path):
+    """Discovery includes user-level skills and agents from Claude home."""
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "claude-home"
+    cache_root = claude_home / "plugins" / "cache"
+    _make_minimal_plugin(cache_root)
+
+    # Create user-level skill
+    user_skill = claude_home / "skills" / "my-skill"
+    user_skill.mkdir(parents=True)
+    (user_skill / "SKILL.md").write_text(
+        "---\nname: my-skill\ndescription: test\n---\n"
+    )
+
+    # Create user-level agent
+    user_agents = claude_home / "agents"
+    user_agents.mkdir(parents=True)
+    (user_agents / "my-agent.md").write_text(
+        "---\nname: my-agent\ndescription: test\ntools:\n  - Read\n---\nPrompt.\n"
+    )
+
+    result = discover(project_path=project_root, claude_home=claude_home)
+
+    assert len(result.user_skills) == 1
+    assert result.user_skills[0].name == "my-skill"
+    assert len(result.user_agents) == 1
+    assert result.user_agents[0].name == "my-agent.md"
+
+
+def test_discover_finds_project_level_skills_and_agents(make_project, tmp_path: Path):
+    """Discovery includes project-level skills and agents."""
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "claude-home"
+    cache_root = claude_home / "plugins" / "cache"
+    _make_minimal_plugin(cache_root)
+
+    # Create project-level skill
+    project_skill = project_root / ".claude" / "skills" / "run-tests"
+    project_skill.mkdir(parents=True)
+    (project_skill / "SKILL.md").write_text(
+        "---\nname: run-tests\ndescription: Run tests\n---\n"
+    )
+
+    # Create project-level agent
+    project_agents = project_root / ".claude" / "agents"
+    project_agents.mkdir(parents=True)
+    (project_agents / "code-reviewer.md").write_text(
+        "---\nname: code-reviewer\ndescription: Review code\n---\nReview.\n"
+    )
+
+    result = discover(project_path=project_root, claude_home=claude_home)
+
+    assert len(result.project_skills) == 1
+    assert result.project_skills[0].name == "run-tests"
+    assert len(result.project_agents) == 1
+    assert result.project_agents[0].name == "code-reviewer.md"
+
+
+def test_discover_returns_empty_when_no_user_or_project_sources(
+    make_project, tmp_path: Path
+):
+    """Missing non-plugin source directories yield empty tuples."""
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "claude-home"
+    cache_root = claude_home / "plugins" / "cache"
+    _make_minimal_plugin(cache_root)
+
+    result = discover(project_path=project_root, claude_home=claude_home)
+
+    assert result.user_skills == ()
+    assert result.user_agents == ()
+    assert result.project_skills == ()
+    assert result.project_agents == ()
+
+
+def test_discover_skips_skill_dirs_without_skill_md(make_project, tmp_path: Path):
+    """Incomplete skill directories (missing SKILL.md) are ignored."""
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "claude-home"
+    cache_root = claude_home / "plugins" / "cache"
+    _make_minimal_plugin(cache_root)
+
+    # Create a skill dir without SKILL.md
+    incomplete = claude_home / "skills" / "incomplete"
+    incomplete.mkdir(parents=True)
+    # Create a valid skill dir
+    valid = claude_home / "skills" / "valid"
+    valid.mkdir(parents=True)
+    (valid / "SKILL.md").write_text("---\nname: valid\ndescription: test\n---\n")
+
+    result = discover(project_path=project_root, claude_home=claude_home)
+
+    assert len(result.user_skills) == 1
+    assert result.user_skills[0].name == "valid"
