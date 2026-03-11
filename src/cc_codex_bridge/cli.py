@@ -51,6 +51,7 @@ from cc_codex_bridge.translate_skills import translate_installed_skills, transla
 
 PIPELINE_COMMANDS = {"reconcile", "validate", "status"}
 LAUNCHAGENT_COMMANDS = {"print-launchagent", "install-launchagent"}
+GLOBAL_COMMANDS = {"reconcile-all"}
 UTILITY_COMMANDS = {"doctor"}
 
 
@@ -119,6 +120,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Override the LaunchAgents directory to scan.",
     )
+    reconcile_all_parser = subparsers.add_parser("reconcile-all", parents=[common])
+    reconcile_all_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Compute reconcile changes without writing.",
+    )
+    reconcile_all_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit structured JSON output.",
+    )
+
     doctor_parser = subparsers.add_parser("doctor", parents=[common])
     doctor_parser.add_argument(
         "--json",
@@ -203,6 +216,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "uninstall":
         return _handle_uninstall_command(args)
+
+    if args.command in GLOBAL_COMMANDS:
+        return _handle_reconcile_all_command(args)
 
     if args.command in LAUNCHAGENT_COMMANDS:
         return _handle_launchagent_command(args)
@@ -403,6 +419,77 @@ def _handle_uninstall_command(args: argparse.Namespace) -> int:
         print(_format_uninstall_report(report, dry_run=args.dry_run))
 
     return 0
+
+
+def _handle_reconcile_all_command(args: argparse.Namespace) -> int:
+    """Handle the reconcile-all command."""
+    if args.json and not args.dry_run:
+        # JSON output is allowed in both modes but let's keep it flexible
+        pass
+
+    try:
+        from cc_codex_bridge.reconcile import reconcile_all
+        report = reconcile_all(
+            codex_home=args.codex_home,
+            dry_run=args.dry_run,
+        )
+    except (ReconcileError, OSError, UnicodeError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(_format_reconcile_all_json(report))
+    else:
+        print(_format_reconcile_all_report(report, dry_run=args.dry_run))
+
+    has_errors = len(report.errors) > 0
+    return 1 if has_errors else 0
+
+
+def _format_reconcile_all_json(report) -> str:
+    """Render reconcile-all report as JSON."""
+    payload = {
+        "projects": [
+            {
+                "root": str(r.project_root),
+                "changes": len(r.report.changes),
+                "applied": r.report.applied,
+            }
+            for r in report.results
+        ],
+        "errors": [
+            {
+                "root": str(e.project_root),
+                "error": e.error,
+            }
+            for e in report.errors
+        ],
+    }
+    return json.dumps(payload, indent=2, sort_keys=True)
+
+
+def _format_reconcile_all_report(report, *, dry_run: bool = False) -> str:
+    """Render reconcile-all report as human-readable text."""
+    lines: list[str] = []
+
+    if dry_run:
+        lines.append("Dry run — no changes applied.")
+        lines.append("")
+
+    for r in report.results:
+        change_count = len(r.report.changes)
+        if change_count:
+            lines.append(f"OK: {r.project_root} ({change_count} change{'s' if change_count != 1 else ''})")
+        else:
+            lines.append(f"OK: {r.project_root} (no changes)")
+
+    for e in report.errors:
+        lines.append(f"ERROR: {e.project_root} — {e.error}")
+
+    if not report.results and not report.errors:
+        lines.append("No registered projects.")
+
+    return "\n".join(lines)
 
 
 def _format_uninstall_json(report) -> str:

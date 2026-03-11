@@ -1192,6 +1192,66 @@ def test_find_bridge_launchagents_missing_dir(tmp_path: Path):
     assert results == ()
 
 
+def test_reconcile_all_command_dispatches(
+    make_project, make_plugin_version, tmp_path: Path,
+):
+    """reconcile-all command runs without error on a registered project."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "test-plugin", "1.0.0",
+        skill_names=("test-skill",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    # First reconcile to register the project
+    exit_code = cli.main([
+        "reconcile", "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+
+    # Now run reconcile-all
+    exit_code = cli.main([
+        "reconcile-all",
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+
+
+def test_reconcile_all_dry_run_json(
+    make_project, make_plugin_version, tmp_path: Path, capsys,
+):
+    """reconcile-all --dry-run --json produces valid JSON."""
+    import json as json_mod
+
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version(
+        "market", "test-plugin", "1.0.0",
+        skill_names=("test-skill",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    cli.main([
+        "reconcile", "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(codex_home),
+    ])
+    capsys.readouterr()  # discard
+
+    exit_code = cli.main([
+        "reconcile-all",
+        "--codex-home", str(codex_home),
+        "--dry-run", "--json",
+    ])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    data = json_mod.loads(captured.out)
+    assert "projects" in data
+    assert isinstance(data["projects"], list)
+
+
 def test_validate_works_without_plugins(make_project, tmp_path: Path, capsys):
     """Validate succeeds with no plugins when user-level sources exist."""
     project_root, _agents_md = make_project()
