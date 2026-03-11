@@ -270,8 +270,18 @@ def clean_project(
                     changes.append(Change("remove", skill_path, resource_kind="skill"))
             registry_changed = True
 
+        # Remove project from the projects list
+        updated_projects = tuple(
+            p for p in registry.projects if p != project_root_path
+        )
+        if updated_projects != registry.projects:
+            registry_changed = True
+
         if registry_changed:
-            updated_registry = GlobalSkillRegistry(skills=updated_skills)
+            updated_registry = GlobalSkillRegistry(
+                skills=updated_skills,
+                projects=updated_projects,
+            )
     else:
         updated_registry = None
 

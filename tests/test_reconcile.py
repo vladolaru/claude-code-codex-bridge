@@ -1560,6 +1560,43 @@ def test_clean_does_not_touch_global_agents_md(
     assert (codex_home / "AGENTS.md").read_text() == "# Global instructions\n"
 
 
+def test_clean_removes_project_from_registry_projects_list(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """After clean, the project root is removed from the global registry projects list.
+
+    A second registered project must survive the clean of the first.
+    """
+    project_a, _ = make_project("project-a")
+    project_b, _ = make_project("project-b")
+    cache_root, version_dir = make_plugin_version(
+        "market", "test-plugin", "1.0.0",
+        skill_names=("test-skill",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    # Register both projects
+    desired_a = _build_desired(project_a, cache_root, codex_home)
+    reconcile_desired_state(desired_a)
+    desired_b = _build_desired(project_b, cache_root, codex_home)
+    reconcile_desired_state(desired_b)
+
+    registry_data = _read_global_registry(codex_home)
+    assert str(project_a) in registry_data["projects"]
+    assert str(project_b) in registry_data["projects"]
+
+    # Clean project A
+    from cc_codex_bridge.reconcile import clean_project
+    clean_project(project_a, codex_home=codex_home)
+
+    # Project A removed, project B still present
+    registry_data = _read_global_registry(codex_home)
+    assert str(project_a) not in registry_data["projects"]
+    assert str(project_b) in registry_data["projects"]
+
+
 def test_reconcile_registers_project_in_global_registry(
     make_project,
     make_plugin_version,
