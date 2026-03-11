@@ -447,6 +447,9 @@ def uninstall_all(
     if registry_path.exists() and not registry_path.is_symlink():
         registry = GlobalSkillRegistry.from_path(registry_path)
         if registry is not None:
+            project_roots.update(registry.projects)
+            # Also include skill owners for backwards compatibility with
+            # registries that predate the projects list
             for entry in registry.skills.values():
                 project_roots.update(entry.owners)
 
