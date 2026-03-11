@@ -139,19 +139,19 @@ def test_discover_latest_plugins_fails_if_no_valid_versions(tmp_path: Path):
         discover_latest_plugins(cache_root)
 
 
-def test_discover_latest_plugins_requires_existing_cache_dir(tmp_path: Path):
-    """A missing cache root is a hard discovery failure."""
-    with pytest.raises(DiscoveryError, match="cache not found"):
-        discover_latest_plugins(tmp_path / "missing-cache")
+def test_discover_latest_plugins_returns_empty_for_missing_cache(tmp_path: Path):
+    """A missing cache root returns an empty result instead of raising."""
+    plugins = discover_latest_plugins(tmp_path / "missing-cache")
+    assert plugins == ()
 
 
-def test_discover_latest_plugins_requires_at_least_one_plugin(tmp_path: Path):
-    """An empty cache root fails clearly instead of returning an empty result."""
+def test_discover_latest_plugins_returns_empty_for_empty_cache(tmp_path: Path):
+    """An empty cache root returns an empty result instead of raising."""
     cache_root = tmp_path / "claude-cache"
     cache_root.mkdir()
 
-    with pytest.raises(DiscoveryError, match="No installed Claude plugins found"):
-        discover_latest_plugins(cache_root)
+    plugins = discover_latest_plugins(cache_root)
+    assert plugins == ()
 
 
 def test_discover_latest_plugins_follows_symlinked_repo_source(tmp_path: Path):
@@ -327,3 +327,19 @@ def test_discover_skips_skill_dirs_without_skill_md(make_project, tmp_path: Path
 
     assert len(result.user_skills) == 1
     assert result.user_skills[0].name == "valid"
+
+
+def test_discover_works_with_only_user_skills_and_no_plugins(make_project, tmp_path: Path):
+    """Discovery succeeds with user-level skills even when plugin cache is empty."""
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "claude-home"
+    (claude_home / "plugins" / "cache").mkdir(parents=True)  # empty cache
+
+    user_skill = claude_home / "skills" / "my-skill"
+    user_skill.mkdir(parents=True)
+    (user_skill / "SKILL.md").write_text("---\nname: my-skill\ndescription: test\n---\n")
+
+    result = discover(project_path=project_root, claude_home=claude_home)
+
+    assert len(result.plugins) == 0
+    assert len(result.user_skills) == 1

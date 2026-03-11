@@ -918,3 +918,25 @@ def test_module_entrypoint_invokes_cli_main(monkeypatch: pytest.MonkeyPatch):
 
     assert excinfo.value.code == 0
     assert calls == [None]
+
+
+def test_validate_works_without_plugins(make_project, tmp_path: Path, capsys):
+    """Validate succeeds with no plugins when user-level sources exist."""
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "claude-home"
+    (claude_home / "plugins" / "cache").mkdir(parents=True)
+
+    user_skill = claude_home / "skills" / "my-skill"
+    user_skill.mkdir(parents=True)
+    (user_skill / "SKILL.md").write_text("---\nname: my-skill\ndescription: test\n---\n")
+
+    exit_code = cli.main([
+        "validate",
+        "--project", str(project_root),
+        "--claude-home", str(claude_home),
+    ])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "PLUGINS_FOUND: 0" in captured.out
+    assert "GENERATED_SKILLS: 1" in captured.out
