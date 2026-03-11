@@ -29,6 +29,7 @@ class GlobalSkillRegistry:
     """Validated global generated-skill ownership registry."""
 
     skills: dict[str, GlobalSkillEntry]
+    projects: tuple[Path, ...] = ()
     version: int = GLOBAL_REGISTRY_VERSION
 
     @classmethod
@@ -70,12 +71,30 @@ class GlobalSkillRegistry:
                 owners=owners,
             )
 
-        return cls(skills=skills, version=GLOBAL_REGISTRY_VERSION)
+        raw_projects = data.get("projects", [])
+        if not isinstance(raw_projects, list) or any(
+            not isinstance(item, str) for item in raw_projects
+        ):
+            raise ReconcileError(f"Invalid global skill registry file: {path}")
+
+        projects: list[Path] = []
+        for raw_project in raw_projects:
+            project_path = Path(raw_project).expanduser()
+            if not project_path.is_absolute():
+                raise ReconcileError(f"Invalid global skill registry file: {path}")
+            projects.append(project_path.resolve())
+
+        return cls(
+            skills=skills,
+            projects=tuple(sorted(projects, key=str)),
+            version=GLOBAL_REGISTRY_VERSION,
+        )
 
     def to_json(self) -> str:
         """Serialize the registry deterministically."""
-        payload = {
+        payload: dict[str, object] = {
             "version": self.version,
+            "projects": sorted(str(p) for p in self.projects),
             "skills": {
                 skill_name: {
                     "content_hash": entry.content_hash,
