@@ -567,3 +567,65 @@ def test_power_user_full_stack(make_project, tmp_path: Path):
     assert (claude_home / "CLAUDE.md").exists()
     assert (claude_home / "skills" / "a8c-url-shorthand" / "SKILL.md").exists()
     assert (project_root / ".claude" / "skills" / "run-tests" / "SKILL.md").exists()
+
+
+def test_setup_evolves_over_time(make_project, tmp_path: Path):
+    """Bridge handles evolving setup: add sources, update content, remove sources.
+
+    Runs reconcile multiple times and verifies artifacts are correctly
+    created, updated, and cleaned up at each step.
+    """
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "claude-home"
+    codex_home = tmp_path / "codex-home"
+    cache_root = claude_home / "plugins" / "cache"
+
+    # --- Phase 1: Plugin only ---
+    build_plugin(cache_root, "vlad-plugins", "review-tools", "1.12.0")
+    assert reconcile(project_root, claude_home, codex_home) == 0
+
+    assert (codex_home / "skills" / "vlad-plugins-review-tools-code-review" / "SKILL.md").exists()
+    config_v1 = (project_root / ".codex" / "config.toml").read_text()
+    assert "vlad-plugins_review-tools_security_reviewer" in config_v1
+    assert not (codex_home / "AGENTS.md").exists()  # no user CLAUDE.md yet
+
+    # --- Phase 2: Add user skill + CLAUDE.md ---
+    build_user_skill_simple(claude_home, "url-shorthand")
+    build_user_claude_md(claude_home)
+    assert reconcile(project_root, claude_home, codex_home) == 0
+
+    assert (codex_home / "skills" / "user-url-shorthand" / "SKILL.md").exists()
+    assert (codex_home / "AGENTS.md").exists()
+    assert "Conventional Commits" in (codex_home / "AGENTS.md").read_text()
+    # Plugin skills still present
+    assert (codex_home / "skills" / "vlad-plugins-review-tools-code-review" / "SKILL.md").exists()
+
+    # --- Phase 3: Update CLAUDE.md content ---
+    (claude_home / "CLAUDE.md").write_text(
+        "# Updated Instructions\n\nAlways use TypeScript strict mode.\n"
+    )
+    assert reconcile(project_root, claude_home, codex_home) == 0
+
+    updated_content = (codex_home / "AGENTS.md").read_text()
+    assert "TypeScript strict mode" in updated_content
+    assert "Conventional Commits" not in updated_content  # old content replaced
+
+    # --- Phase 4: Add project agent ---
+    build_project_agent(project_root, "reviewer", tools=("Read", "Grep"))
+    assert reconcile(project_root, claude_home, codex_home) == 0
+
+    config_v4 = (project_root / ".codex" / "config.toml").read_text()
+    assert "project_reviewer" in config_v4
+    assert "vlad-plugins_review-tools_security_reviewer" in config_v4  # plugin still there
+
+    # --- Phase 5: Plugin version bumps (old version removed, new installed) ---
+    import shutil
+    shutil.rmtree(cache_root / "vlad-plugins" / "review-tools" / "1.12.0")
+    build_plugin(cache_root, "vlad-plugins", "review-tools", "1.13.0")
+    assert reconcile(project_root, claude_home, codex_home) == 0
+
+    # Skills still present (same content, new version path)
+    assert (codex_home / "skills" / "vlad-plugins-review-tools-code-review" / "SKILL.md").exists()
+    # Config regenerated
+    config_v5 = (project_root / ".codex" / "config.toml").read_text()
+    assert "project_reviewer" in config_v5  # project agent survived plugin change
