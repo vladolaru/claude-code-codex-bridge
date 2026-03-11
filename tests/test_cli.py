@@ -91,7 +91,7 @@ def test_reconcile_and_dry_run_respect_fake_codex_home(
     assert reconcile_exit == 0
     assert dry_run_exit == 0
     assert (project_root / ".codex" / "config.toml").exists()
-    assert (codex_home / "skills" / "prompt-engineer-prompt-engineer").exists()
+    assert (codex_home / "skills" / "market-prompt-engineer-prompt-engineer").exists()
 
 
 def test_install_launchagent_cli_writes_plist(make_project, tmp_path: Path):
@@ -235,7 +235,7 @@ def test_reconcile_diff_surfaces_non_utf8_managed_text_as_user_facing_error(
     ) == 0
     capsys.readouterr()
 
-    prompt_path = project_root / ".codex" / "prompts" / "agents" / "prompt-engineer-reviewer.md"
+    prompt_path = project_root / ".codex" / "prompts" / "agents" / "market-prompt-engineer-reviewer.md"
     prompt_path.write_bytes(b"\xff\xfebroken")
 
     exit_code = cli.main(
@@ -646,7 +646,7 @@ def test_reconcile_exclude_skill_removes_previously_managed_output(
         "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
     )
     codex_home = tmp_path / "codex-home"
-    generated_skill = codex_home / "skills" / "prompt-engineer-prompt-engineer"
+    generated_skill = codex_home / "skills" / "market-prompt-engineer-prompt-engineer"
 
     assert (
         cli.main(

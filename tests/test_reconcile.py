@@ -66,16 +66,16 @@ def test_reconcile_writes_project_and_codex_outputs(
     assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
     assert (project_root / ".codex" / "config.toml").exists()
     assert (
-        project_root / ".codex" / "prompts" / "agents" / "pirategoat-tools-architecture-reviewer.md"
+        project_root / ".codex" / "prompts" / "agents" / "market-pirategoat-tools-architecture-reviewer.md"
     ).read_text() == "You are an architecture reviewer.\n"
     assert (project_root / STATE_RELATIVE_PATH).exists()
     assert (
-        codex_home / "skills" / "pirategoat-tools-decision-critic" / "SKILL.md"
-    ).read_text().startswith("---\nname: pirategoat-tools-decision-critic\n")
+        codex_home / "skills" / "market-pirategoat-tools-decision-critic" / "SKILL.md"
+    ).read_text().startswith("---\nname: market-pirategoat-tools-decision-critic\n")
     state_payload = json.loads((project_root / STATE_RELATIVE_PATH).read_text())
     assert "managed_codex_skill_dirs" not in state_payload
     registry_payload = _read_global_registry(codex_home)
-    assert registry_payload["skills"]["pirategoat-tools-decision-critic"]["owners"] == [
+    assert registry_payload["skills"]["market-pirategoat-tools-decision-critic"]["owners"] == [
         str(project_root)
     ]
 
@@ -194,7 +194,7 @@ def test_reconcile_removes_stale_managed_skill(make_project, make_plugin_version
 
     first_desired = _build_desired(project_root, cache_root, codex_home)
     reconcile_desired_state(first_desired)
-    installed_skill = codex_home / "skills" / "pirategoat-tools-decision-critic"
+    installed_skill = codex_home / "skills" / "market-pirategoat-tools-decision-critic"
     assert installed_skill.exists()
 
     _, v2_dir = make_plugin_version("market", "pirategoat-tools", "1.0.1")
@@ -233,7 +233,7 @@ def test_reconcile_shares_identical_skill_ownership_across_projects(
 
     assert any(change.resource_kind == "skill" for change in first_report.changes)
     assert all(change.resource_kind != "skill" for change in second_report.changes)
-    assert _read_global_registry(codex_home)["skills"]["prompt-engineer-prompt-engineer"]["owners"] == [
+    assert _read_global_registry(codex_home)["skills"]["market-prompt-engineer-prompt-engineer"]["owners"] == [
         str(first_project),
         str(second_project),
     ]
@@ -257,7 +257,7 @@ def test_reconcile_keeps_shared_skill_when_one_project_drops_claim(
         "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
     )
     codex_home = tmp_path / "codex-home"
-    installed_skill = codex_home / "skills" / "prompt-engineer-prompt-engineer"
+    installed_skill = codex_home / "skills" / "market-prompt-engineer-prompt-engineer"
 
     reconcile_desired_state(_build_desired(first_project, cache_root, codex_home))
     reconcile_desired_state(_build_desired(second_project, cache_root, codex_home))
@@ -268,7 +268,7 @@ def test_reconcile_keeps_shared_skill_when_one_project_drops_claim(
 
     assert installed_skill.exists()
     assert all(change.path != installed_skill for change in report.changes)
-    assert _read_global_registry(codex_home)["skills"]["prompt-engineer-prompt-engineer"]["owners"] == [
+    assert _read_global_registry(codex_home)["skills"]["market-prompt-engineer-prompt-engineer"]["owners"] == [
         str(second_project)
     ]
 
@@ -292,14 +292,14 @@ def test_reconcile_adopts_existing_matching_skill_directory(
     codex_home = tmp_path / "codex-home"
     desired = _build_desired(project_root, cache_root, codex_home)
     _write_skill_directory(
-        codex_home / "skills" / "prompt-engineer-prompt-engineer",
+        codex_home / "skills" / "market-prompt-engineer-prompt-engineer",
         desired.skills[0],
     )
 
     report = reconcile_desired_state(desired)
 
     assert all(change.resource_kind != "skill" for change in report.changes)
-    assert _read_global_registry(codex_home)["skills"]["prompt-engineer-prompt-engineer"]["owners"] == [
+    assert _read_global_registry(codex_home)["skills"]["market-prompt-engineer-prompt-engineer"]["owners"] == [
         str(project_root)
     ]
 
@@ -353,13 +353,13 @@ def test_reconcile_moves_managed_skills_when_codex_home_changes(
     second_home = tmp_path / "codex-home-two"
 
     reconcile_desired_state(_build_desired(project_root, cache_root, first_home))
-    original_skill = first_home / "skills" / "prompt-engineer-prompt-engineer"
+    original_skill = first_home / "skills" / "market-prompt-engineer-prompt-engineer"
     assert original_skill.exists()
 
     reconcile_desired_state(_build_desired(project_root, cache_root, second_home))
 
     assert not original_skill.exists()
-    assert (second_home / "skills" / "prompt-engineer-prompt-engineer").exists()
+    assert (second_home / "skills" / "market-prompt-engineer-prompt-engineer").exists()
     assert '"codex_home": "' + str(second_home.resolve()) + '"' in (
         project_root / STATE_RELATIVE_PATH
     ).read_text()
@@ -414,7 +414,7 @@ def test_reconcile_removes_stale_managed_prompt_file(
 
     first = _build_desired(project_root, cache_root, codex_home)
     reconcile_desired_state(first)
-    prompt_path = project_root / ".codex" / "prompts" / "agents" / "prompt-engineer-reviewer.md"
+    prompt_path = project_root / ".codex" / "prompts" / "agents" / "market-prompt-engineer-reviewer.md"
     assert prompt_path.exists()
 
     updated_agent = version_dir / "agents" / "reviewer.md"
@@ -458,7 +458,7 @@ def test_reconcile_rejects_non_directory_skill_target(make_project, make_plugin_
     codex_home = tmp_path / "codex-home"
     skills_root = codex_home / "skills"
     skills_root.mkdir(parents=True)
-    (skills_root / "prompt-engineer-prompt-engineer").write_text("not a directory\n")
+    (skills_root / "market-prompt-engineer-prompt-engineer").write_text("not a directory\n")
 
     desired = _build_desired(project_root, cache_root, codex_home)
 
@@ -476,7 +476,7 @@ def test_reconcile_rejects_non_owned_skill_directory(make_project, make_plugin_v
         "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
     )
     codex_home = tmp_path / "codex-home"
-    skill_dir = codex_home / "skills" / "prompt-engineer-prompt-engineer"
+    skill_dir = codex_home / "skills" / "market-prompt-engineer-prompt-engineer"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("hand-authored\n")
 
@@ -776,7 +776,7 @@ def test_reconcile_updates_skill_directory_when_sole_owner_changes_content(
         "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nVersion A.\n"
     )
     codex_home = tmp_path / "codex-home"
-    installed_skill = codex_home / "skills" / "prompt-engineer-prompt-engineer" / "SKILL.md"
+    installed_skill = codex_home / "skills" / "market-prompt-engineer-prompt-engineer" / "SKILL.md"
 
     reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
     assert "Version A." in installed_skill.read_text()
@@ -913,7 +913,7 @@ def test_diff_report_skips_remove_and_skill_changes_in_diff_output(
 
     assert "REMOVE:" in rendered
     prompt_path = str(
-        project_root / ".codex" / "prompts" / "agents" / "prompt-engineer-reviewer.md"
+        project_root / ".codex" / "prompts" / "agents" / "market-prompt-engineer-reviewer.md"
     )
     assert f"--- {prompt_path}" not in rendered
 
@@ -937,10 +937,10 @@ def test_reconcile_detects_skill_directory_with_extra_files(
     codex_home = tmp_path / "codex-home"
     desired = _build_desired(project_root, cache_root, codex_home)
     _write_skill_directory(
-        codex_home / "skills" / "prompt-engineer-prompt-engineer",
+        codex_home / "skills" / "market-prompt-engineer-prompt-engineer",
         desired.skills[0],
     )
-    (codex_home / "skills" / "prompt-engineer-prompt-engineer" / "EXTRA.md").write_text(
+    (codex_home / "skills" / "market-prompt-engineer-prompt-engineer" / "EXTRA.md").write_text(
         "extra file\n"
     )
 
@@ -968,7 +968,7 @@ def test_reconcile_detects_skill_directory_with_wrong_file_mode(
 
     first_desired = _build_desired(project_root, cache_root, codex_home)
     reconcile_desired_state(first_desired)
-    installed = codex_home / "skills" / "prompt-engineer-prompt-engineer" / "SKILL.md"
+    installed = codex_home / "skills" / "market-prompt-engineer-prompt-engineer" / "SKILL.md"
     installed.chmod(0o777)
 
     report = reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
@@ -1067,21 +1067,21 @@ def test_reconcile_codex_home_migration_preserves_other_owners_in_previous_regis
 
     original_registry = _read_global_registry(first_home)
     assert sorted(
-        original_registry["skills"]["prompt-engineer-prompt-engineer"]["owners"]
+        original_registry["skills"]["market-prompt-engineer-prompt-engineer"]["owners"]
     ) == sorted([str(first_project), str(second_project)])
 
     reconcile_desired_state(_build_desired(first_project, cache_root, second_home))
 
     previous_registry = _read_global_registry(first_home)
-    assert previous_registry["skills"]["prompt-engineer-prompt-engineer"]["owners"] == [
+    assert previous_registry["skills"]["market-prompt-engineer-prompt-engineer"]["owners"] == [
         str(second_project)
     ]
     new_registry = _read_global_registry(second_home)
-    assert new_registry["skills"]["prompt-engineer-prompt-engineer"]["owners"] == [
+    assert new_registry["skills"]["market-prompt-engineer-prompt-engineer"]["owners"] == [
         str(first_project)
     ]
-    assert (first_home / "skills" / "prompt-engineer-prompt-engineer").exists()
-    assert (second_home / "skills" / "prompt-engineer-prompt-engineer").exists()
+    assert (first_home / "skills" / "market-prompt-engineer-prompt-engineer").exists()
+    assert (second_home / "skills" / "market-prompt-engineer-prompt-engineer").exists()
 
 
 def test_reconcile_rejects_traversal_paths_in_corrupted_state(
@@ -1138,7 +1138,7 @@ def test_diff_report_skips_skill_create_changes(
 
     assert "CREATE:" in rendered
     assert "(skill)" in rendered
-    skill_path = str(codex_home / "skills" / "prompt-engineer-prompt-engineer")
+    skill_path = str(codex_home / "skills" / "market-prompt-engineer-prompt-engineer")
     assert f"--- {skill_path}" not in rendered
 
 

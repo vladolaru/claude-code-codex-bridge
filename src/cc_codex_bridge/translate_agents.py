@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-from dataclasses import dataclass
 from pathlib import Path
 import re
 from typing import Iterable
@@ -32,23 +30,6 @@ ROLE_AGENT_RE = re.compile(r"[^A-Za-z0-9_]+")
 PROMPT_COMPONENT_RE = re.compile(r"[^A-Za-z0-9-]+")
 
 
-@dataclass(frozen=True)
-class _RawAgentRole:
-    """Intermediate translated agent before collision resolution."""
-
-    marketplace: str
-    plugin_name: str
-    source_path: Path
-    description: str
-    original_model_hint: str | None
-    tools: tuple[str, ...]
-    prompt_body: str
-    role_name_base: str
-    role_name_prefix: str
-    prompt_stem_base: str
-    prompt_stem_prefix: str
-
-
 def translate_installed_agents(
     plugins: Iterable[InstalledPlugin],
     *,
@@ -70,8 +51,9 @@ def translate_installed_agents_with_diagnostics(
     default_model: str = "gpt-5.3-codex",
 ) -> AgentTranslationResult:
     """Translate installed Claude agent files into Codex role definitions."""
-    raw_roles: list[_RawAgentRole] = []
+    roles: list[GeneratedAgentRole] = []
     diagnostics: list[AgentTranslationDiagnostic] = []
+    seen_role_names: set[str] = set()
 
     for plugin in plugins:
         for agent_path in plugin.agents:
@@ -98,50 +80,33 @@ def translate_installed_agents_with_diagnostics(
                 )
                 continue
 
-            raw_roles.append(
-                _RawAgentRole(
-                    marketplace=plugin.marketplace,
+            marketplace_ns = _normalize_role_namespace(plugin.marketplace, kind="marketplace")
+            plugin_ns = _normalize_role_namespace(plugin.plugin_name, kind="plugin name")
+            agent_id = _normalize_name(agent_name)
+            role_name = f"{marketplace_ns}_{plugin_ns}_{agent_id}"
+
+            if role_name in seen_role_names:
+                raise TranslationError(f"Generated duplicate role name: {role_name}")
+            seen_role_names.add(role_name)
+
+            marketplace_pc = _normalize_prompt_component(plugin.marketplace, kind="marketplace")
+            plugin_pc = _normalize_prompt_component(plugin.plugin_name, kind="plugin name")
+            agent_pc = _normalize_prompt_component(agent_name, kind="agent name")
+            prompt_stem = f"{marketplace_pc}-{plugin_pc}-{agent_pc}"
+
+            roles.append(
+                GeneratedAgentRole(
                     plugin_name=plugin.plugin_name,
                     source_path=agent_path,
+                    role_name=role_name,
                     description=description,
                     original_model_hint=_optional_str(parsed_frontmatter.get("model")),
+                    model=default_model,
                     tools=translated_tools,
+                    prompt_relpath=Path("prompts") / "agents" / f"{prompt_stem}.md",
                     prompt_body=body.strip() + ("\n" if body.strip() else ""),
-                    role_name_base=(
-                        f"{_normalize_role_namespace(plugin.plugin_name, kind='plugin name')}_"
-                        f"{_normalize_name(agent_name)}"
-                    ),
-                    role_name_prefix=_normalize_role_namespace(
-                        plugin.marketplace,
-                        kind="marketplace",
-                    ),
-                    prompt_stem_base=(
-                        f"{_normalize_prompt_component(plugin.plugin_name, kind='plugin name')}-"
-                        f"{_normalize_prompt_component(agent_name, kind='agent name')}"
-                    ),
-                    prompt_stem_prefix=_normalize_prompt_component(
-                        plugin.marketplace,
-                        kind="marketplace",
-                    ),
                 )
             )
-
-    role_names = _resolve_role_names(raw_roles)
-    prompt_stems = _resolve_prompt_stems(raw_roles)
-    roles = [
-        GeneratedAgentRole(
-            plugin_name=raw_role.plugin_name,
-            source_path=raw_role.source_path,
-            role_name=role_names[id(raw_role)],
-            description=raw_role.description,
-            original_model_hint=raw_role.original_model_hint,
-            model=default_model,
-            tools=raw_role.tools,
-            prompt_relpath=Path("prompts") / "agents" / f"{prompt_stems[id(raw_role)]}.md",
-            prompt_body=raw_role.prompt_body,
-        )
-        for raw_role in raw_roles
-    ]
 
     return AgentTranslationResult(
         roles=tuple(sorted(roles, key=lambda role: role.role_name)),
@@ -198,84 +163,6 @@ def _unsupported_tools(raw_tools: object) -> tuple[str, ...]:
         if isinstance(tool, str) and tool not in TOOL_TRANSLATIONS
     }
     return tuple(sorted(unsupported))
-
-
-def _resolve_role_names(raw_roles: list[_RawAgentRole]) -> dict[int, str]:
-    """Resolve deterministic, collision-safe role names."""
-    return _resolve_name_map(
-        raw_roles,
-        lambda raw_role: raw_role.role_name_base,
-        lambda raw_role: f"{raw_role.role_name_prefix}_{raw_role.role_name_base}",
-        error_label="role name",
-    )
-
-
-def _resolve_prompt_stems(raw_roles: list[_RawAgentRole]) -> dict[int, str]:
-    """Resolve deterministic, collision-safe prompt file stems."""
-    return _resolve_name_map(
-        raw_roles,
-        lambda raw_role: raw_role.prompt_stem_base,
-        lambda raw_role: f"{raw_role.prompt_stem_prefix}-{raw_role.prompt_stem_base}",
-        error_label="prompt file name",
-    )
-
-
-def _resolve_name_map(
-    raw_roles: list[_RawAgentRole],
-    base_name_getter,
-    disambiguated_name_getter,
-    *,
-    error_label: str,
-) -> dict[int, str]:
-    """Resolve unique names, prefixing collisions by marketplace when needed."""
-    grouped: dict[str, list[_RawAgentRole]] = defaultdict(list)
-    for raw_role in raw_roles:
-        grouped[base_name_getter(raw_role)].append(raw_role)
-
-    resolved: dict[int, str] = {}
-    seen_names: set[str] = set()
-    for group_name in sorted(grouped):
-        group = sorted(grouped[group_name], key=_raw_role_sort_key)
-        if len(group) == 1:
-            _assign_unique_name(
-                resolved,
-                seen_names,
-                group[0],
-                base_name_getter(group[0]),
-                error_label=error_label,
-            )
-            continue
-
-        for raw_role in group:
-            _assign_unique_name(
-                resolved,
-                seen_names,
-                raw_role,
-                disambiguated_name_getter(raw_role),
-                error_label=error_label,
-            )
-
-    return resolved
-
-
-def _assign_unique_name(
-    resolved: dict[int, str],
-    seen_names: set[str],
-    raw_role: _RawAgentRole,
-    candidate: str,
-    *,
-    error_label: str,
-) -> None:
-    """Store one resolved name and fail when normalization still collides."""
-    if candidate in seen_names:
-        raise TranslationError(f"Generated duplicate {error_label}: {candidate}")
-    seen_names.add(candidate)
-    resolved[id(raw_role)] = candidate
-
-
-def _raw_role_sort_key(raw_role: _RawAgentRole) -> tuple[str, str, str]:
-    """Stable ordering for marketplace-based collision resolution."""
-    return (raw_role.marketplace, raw_role.plugin_name, raw_role.source_path.name)
 
 
 def _optional_str(value: object) -> str | None:

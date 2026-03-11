@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from pathlib import Path
 import re
 from typing import Iterable
@@ -46,10 +45,6 @@ class _RawSkill:
     def skill_dir_name(self) -> str:
         return self.skill_path.name
 
-    @property
-    def install_dir_base(self) -> str:
-        return f"{self.plugin_name}-{self.skill_dir_name}"
-
 
 def translate_installed_skills(
     plugins: Iterable[InstalledPlugin],
@@ -69,9 +64,11 @@ def translate_installed_skills(
                 )
             )
 
-    install_dir_names = _resolve_install_dir_names(raw_skills)
     generated = [
-        _build_generated_skill(raw_skill, install_dir_names[id(raw_skill)])
+        _build_generated_skill(
+            raw_skill,
+            f"{raw_skill.marketplace}-{raw_skill.plugin_name}-{raw_skill.skill_dir_name}",
+        )
         for raw_skill in raw_skills
     ]
 
@@ -85,26 +82,6 @@ def _read_required_skill_name(skill_md_path: Path) -> str:
     if not skill_name:
         raise TranslationError(f"Skill missing required name frontmatter: {skill_md_path}")
     return skill_name
-
-
-def _resolve_install_dir_names(raw_skills: list[_RawSkill]) -> dict[int, str]:
-    """Resolve unique generated install directory names."""
-    grouped: dict[str, list[_RawSkill]] = defaultdict(list)
-    for raw_skill in raw_skills:
-        grouped[raw_skill.install_dir_base].append(raw_skill)
-
-    resolved: dict[int, str] = {}
-    for install_dir_base, group in grouped.items():
-        if len(group) == 1:
-            resolved[id(group[0])] = install_dir_base
-            continue
-
-        for raw_skill in sorted(group, key=_raw_skill_sort_key):
-            resolved[id(raw_skill)] = (
-                f"{raw_skill.marketplace}-{raw_skill.plugin_name}-{raw_skill.skill_dir_name}"
-            )
-
-    return resolved
 
 
 def _build_generated_skill(
@@ -275,8 +252,3 @@ def _should_ignore(path: Path) -> bool:
     if path.suffix == ".pyc":
         return True
     return False
-
-
-def _raw_skill_sort_key(raw_skill: _RawSkill) -> tuple[str, str, str]:
-    """Stable ordering for conflict resolution."""
-    return (raw_skill.marketplace, raw_skill.plugin_name, raw_skill.skill_dir_name)

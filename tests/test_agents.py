@@ -51,12 +51,12 @@ def test_translate_installed_agents_generates_deterministic_roles(make_plugin_ve
 
     assert len(roles) == 1
     role = roles[0]
-    assert role.role_name == "pirategoat-tools_architecture_reviewer"
+    assert role.role_name == "market_pirategoat-tools_architecture_reviewer"
     assert role.description == "Software architecture review"
     assert role.original_model_hint == "sonnet"
     assert role.model == "gpt-5.3-codex"
     assert role.tools == ("bash", "read", "web_search")
-    assert role.prompt_relpath.as_posix() == "prompts/agents/pirategoat-tools-architecture-reviewer.md"
+    assert role.prompt_relpath.as_posix() == "prompts/agents/market-pirategoat-tools-architecture-reviewer.md"
     assert role.prompt_body == "You are an architecture reviewer.\n"
 
 
@@ -73,7 +73,7 @@ def test_render_prompt_files_uses_dot_codex_relative_paths(make_plugin_version):
     prompt_files = render_prompt_files(roles)
 
     assert prompt_files == {
-        Path(".codex/prompts/agents/test-plugin-reviewer.md"): "Prompt body.\n"
+        Path(".codex/prompts/agents/market-test-plugin-reviewer.md"): "Prompt body.\n"
     }
 
 
@@ -95,10 +95,10 @@ def test_render_inline_codex_config_is_deterministic(make_plugin_version):
     roles = translate_installed_agents(discover_latest_plugins(cache_root))
     rendered = render_inline_codex_config(roles)
 
-    assert '[agents.alpha_b_reviewer]' in rendered
-    assert '[agents.beta_a_reviewer]' in rendered
-    assert 'prompt = ".codex/prompts/agents/alpha-b-reviewer.md"' in rendered
-    assert 'prompt = ".codex/prompts/agents/beta-a-reviewer.md"' in rendered
+    assert '[agents.market_alpha_b_reviewer]' in rendered
+    assert '[agents.market_beta_a_reviewer]' in rendered
+    assert 'prompt = ".codex/prompts/agents/market-alpha-b-reviewer.md"' in rendered
+    assert 'prompt = ".codex/prompts/agents/market-beta-a-reviewer.md"' in rendered
     assert '# original_claude_model_hint = "sonnet"' in rendered
     assert 'tools = ["read", "write"]' in rendered
 
@@ -122,7 +122,7 @@ def test_render_inline_codex_config_escapes_multiline_strings(make_plugin_versio
     rendered = render_inline_codex_config(roles)
     parsed = tomllib.loads(rendered)
 
-    assert parsed["agents"]["test-plugin_reviewer"]["description"] == "line one\nline two"
+    assert parsed["agents"]["market_test-plugin_reviewer"]["description"] == "line one\nline two"
 
 
 def test_translate_tools_and_rendered_config_ignore_source_tool_order(make_plugin_version):
@@ -187,14 +187,14 @@ def test_translate_installed_agents_sanitizes_generated_names_and_paths(make_plu
 
     roles = translate_installed_agents(discover_latest_plugins(cache_root))
 
-    assert roles[0].role_name == "test-plugin_tmp_pwn"
-    assert roles[0].prompt_relpath.as_posix() == "prompts/agents/test-plugin-tmp-pwn.md"
+    assert roles[0].role_name == "market_test-plugin_tmp_pwn"
+    assert roles[0].prompt_relpath.as_posix() == "prompts/agents/market-test-plugin-tmp-pwn.md"
 
 
-def test_translate_installed_agents_disambiguates_cross_marketplace_collisions(
+def test_translate_installed_agents_always_includes_marketplace_prefix(
     make_plugin_version,
 ):
-    """Marketplace prefixes resolve otherwise-colliding generated agent names."""
+    """Marketplace prefix is always included in generated agent names."""
     cache_root, alpha_dir = make_plugin_version(
         "alpha",
         "shared-plugin",
@@ -409,7 +409,7 @@ def test_translate_installed_agents_accepts_quoted_fields_and_inline_tool_lists(
     roles = translate_installed_agents(discover_latest_plugins(cache_root))
 
     assert len(roles) == 1
-    assert roles[0].role_name == "test-plugin_reviewer"
+    assert roles[0].role_name == "market_test-plugin_reviewer"
     assert roles[0].description == "Review: carefully"
     assert roles[0].tools == ("read", "write")
 

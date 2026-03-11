@@ -46,10 +46,10 @@ def test_generated_skills_copy_bundled_resources(make_plugin_version, tmp_path: 
         for skill in skills
     )
 
-    assert installed_paths == (codex_home / "skills" / "prompt-engineer-prompt-engineer",)
+    assert installed_paths == (codex_home / "skills" / "market-prompt-engineer-prompt-engineer",)
     installed_root = installed_paths[0]
     assert (installed_root / "SKILL.md").read_text().startswith(
-        "---\nname: prompt-engineer-prompt-engineer\n"
+        "---\nname: market-prompt-engineer-prompt-engineer\n"
     )
     assert (installed_root / "references" / "guide.md").read_text() == "Reference material.\n"
     assert (installed_root / "scripts" / "check.sh").read_text() == "#!/bin/sh\necho ok\n"
@@ -84,7 +84,7 @@ def test_translate_installed_skills_rewrites_plugin_root_script_paths(
     for skill in skills:
         _write_skill_directory(tmp_path / "codex-home" / "skills" / skill.install_dir_name, skill)
 
-    installed_root = tmp_path / "codex-home" / "skills" / "pirategoat-tools-decision-critic"
+    installed_root = tmp_path / "codex-home" / "skills" / "market-pirategoat-tools-decision-critic"
     skill_md = (installed_root / "SKILL.md").read_text()
     assert 'PLUGIN_ROOT="<skill base directory>/_plugin"' in skill_md
     assert (installed_root / "_plugin" / "scripts" / "decision-critic.py").read_text() == "print('ok')\n"
@@ -125,7 +125,7 @@ def test_translate_installed_skills_vendors_referenced_sibling_skills(
     for skill in skills:
         _write_skill_directory(tmp_path / "codex-home" / "skills" / skill.install_dir_name, skill)
 
-    installed_root = tmp_path / "codex-home" / "skills" / "pirategoat-tools-e2e-testing-patterns"
+    installed_root = tmp_path / "codex-home" / "skills" / "market-pirategoat-tools-e2e-testing-patterns"
     skill_md = (installed_root / "SKILL.md").read_text()
     assert "_plugin/skills/testing-patterns/references/test-philosophy.md" in skill_md
     assert (
@@ -195,9 +195,9 @@ def test_hash_generated_skill_is_order_independent():
         marketplace="market",
         plugin_name="prompt-engineer",
         source_path=Path("/tmp/source"),
-        install_dir_name="prompt-engineer-prompt-engineer",
+        install_dir_name="market-prompt-engineer-prompt-engineer",
         original_skill_name="prompt-engineer",
-        codex_skill_name="prompt-engineer-prompt-engineer",
+        codex_skill_name="market-prompt-engineer-prompt-engineer",
         files=(
             GeneratedSkillFile(
                 relative_path=Path("scripts") / "check.sh",
@@ -206,7 +206,7 @@ def test_hash_generated_skill_is_order_independent():
             ),
             GeneratedSkillFile(
                 relative_path=Path("SKILL.md"),
-                content=b"---\nname: prompt-engineer-prompt-engineer\n---\n",
+                content=b"---\nname: market-prompt-engineer-prompt-engineer\n---\n",
                 mode=0o644,
             ),
         ),
@@ -230,9 +230,9 @@ def test_hash_generated_skill_tracks_bytes_and_mode():
         marketplace="market",
         plugin_name="prompt-engineer",
         source_path=Path("/tmp/source"),
-        install_dir_name="prompt-engineer-prompt-engineer",
+        install_dir_name="market-prompt-engineer-prompt-engineer",
         original_skill_name="prompt-engineer",
-        codex_skill_name="prompt-engineer-prompt-engineer",
+        codex_skill_name="market-prompt-engineer-prompt-engineer",
         files=(
             GeneratedSkillFile(relative_path=Path("SKILL.md"), content=b"alpha\n", mode=0o644),
         ),
