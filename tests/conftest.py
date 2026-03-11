@@ -94,5 +94,5 @@ def isolate_home_scoped_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(
         launchagent_module,
         "DEFAULT_LOGS_DIR",
-        sandbox_home / "Library" / "Logs" / "codex-interop",
+        sandbox_home / "Library" / "Logs" / "codex-bridge",
     )

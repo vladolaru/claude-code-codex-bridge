@@ -55,7 +55,7 @@ The bridge reads local Claude Code state and produces Codex-compatible outputs s
 - `CLAUDE.md` as the `@AGENTS.md` shim
 - `.codex/config.toml`
 - `.codex/prompts/agents/*.md`
-- `.codex/claude-code-interop-state.json`
+- `.codex/claude-code-bridge-state.json`
 - `~/.codex/skills/*`
 
 Do not treat generated `.codex/*` or generated Codex skill directories as hand-authored source.

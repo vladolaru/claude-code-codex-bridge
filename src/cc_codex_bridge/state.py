@@ -1,4 +1,4 @@
-"""State tracking for generated Codex interop artifacts."""
+"""State tracking for generated Codex bridge artifacts."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ STATE_VERSION = 3
 
 
 @dataclass(frozen=True)
-class InteropState:
+class BridgeState:
     """Recorded ownership metadata for generated artifacts."""
 
     project_root: Path
@@ -23,22 +23,22 @@ class InteropState:
     version: int = STATE_VERSION
 
     @classmethod
-    def from_path(cls, path: Path) -> "InteropState | None":
+    def from_path(cls, path: Path) -> "BridgeState | None":
         """Read a state file if it exists."""
         if not path.exists():
             return None
 
         try:
             data = json.loads(
-                read_utf8_text(path, label="interop state file", error_type=ReconcileError)
+                read_utf8_text(path, label="bridge state file", error_type=ReconcileError)
             )
         except json.JSONDecodeError as exc:
-            raise ReconcileError(f"Invalid interop state file: {path}") from exc
+            raise ReconcileError(f"Invalid bridge state file: {path}") from exc
 
         if not isinstance(data, dict):
-            raise ReconcileError(f"Invalid interop state file: {path}")
+            raise ReconcileError(f"Invalid bridge state file: {path}")
         if data.get("version") != STATE_VERSION:
-            raise ReconcileError(f"Unsupported interop state version in: {path}")
+            raise ReconcileError(f"Unsupported bridge state version in: {path}")
 
         return cls(
             project_root=_read_absolute_path(data, "project_root", path),
@@ -62,7 +62,7 @@ def _require_string(data: dict[str, object], key: str, path: Path) -> str:
     """Read one required string field from the state payload."""
     value = data.get(key)
     if not isinstance(value, str) or not value:
-        raise ReconcileError(f"Invalid interop state file: {path}")
+        raise ReconcileError(f"Invalid bridge state file: {path}")
     return value
 
 
@@ -70,7 +70,7 @@ def _read_absolute_path(data: dict[str, object], key: str, path: Path) -> Path:
     """Read one required absolute path field from the state payload."""
     value = Path(_require_string(data, key, path)).expanduser()
     if not value.is_absolute():
-        raise ReconcileError(f"Invalid interop state file: {path}")
+        raise ReconcileError(f"Invalid bridge state file: {path}")
     return value.resolve()
 
 
@@ -78,5 +78,5 @@ def _read_string_list(data: dict[str, object], key: str, path: Path) -> list[str
     """Read one optional string-list field from the state payload."""
     value = data.get(key, [])
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
-        raise ReconcileError(f"Invalid interop state file: {path}")
+        raise ReconcileError(f"Invalid bridge state file: {path}")
     return value

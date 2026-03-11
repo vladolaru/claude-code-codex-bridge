@@ -15,7 +15,7 @@ from cc_codex_bridge.model import ReconcileError
 
 DEFAULT_START_INTERVAL = 300
 DEFAULT_LAUNCHAGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
-DEFAULT_LOGS_DIR = Path.home() / "Library" / "Logs" / "codex-interop"
+DEFAULT_LOGS_DIR = Path.home() / "Library" / "Logs" / "codex-bridge"
 
 
 def build_launchagent_label(project_root: str | Path) -> str:
@@ -23,7 +23,7 @@ def build_launchagent_label(project_root: str | Path) -> str:
     project_path = Path(project_root).expanduser().resolve()
     slug = re.sub(r"[^A-Za-z0-9]+", "-", project_path.name).strip("-").lower() or "project"
     stable_hash = uuid5(NAMESPACE_URL, str(project_path)).hex[:10]
-    return f"com.openai.codex-interop.{slug}.{stable_hash}"
+    return f"com.openai.codex-bridge.{slug}.{stable_hash}"
 
 
 def build_launchagent_plist(

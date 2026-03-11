@@ -1,4 +1,4 @@
-"""Tests for the Codex interop CLI against isolated fixtures."""
+"""Tests for the Codex bridge CLI against isolated fixtures."""
 
 from __future__ import annotations
 

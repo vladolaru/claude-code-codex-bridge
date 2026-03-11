@@ -14,7 +14,7 @@ What it generates:
 - project-local `CLAUDE.md`
 - project-local `.codex/config.toml`
 - project-local `.codex/prompts/agents/*.md`
-- project-local `.codex/claude-code-interop-state.json`
+- project-local `.codex/claude-code-bridge-state.json`
 - user-global `~/.codex/skills/*`
 
 ## Install From GitHub Releases

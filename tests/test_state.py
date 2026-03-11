@@ -1,4 +1,4 @@
-"""Tests for interop state serialization and validation."""
+"""Tests for bridge state serialization and validation."""
 
 from __future__ import annotations
 
@@ -9,34 +9,34 @@ import pytest
 
 from cc_codex_bridge.model import ReconcileError
 from cc_codex_bridge.registry import GlobalSkillEntry, GlobalSkillRegistry
-from cc_codex_bridge.state import InteropState
+from cc_codex_bridge.state import BridgeState
 
 
-def test_interop_state_round_trips(tmp_path: Path):
+def test_bridge_state_round_trips(tmp_path: Path):
     """A valid state file deserializes and preserves deterministic JSON."""
-    path = tmp_path / "claude-code-interop-state.json"
-    state = InteropState(
+    path = tmp_path / "claude-code-bridge-state.json"
+    state = BridgeState(
         project_root=tmp_path / "project",
         codex_home=tmp_path / "codex-home",
         managed_project_files=("CLAUDE.md", ".codex/config.toml"),
     )
     path.write_text(state.to_json())
 
-    loaded = InteropState.from_path(path)
+    loaded = BridgeState.from_path(path)
 
     assert loaded == state
     assert json.loads(state.to_json())["version"] == 3
 
 
-def test_interop_state_handles_missing_invalid_and_unsupported_files(tmp_path: Path):
+def test_bridge_state_handles_missing_invalid_and_unsupported_files(tmp_path: Path):
     """State loading fails clearly for malformed or unsupported files."""
     missing = tmp_path / "missing.json"
-    assert InteropState.from_path(missing) is None
+    assert BridgeState.from_path(missing) is None
 
     invalid = tmp_path / "invalid.json"
     invalid.write_text("{")
-    with pytest.raises(ReconcileError, match="Invalid interop state file"):
-        InteropState.from_path(invalid)
+    with pytest.raises(ReconcileError, match="Invalid bridge state file"):
+        BridgeState.from_path(invalid)
 
     unsupported = tmp_path / "unsupported.json"
     unsupported.write_text(
@@ -48,11 +48,11 @@ def test_interop_state_handles_missing_invalid_and_unsupported_files(tmp_path: P
             }
         )
     )
-    with pytest.raises(ReconcileError, match="Unsupported interop state version"):
-        InteropState.from_path(unsupported)
+    with pytest.raises(ReconcileError, match="Unsupported bridge state version"):
+        BridgeState.from_path(unsupported)
 
 
-def test_interop_state_rejects_invalid_schema_shapes(tmp_path: Path):
+def test_bridge_state_rejects_invalid_schema_shapes(tmp_path: Path):
     """Version-matching state payloads still validate field types strictly."""
     invalid = tmp_path / "invalid-schema.json"
     invalid.write_text(
@@ -66,11 +66,11 @@ def test_interop_state_rejects_invalid_schema_shapes(tmp_path: Path):
         )
     )
 
-    with pytest.raises(ReconcileError, match="Invalid interop state file"):
-        InteropState.from_path(invalid)
+    with pytest.raises(ReconcileError, match="Invalid bridge state file"):
+        BridgeState.from_path(invalid)
 
 
-def test_interop_state_rejects_non_absolute_paths(tmp_path: Path):
+def test_bridge_state_rejects_non_absolute_paths(tmp_path: Path):
     """State path fields must remain absolute paths."""
     invalid_paths = tmp_path / "invalid-paths.json"
     invalid_paths.write_text(
@@ -84,13 +84,13 @@ def test_interop_state_rejects_non_absolute_paths(tmp_path: Path):
         )
     )
 
-    with pytest.raises(ReconcileError, match="Invalid interop state file"):
-        InteropState.from_path(invalid_paths)
+    with pytest.raises(ReconcileError, match="Invalid bridge state file"):
+        BridgeState.from_path(invalid_paths)
 
 
 def test_global_skill_registry_round_trips(tmp_path: Path):
     """A valid global registry serializes and deserializes deterministically."""
-    path = tmp_path / "claude-code-interop-global-state.json"
+    path = tmp_path / "claude-code-bridge-global-state.json"
     registry = GlobalSkillRegistry(
         skills={
             "prompt-engineer-prompt-engineer": GlobalSkillEntry(

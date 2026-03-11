@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Codex interop generator CLI."""
+"""Codex bridge generator CLI."""
 
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser = argparse.ArgumentParser(
-        description="Generate Codex interop artifacts from installed Claude Code plugins.",
+        description="Generate Codex bridge artifacts from installed Claude Code plugins.",
         parents=[common],
     )
 

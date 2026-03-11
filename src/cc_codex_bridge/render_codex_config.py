@@ -24,7 +24,7 @@ def render_inline_codex_config(
     """Render inline `.codex/config.toml` agent role config deterministically."""
     lines = [
         "# GENERATED FILE - DO NOT EDIT",
-        "# Source: cc_codex_bridge phase 2",
+        "# Source: cc_codex_bridge",
         "",
     ]
 

@@ -1,4 +1,4 @@
-"""Exclusion config and filtering for Codex interop sync."""
+"""Exclusion config and filtering for Codex bridge sync."""
 
 from __future__ import annotations
 

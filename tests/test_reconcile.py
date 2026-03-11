@@ -658,7 +658,7 @@ def test_reconcile_rejects_symlinked_state_file(
     make_plugin_version,
     tmp_path: Path,
 ):
-    """The interop state file itself may not be a symlink."""
+    """The bridge state file itself may not be a symlink."""
     project_root, _agents_md = make_project()
     cache_root, version_dir = make_plugin_version(
         "market",
@@ -677,7 +677,7 @@ def test_reconcile_rejects_symlinked_state_file(
 
     desired = _build_desired(project_root, cache_root, tmp_path / "codex-home")
 
-    with pytest.raises(ReconcileError, match="symlinked interop state file"):
+    with pytest.raises(ReconcileError, match="symlinked bridge state file"):
         diff_desired_state(desired)
 
 
@@ -815,7 +815,7 @@ def test_atomic_write_cleans_up_temp_file_on_failure(
     original_rename = Path.rename
 
     def fail_on_first_rename(self, target):
-        if self.name.startswith(".interop-"):
+        if self.name.startswith(".bridge-"):
             raise OSError("disk full")
         return original_rename(self, target)
 
@@ -823,8 +823,8 @@ def test_atomic_write_cleans_up_temp_file_on_failure(
         with pytest.raises(OSError, match="disk full"):
             reconcile_desired_state(desired)
 
-    interop_temps = list(project_root.rglob(".interop-*"))
-    assert interop_temps == []
+    bridge_temps = list(project_root.rglob(".bridge-*"))
+    assert bridge_temps == []
 
 
 def test_reconcile_cleans_empty_prompt_parents_but_stops_at_non_empty(
@@ -1000,7 +1000,7 @@ def test_reconcile_rejects_symlinked_global_registry(
     codex_home.mkdir(parents=True)
     real_registry = tmp_path / "real-registry.json"
     real_registry.write_text("{}\n")
-    (codex_home / "claude-code-interop-global-state.json").symlink_to(real_registry)
+    (codex_home / "claude-code-bridge-global-state.json").symlink_to(real_registry)
 
     desired = _build_desired(project_root, cache_root, codex_home)
 

@@ -1,4 +1,4 @@
-"""Discovery for Codex interop generation."""
+"""Discovery for Codex bridge generation."""
 
 from __future__ import annotations
 

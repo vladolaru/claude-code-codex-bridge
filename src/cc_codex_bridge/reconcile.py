@@ -1,4 +1,4 @@
-"""Desired-state reconcile engine for Codex interop artifacts."""
+"""Desired-state reconcile engine for Codex bridge artifacts."""
 
 from __future__ import annotations
 
@@ -21,12 +21,12 @@ from cc_codex_bridge.registry import (
     GlobalSkillRegistry,
     hash_generated_skill,
 )
-from cc_codex_bridge.state import InteropState
+from cc_codex_bridge.state import BridgeState
 from cc_codex_bridge.text import read_utf8_text
 
 
 DEFAULT_CODEX_HOME = Path.home() / ".codex"
-STATE_RELATIVE_PATH = Path(".codex") / "claude-code-interop-state.json"
+STATE_RELATIVE_PATH = Path(".codex") / "claude-code-bridge-state.json"
 CONFIG_RELATIVE_PATH = Path(".codex") / "config.toml"
 PROMPTS_RELATIVE_ROOT = Path(".codex") / "prompts" / "agents"
 
@@ -210,7 +210,7 @@ def _apply_changes(desired: DesiredState, plan: _MutationPlan) -> None:
 def _atomic_write_file(path: Path, content: bytes) -> None:
     """Write a file atomically via temp-file-then-rename."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.parent / f".interop-{uuid4().hex}"
+    tmp = path.parent / f".bridge-{uuid4().hex}"
     try:
         tmp.write_bytes(content)
         tmp.rename(path)
@@ -263,7 +263,7 @@ def format_diff_report(desired: DesiredState, report: ReconcileReport) -> str:
 
 def _plan_mutations(
     desired: DesiredState,
-    previous_state: InteropState | None,
+    previous_state: BridgeState | None,
 ) -> _MutationPlan:
     """Plan file, skill, and registry mutations for one reconcile run."""
     project_changes = _compute_project_file_changes(desired, previous_state)
@@ -277,7 +277,7 @@ def _plan_mutations(
 
 def _compute_project_file_changes(
     desired: DesiredState,
-    previous_state: InteropState | None,
+    previous_state: BridgeState | None,
 ) -> tuple[Change, ...]:
     """Compute project-local file changes, enforcing ownership safety."""
     if previous_state is not None and previous_state.project_root != desired.project_root:
@@ -329,7 +329,7 @@ def _compute_project_file_changes(
 
 def _plan_skill_mutations(
     desired: DesiredState,
-    previous_state: InteropState | None,
+    previous_state: BridgeState | None,
 ) -> tuple[tuple[Change, ...], tuple[_RegistryWrite, ...]]:
     """Plan global-skill ownership and directory mutations."""
     current_snapshot = _load_registry_snapshot(desired.codex_home / GLOBAL_REGISTRY_FILENAME)
@@ -512,11 +512,11 @@ def _directory_matches_skill(path: Path, skill: GeneratedSkill) -> bool:
     return True
 
 
-def _load_previous_state(desired: DesiredState) -> InteropState | None:
+def _load_previous_state(desired: DesiredState) -> BridgeState | None:
     """Load state only from a regular file at the expected project path."""
     if desired.state_path.is_symlink():
-        raise ReconcileError(f"Refusing to use symlinked interop state file: {desired.state_path}")
-    return InteropState.from_path(desired.state_path)
+        raise ReconcileError(f"Refusing to use symlinked bridge state file: {desired.state_path}")
+    return BridgeState.from_path(desired.state_path)
 
 
 def _load_registry_snapshot(path: Path) -> _RegistrySnapshot:
@@ -550,7 +550,7 @@ def _cleanup_empty_parents(path: Path, stop_at: Path) -> None:
         current = current.parent
 
 
-def _build_state_record(desired: DesiredState) -> InteropState:
+def _build_state_record(desired: DesiredState) -> BridgeState:
     """Build the desired stable state payload."""
     managed_project_paths = {
         *(_project_relative(desired, path) for path, _ in desired.project_files),
@@ -558,7 +558,7 @@ def _build_state_record(desired: DesiredState) -> InteropState:
         STATE_RELATIVE_PATH.as_posix(),
     }
     managed_project_files = tuple(sorted(managed_project_paths))
-    return InteropState(
+    return BridgeState(
         project_root=desired.project_root,
         codex_home=desired.codex_home,
         managed_project_files=managed_project_files,

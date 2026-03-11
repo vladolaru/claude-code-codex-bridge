@@ -49,8 +49,8 @@ These are derived artifacts and must not become hand-maintained sources:
 - `CLAUDE.md`
 - `.codex/config.toml`
 - `.codex/prompts/agents/*.md`
-- `.codex/claude-code-interop-state.json`
-- `~/.codex/claude-code-interop-global-state.json`
+- `.codex/claude-code-bridge-state.json`
+- `~/.codex/claude-code-bridge-global-state.json`
 - `~/.codex/skills/*`
 
 ### Authority rule
@@ -120,12 +120,12 @@ Utility commands such as `doctor` and the LaunchAgent commands are intentionally
   - rendered inline multi-agent config
 - `.codex/prompts/agents/*.md`
   - prompt bodies derived from Claude agent markdown bodies
-- `.codex/claude-code-interop-state.json`
+- `.codex/claude-code-bridge-state.json`
   - project-local ownership state for reconcile safety
 
 ### User-global outputs
 
-- `~/.codex/claude-code-interop-global-state.json`
+- `~/.codex/claude-code-bridge-global-state.json`
   - global generated-skill ownership registry keyed by install directory name
 - `~/.codex/skills/<generated-skill-name>/`
   - self-contained Codex skill directories derived from Claude plugin and user skills
@@ -171,14 +171,14 @@ The global registry records:
 ### Safety rules
 
 - project files are never overwritten unless they were previously recorded as managed
-- the state file may only authorize generator-owned project paths: `CLAUDE.md`, `.codex/config.toml`, `.codex/claude-code-interop-state.json`, and `.codex/prompts/agents/*`
+- the state file may only authorize generator-owned project paths: `CLAUDE.md`, `.codex/config.toml`, `.codex/claude-code-bridge-state.json`, and `.codex/prompts/agents/*`
 - generated project-relative paths are normalized and may not use absolute paths or `..` traversal
 - corrupted or unexpected managed project paths in state are treated as a hard error
 - state is rejected if it belongs to a different project root than the current reconcile target
 - malformed state payload field types are treated as a hard error
 - malformed state path fields are treated as a hard error
 - symlinked managed project targets are rejected
-- symlinked interop state files are rejected
+- symlinked bridge state files are rejected
 - malformed or symlinked global registry files are treated as a hard error
 - non-directory skill targets are rejected
 - existing skill directories are adopted only when their content matches the desired generated tree exactly
@@ -488,7 +488,7 @@ Current design:
 - the job always includes `--project <resolved-project-root>`
 - optional `--cache-dir` and `--codex-home` overrides are embedded when supplied
 - the plist uses `RunAtLoad` and `StartInterval`
-- logs go to `~/Library/Logs/codex-interop/` by default
+- logs go to `~/Library/Logs/codex-bridge/` by default
 
 The tool installs the plist file but does not run `launchctl` automatically.
 

@@ -1,4 +1,4 @@
-"""Tests for Codex interop discovery and SemVer behavior."""
+"""Tests for Codex bridge discovery and SemVer behavior."""
 
 from __future__ import annotations
 

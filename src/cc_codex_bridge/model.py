@@ -1,4 +1,4 @@
-"""Data models for Codex interop discovery."""
+"""Data models for Codex bridge discovery."""
 
 from __future__ import annotations
 
