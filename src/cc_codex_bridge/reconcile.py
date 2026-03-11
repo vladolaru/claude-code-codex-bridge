@@ -93,6 +93,7 @@ def build_desired_state(
     skills: Iterable[GeneratedSkill],
     *,
     codex_home: str | Path | None = None,
+    extra_project_files: Iterable[tuple[Path, bytes]] | None = None,
 ) -> DesiredState:
     """Build the desired generated outputs for a project."""
     if shim_decision.action == "fail":
@@ -129,6 +130,15 @@ def build_desired_state(
                 content.encode(),
             )
         )
+
+    if extra_project_files:
+        for relpath, content in sorted(extra_project_files, key=lambda item: item[0].as_posix()):
+            project_files.append(
+                (
+                    _resolve_managed_project_path(project_root, relpath),
+                    content,
+                )
+            )
 
     return DesiredState(
         project_root=project_root,
@@ -535,6 +545,9 @@ def _state_write_needed(desired: DesiredState) -> bool:
     return not desired.state_path.exists() or desired.state_path.read_bytes() != state_bytes
 
 
+SKILLS_RELATIVE_ROOT = Path(".codex") / "skills"
+
+
 def _is_allowed_managed_project_relative(relative: str) -> bool:
     """Return True for the only project-relative paths the generator may ever manage."""
     try:
@@ -551,7 +564,15 @@ def _is_allowed_managed_project_relative(relative: str) -> bool:
     if normalized_text in allowed_exact:
         return True
 
-    return normalized.parent == PROMPTS_RELATIVE_ROOT and normalized.suffix == ".md"
+    if normalized.parent == PROMPTS_RELATIVE_ROOT and normalized.suffix == ".md":
+        return True
+
+    # Allow project-level skill files under .codex/skills/
+    parts = normalized.parts
+    if len(parts) >= 3 and parts[0] == ".codex" and parts[1] == "skills":
+        return True
+
+    return False
 
 
 def _resolve_managed_project_path(project_root: Path, relative_path: Path) -> Path:

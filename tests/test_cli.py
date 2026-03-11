@@ -811,6 +811,98 @@ def test_validate_with_claude_home_flag(make_project, tmp_path: Path, capsys):
     assert "PLUGINS_FOUND: 1" in captured.out
 
 
+def test_reconcile_includes_user_level_skills(make_project, tmp_path: Path, capsys):
+    """Reconcile translates and installs user-level skills to ~/.codex/skills/."""
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "claude-home"
+    codex_home = tmp_path / "codex-home"
+
+    cache_root = claude_home / "plugins" / "cache"
+    _make_minimal_plugin(cache_root, "market", "test-plugin", "1.0.0")
+
+    user_skill = claude_home / "skills" / "my-tool"
+    user_skill.mkdir(parents=True)
+    (user_skill / "SKILL.md").write_text(
+        "---\nname: my-tool\ndescription: A tool\n---\n\nUse this.\n"
+    )
+
+    exit_code = cli.main([
+        "reconcile",
+        "--project", str(project_root),
+        "--claude-home", str(claude_home),
+        "--codex-home", str(codex_home),
+    ])
+
+    assert exit_code == 0
+    assert (codex_home / "skills" / "user-my-tool" / "SKILL.md").exists()
+
+
+def test_reconcile_includes_project_level_skills(make_project, tmp_path: Path, capsys):
+    """Reconcile translates and installs project-level skills to .codex/skills/."""
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "claude-home"
+    codex_home = tmp_path / "codex-home"
+
+    cache_root = claude_home / "plugins" / "cache"
+    _make_minimal_plugin(cache_root, "market", "test-plugin", "1.0.0")
+
+    project_skill = project_root / ".claude" / "skills" / "run-tests"
+    project_skill.mkdir(parents=True)
+    (project_skill / "SKILL.md").write_text(
+        "---\nname: run-tests\ndescription: Run the test suite\n---\n\nRun tests.\n"
+    )
+
+    exit_code = cli.main([
+        "reconcile",
+        "--project", str(project_root),
+        "--claude-home", str(claude_home),
+        "--codex-home", str(codex_home),
+    ])
+
+    assert exit_code == 0
+    # Project skills go to project-local .codex/skills/ (raw name, no prefix)
+    assert (project_root / ".codex" / "skills" / "run-tests" / "SKILL.md").exists()
+    # NOT in global registry
+    assert not (codex_home / "skills" / "run-tests" / "SKILL.md").exists()
+    assert not (codex_home / "skills" / "project-run-tests" / "SKILL.md").exists()
+
+
+def test_reconcile_includes_standalone_agents(make_project, tmp_path: Path, capsys):
+    """Reconcile translates user-level and project-level agents into config."""
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "claude-home"
+    codex_home = tmp_path / "codex-home"
+
+    cache_root = claude_home / "plugins" / "cache"
+    _make_minimal_plugin(cache_root, "market", "test-plugin", "1.0.0")
+
+    # User-level agent
+    user_agents = claude_home / "agents"
+    user_agents.mkdir(parents=True)
+    (user_agents / "helper.md").write_text(
+        "---\nname: helper\ndescription: Helps\ntools:\n  - Read\n---\n\nYou help.\n"
+    )
+
+    # Project-level agent
+    project_agents = project_root / ".claude" / "agents"
+    project_agents.mkdir(parents=True)
+    (project_agents / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Reviews\ntools:\n  - Read\n  - Grep\n---\n\nYou review.\n"
+    )
+
+    exit_code = cli.main([
+        "reconcile",
+        "--project", str(project_root),
+        "--claude-home", str(claude_home),
+        "--codex-home", str(codex_home),
+    ])
+
+    assert exit_code == 0
+    config_content = (project_root / ".codex" / "config.toml").read_text()
+    assert "user_helper" in config_content
+    assert "project_reviewer" in config_content
+
+
 def test_module_entrypoint_invokes_cli_main(monkeypatch: pytest.MonkeyPatch):
     """`python -m cc_codex_bridge` delegates to the CLI main entrypoint."""
     calls: list[list[str] | None] = []

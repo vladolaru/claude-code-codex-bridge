@@ -44,8 +44,9 @@ from cc_codex_bridge.render_codex_config import render_inline_codex_config, rend
 from cc_codex_bridge.translate_agents import (
     format_agent_translation_diagnostics,
     translate_installed_agents_with_diagnostics,
+    translate_standalone_agents,
 )
-from cc_codex_bridge.translate_skills import translate_installed_skills
+from cc_codex_bridge.translate_skills import translate_installed_skills, translate_standalone_skills
 
 
 PIPELINE_COMMANDS = {"reconcile", "validate", "status"}
@@ -218,27 +219,55 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
+        # Plugin agents
         agent_result = translate_installed_agents_with_diagnostics(result.plugins)
-        if agent_result.diagnostics:
+
+        # Standalone agents
+        user_agent_result = translate_standalone_agents(result.user_agents, scope="user")
+        project_agent_result = translate_standalone_agents(result.project_agents, scope="project")
+
+        # Merge diagnostics from all sources
+        all_diagnostics = (
+            *agent_result.diagnostics,
+            *user_agent_result.diagnostics,
+            *project_agent_result.diagnostics,
+        )
+        if all_diagnostics:
             if args.command == "status":
                 if args.json:
-                    print(format_status_json(None, exclusion_report, diagnostics=agent_result.diagnostics))
+                    print(format_status_json(None, exclusion_report, diagnostics=all_diagnostics))
                 else:
-                    print(format_status_report(None, exclusion_report, diagnostics=agent_result.diagnostics))
+                    print(format_status_report(None, exclusion_report, diagnostics=all_diagnostics))
                 return 0
-            raise TranslationError(format_agent_translation_diagnostics(agent_result.diagnostics))
+            raise TranslationError(format_agent_translation_diagnostics(all_diagnostics))
 
-        roles = agent_result.roles
-        skills = translate_installed_skills(result.plugins)
-        prompt_files = render_prompt_files(roles)
-        rendered_config = render_inline_codex_config(roles)
+        # Merge roles from all sources
+        all_roles = (*agent_result.roles, *user_agent_result.roles, *project_agent_result.roles)
+
+        # Plugin skills + user skills → global registry
+        plugin_skills = translate_installed_skills(result.plugins)
+        user_skills = translate_standalone_skills(result.user_skills, scope="user")
+        all_global_skills = (*plugin_skills, *user_skills)
+
+        # Project skills → project file entries
+        project_skills = translate_standalone_skills(result.project_skills, scope="project")
+        extra_project_files: list[tuple[Path, bytes]] = []
+        for gen_skill in project_skills:
+            for f in gen_skill.files:
+                rel = Path(".codex") / "skills" / gen_skill.install_dir_name / f.relative_path
+                extra_project_files.append((rel, f.content))
+
+        prompt_files = render_prompt_files(all_roles)
+        rendered_config = render_inline_codex_config(all_roles)
+        total_skill_count = len(all_global_skills) + len(project_skills)
         desired_state = build_desired_state(
             result,
             shim_decision,
             prompt_files,
             rendered_config,
-            skills,
+            all_global_skills,
             codex_home=args.codex_home,
+            extra_project_files=extra_project_files,
         )
     except (TranslationError, ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -248,9 +277,9 @@ def main(argv: list[str] | None = None) -> int:
         _print_summary(
             result,
             shim_decision.action,
-            len(roles),
+            len(all_roles),
             len(prompt_files),
-            len(skills),
+            total_skill_count,
             rendered_config,
             exclusion_report,
         )
@@ -265,9 +294,9 @@ def main(argv: list[str] | None = None) -> int:
             _print_summary(
                 result,
                 shim_decision.action,
-                len(roles),
+                len(all_roles),
                 len(prompt_files),
-                len(skills),
+                total_skill_count,
                 rendered_config,
                 exclusion_report,
             )
