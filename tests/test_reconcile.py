@@ -1560,6 +1560,30 @@ def test_clean_does_not_touch_global_agents_md(
     assert (codex_home / "AGENTS.md").read_text() == "# Global instructions\n"
 
 
+def test_reconcile_registers_project_in_global_registry(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """After reconcile, the project root appears in the global registry projects list."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "test-plugin", "1.0.0",
+        skill_names=("test-skill",),
+        agent_names=("test-agent",),
+    )
+    (version_dir / "agents" / "test-agent.md").write_text(
+        "---\nname: test-agent\ndescription: Test\ntools:\n  - Read\n---\n\nBody.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+
+    desired = _build_desired(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    registry_data = _read_global_registry(codex_home)
+    assert str(project_root) in registry_data.get("projects", [])
+
+
 def _reconcile_once(project_root, cache_root, codex_home):
     """Run a full discover+translate+reconcile and return the desired state."""
     from cc_codex_bridge.discover import discover

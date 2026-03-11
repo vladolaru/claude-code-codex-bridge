@@ -586,7 +586,12 @@ def _plan_skill_mutations(
     }
     changes: list[Change] = []
 
-    updated_current = GlobalSkillRegistry(skills=dict(current_snapshot.registry.skills))
+    updated_current = GlobalSkillRegistry(
+        skills=dict(current_snapshot.registry.skills),
+        projects=_ensure_project_in_list(
+            current_snapshot.registry.projects, desired.project_root
+        ),
+    )
     for install_dir_name in sorted(desired_skills):
         skill = desired_skills[install_dir_name]
         destination = desired.codex_home / "skills" / install_dir_name
@@ -720,6 +725,15 @@ def _owned_skill_names(registry: GlobalSkillRegistry, project_root: Path) -> set
 def _sorted_owner_set(owners: Iterable[Path]) -> tuple[Path, ...]:
     """Return unique owners in deterministic order."""
     return tuple(sorted(set(owners), key=str))
+
+
+def _ensure_project_in_list(
+    projects: tuple[Path, ...], project_root: Path
+) -> tuple[Path, ...]:
+    """Return projects tuple with project_root included, sorted."""
+    if project_root in projects:
+        return projects
+    return tuple(sorted((*projects, project_root), key=str))
 
 
 def _write_skill_tree(destination: Path, skill: GeneratedSkill) -> None:
