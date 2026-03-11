@@ -97,6 +97,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_parser = subparsers.add_parser("validate", parents=[common])
     status_parser = subparsers.add_parser("status", parents=[common])
+    clean_parser = subparsers.add_parser("clean", parents=[common])
+    clean_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview what would be removed without deleting anything.",
+    )
+    uninstall_parser = subparsers.add_parser("uninstall", parents=[common])
+    uninstall_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview what would be removed without deleting anything.",
+    )
+    uninstall_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit structured JSON output (dry-run only).",
+    )
+    uninstall_parser.add_argument(
+        "--launchagents-dir",
+        type=Path,
+        help="Override the LaunchAgents directory to scan.",
+    )
     doctor_parser = subparsers.add_parser("doctor", parents=[common])
     doctor_parser.add_argument(
         "--json",
@@ -175,6 +197,12 @@ def main(argv: list[str] | None = None) -> int:
     """Run the CLI and return a process exit code."""
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "clean":
+        return _handle_clean_command(args)
+
+    if args.command == "uninstall":
+        return _handle_uninstall_command(args)
 
     if args.command in LAUNCHAGENT_COMMANDS:
         return _handle_launchagent_command(args)
@@ -318,6 +346,144 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     raise AssertionError(f"Unhandled command dispatch path: {args.command}")
+
+
+def _handle_clean_command(args: argparse.Namespace) -> int:
+    """Handle the clean command."""
+    try:
+        project_root = resolve_project_root(args.project or Path.cwd()).root
+    except (DiscoveryError, OSError, UnicodeError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        from cc_codex_bridge.reconcile import clean_project
+        report = clean_project(
+            project_root,
+            codex_home=args.codex_home,
+            dry_run=args.dry_run,
+        )
+    except (ReconcileError, OSError, UnicodeError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if not report.changes:
+        print("Nothing to clean.")
+        return 0
+
+    if args.dry_run:
+        print("Dry run — the following would be removed:")
+    else:
+        print("Cleaned:")
+
+    print(format_change_report(report))
+    return 0
+
+
+def _handle_uninstall_command(args: argparse.Namespace) -> int:
+    """Handle the uninstall command."""
+    if args.json and not args.dry_run:
+        print("Error: --json requires --dry-run for uninstall", file=sys.stderr)
+        return 1
+
+    try:
+        from cc_codex_bridge.reconcile import uninstall_all
+        report = uninstall_all(
+            codex_home=args.codex_home,
+            launchagents_dir=args.launchagents_dir,
+            dry_run=args.dry_run,
+        )
+    except (ReconcileError, OSError, UnicodeError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(_format_uninstall_json(report))
+    else:
+        print(_format_uninstall_report(report, dry_run=args.dry_run))
+
+    return 0
+
+
+def _format_uninstall_json(report) -> str:
+    """Render uninstall report as JSON."""
+    payload = {
+        "projects": [
+            {
+                "root": str(result.root),
+                "status": "will_clean" if result.status == "cleaned" else result.status,
+                "removals": [str(c.path) for c in result.changes],
+                **({"skip_reason": result.skip_reason} if result.skip_reason else {}),
+            }
+            for result in report.projects
+        ],
+        "global": {
+            "skills": [
+                str(c.path) for c in report.global_removals
+                if c.resource_kind == "skill"
+            ],
+            "agents_md": next(
+                (str(c.path) for c in report.global_removals
+                 if c.resource_kind == "global_instructions"),
+                None,
+            ),
+            "registry": next(
+                (str(c.path) for c in report.global_removals
+                 if not c.resource_kind),
+                None,
+            ),
+        },
+        "launchagents": [
+            {
+                "path": str(removal.path),
+                "bootout_command": removal.bootout_command,
+            }
+            for removal in report.launchagent_removals
+        ],
+    }
+    return json.dumps(payload, indent=2, sort_keys=True)
+
+
+def _format_uninstall_report(report, *, dry_run: bool = False) -> str:
+    """Render uninstall report as human-readable text."""
+    lines: list[str] = []
+
+    if dry_run:
+        lines.append("Dry run — the following would be removed:")
+        lines.append("")
+
+    for result in report.projects:
+        lines.append(f"--- Project: {result.root} ---")
+        if result.status == "skipped":
+            lines.append(f"SKIPPED: {result.skip_reason}")
+        elif result.status == "no_state":
+            lines.append("NO_STATE: no bridge state file found")
+        else:
+            for change in result.changes:
+                suffix = f" ({change.resource_kind})" if change.resource_kind else ""
+                lines.append(f"REMOVE: {change.path}{suffix}")
+            if not result.changes:
+                lines.append("Nothing to clean.")
+        lines.append("")
+
+    if report.global_removals or report.launchagent_removals:
+        lines.append("--- Global ---")
+        for change in report.global_removals:
+            suffix = f" ({change.resource_kind})" if change.resource_kind else ""
+            lines.append(f"REMOVE: {change.path}{suffix}")
+        lines.append("")
+
+    if report.launchagent_removals:
+        lines.append("--- LaunchAgents ---")
+        for removal in report.launchagent_removals:
+            lines.append(f"REMOVE: {removal.path}")
+            lines.append(f"BOOTOUT: {removal.bootout_command}")
+        lines.append("")
+
+    if not report.projects and not report.global_removals and not report.launchagent_removals:
+        lines.append("Nothing to uninstall.")
+
+    return "\n".join(lines).rstrip()
 
 
 def _handle_launchagent_command(args: argparse.Namespace) -> int:

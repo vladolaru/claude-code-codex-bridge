@@ -920,6 +920,278 @@ def test_module_entrypoint_invokes_cli_main(monkeypatch: pytest.MonkeyPatch):
     assert calls == [None]
 
 
+def test_clean_command_succeeds(make_project, make_plugin_version, tmp_path: Path):
+    """clean command removes managed artifacts and exits 0."""
+    project_root, _agents_md = make_project()
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0",
+        skill_names=("review",), agent_names=("checker",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    # First reconcile to create artifacts
+    exit_code = cli.main([
+        "reconcile",
+        "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+    assert (project_root / ".codex" / "config.toml").exists()
+
+    # Now clean
+    exit_code = cli.main([
+        "clean",
+        "--project", str(project_root),
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+    assert not (project_root / ".codex" / "config.toml").exists()
+    assert not (project_root / "CLAUDE.md").exists()
+
+
+def test_clean_dry_run_command(make_project, make_plugin_version, tmp_path: Path):
+    """clean --dry-run reports changes without deleting."""
+    project_root, _agents_md = make_project()
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0",
+        skill_names=("review",), agent_names=("checker",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    cli.main([
+        "reconcile",
+        "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(codex_home),
+    ])
+
+    exit_code = cli.main([
+        "clean",
+        "--project", str(project_root),
+        "--codex-home", str(codex_home),
+        "--dry-run",
+    ])
+    assert exit_code == 0
+    # Artifacts still exist after dry-run
+    assert (project_root / ".codex" / "config.toml").exists()
+    assert (project_root / "CLAUDE.md").exists()
+
+
+def test_clean_no_state_exits_zero(make_project, tmp_path: Path):
+    """clean on a project with no bridge state exits 0."""
+    project_root, _agents_md = make_project()
+    codex_home = tmp_path / "codex-home"
+
+    exit_code = cli.main([
+        "clean",
+        "--project", str(project_root),
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+
+
+def test_uninstall_command_succeeds(make_project, make_plugin_version, tmp_path: Path):
+    """uninstall removes all bridge artifacts from all discovered projects."""
+    project_a, _ = make_project("project-a")
+    project_b, _ = make_project("project-b")
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("review",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    # Reconcile both projects
+    for project in (project_a, project_b):
+        assert cli.main([
+            "reconcile",
+            "--project", str(project),
+            "--cache-dir", str(cache_root),
+            "--codex-home", str(codex_home),
+        ]) == 0
+
+    assert (codex_home / "skills" / "market-tools-review").exists()
+
+    exit_code = cli.main([
+        "uninstall",
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+
+    # Project artifacts gone
+    for project in (project_a, project_b):
+        assert not (project / ".codex" / "config.toml").exists()
+        assert not (project / "CLAUDE.md").exists()
+
+    # Global artifacts gone
+    assert not (codex_home / "skills" / "market-tools-review").exists()
+    from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
+    assert not (codex_home / GLOBAL_REGISTRY_FILENAME).exists()
+
+
+def test_uninstall_skips_missing_project(make_project, make_plugin_version, tmp_path: Path):
+    """uninstall skips inaccessible project roots and cleans the rest."""
+    import shutil
+    project_a, _ = make_project("project-a")
+    project_b, _ = make_project("project-b")
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("review",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    for project in (project_a, project_b):
+        assert cli.main([
+            "reconcile",
+            "--project", str(project),
+            "--cache-dir", str(cache_root),
+            "--codex-home", str(codex_home),
+        ]) == 0
+
+    # Delete project A entirely
+    shutil.rmtree(project_a)
+
+    exit_code = cli.main([
+        "uninstall",
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+
+    # Project B was cleaned
+    assert not (project_b / ".codex" / "config.toml").exists()
+    # Global skills removed (force-cleaned even though project A was skipped)
+    assert not (codex_home / "skills" / "market-tools-review").exists()
+
+
+def test_uninstall_removes_launchagent_plists(make_project, make_plugin_version, tmp_path: Path):
+    """uninstall removes bridge LaunchAgent plists."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("review",),
+    )
+    codex_home = tmp_path / "codex-home"
+    la_dir = tmp_path / "LaunchAgents"
+    la_dir.mkdir()
+
+    assert cli.main([
+        "reconcile",
+        "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(codex_home),
+    ]) == 0
+
+    # Plant a bridge plist
+    (la_dir / "com.openai.codex-bridge.myproject.abc123.plist").write_bytes(b"<plist/>")
+    # Plant a non-bridge plist (should survive)
+    (la_dir / "com.apple.something.plist").write_bytes(b"<plist/>")
+
+    exit_code = cli.main([
+        "uninstall",
+        "--codex-home", str(codex_home),
+        "--launchagents-dir", str(la_dir),
+    ])
+    assert exit_code == 0
+
+    assert not (la_dir / "com.openai.codex-bridge.myproject.abc123.plist").exists()
+    assert (la_dir / "com.apple.something.plist").exists()
+
+
+def test_uninstall_removes_global_agents_md(make_project, tmp_path: Path):
+    """uninstall removes ~/.codex/AGENTS.md."""
+    project_root, _ = make_project()
+    codex_home = tmp_path / "codex-home"
+
+    # Simulate a prior reconcile that created global AGENTS.md
+    codex_home.mkdir(parents=True, exist_ok=True)
+    (codex_home / "AGENTS.md").write_text("# Global instructions\n")
+
+    exit_code = cli.main([
+        "uninstall",
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+    assert not (codex_home / "AGENTS.md").exists()
+
+
+def test_uninstall_dry_run_json(make_project, make_plugin_version, tmp_path: Path, capsys):
+    """uninstall --dry-run --json produces valid structured JSON output."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("review",),
+    )
+    codex_home = tmp_path / "codex-home"
+    la_dir = tmp_path / "LaunchAgents"
+    la_dir.mkdir()
+    (la_dir / "com.openai.codex-bridge.test.abc.plist").write_bytes(b"<plist/>")
+
+    assert cli.main([
+        "reconcile",
+        "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(codex_home),
+    ]) == 0
+    capsys.readouterr()  # discard reconcile output
+
+    exit_code = cli.main([
+        "uninstall",
+        "--codex-home", str(codex_home),
+        "--launchagents-dir", str(la_dir),
+        "--dry-run",
+        "--json",
+    ])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert "projects" in data
+    assert "global" in data
+    assert "launchagents" in data
+    assert len(data["projects"]) >= 1
+    assert data["projects"][0]["status"] in ("will_clean", "not_found")
+
+
+def test_find_bridge_launchagents_discovers_matching_plists(tmp_path: Path):
+    """find_bridge_launchagents returns plists matching the bridge label pattern."""
+    from cc_codex_bridge.install_launchagent import find_bridge_launchagents
+
+    la_dir = tmp_path / "LaunchAgents"
+    la_dir.mkdir()
+
+    # Bridge plists
+    (la_dir / "com.openai.codex-bridge.myproject.abc123.plist").write_bytes(b"<plist/>")
+    (la_dir / "com.openai.codex-bridge.other.def456.plist").write_bytes(b"<plist/>")
+
+    # Non-bridge plists (should be ignored)
+    (la_dir / "com.apple.something.plist").write_bytes(b"<plist/>")
+    (la_dir / "com.openai.codex.plist").write_bytes(b"<plist/>")
+
+    results = find_bridge_launchagents(launchagents_dir=la_dir)
+    assert len(results) == 2
+    names = sorted(r.name for r in results)
+    assert names == [
+        "com.openai.codex-bridge.myproject.abc123.plist",
+        "com.openai.codex-bridge.other.def456.plist",
+    ]
+
+
+def test_find_bridge_launchagents_empty_dir(tmp_path: Path):
+    """find_bridge_launchagents returns empty tuple when no plists match."""
+    from cc_codex_bridge.install_launchagent import find_bridge_launchagents
+
+    la_dir = tmp_path / "LaunchAgents"
+    la_dir.mkdir()
+    (la_dir / "com.apple.something.plist").write_bytes(b"<plist/>")
+
+    results = find_bridge_launchagents(launchagents_dir=la_dir)
+    assert results == ()
+
+
+def test_find_bridge_launchagents_missing_dir(tmp_path: Path):
+    """find_bridge_launchagents returns empty tuple when dir doesn't exist."""
+    from cc_codex_bridge.install_launchagent import find_bridge_launchagents
+
+    results = find_bridge_launchagents(launchagents_dir=tmp_path / "nonexistent")
+    assert results == ()
+
+
 def test_validate_works_without_plugins(make_project, tmp_path: Path, capsys):
     """Validate succeeds with no plugins when user-level sources exist."""
     project_root, _agents_md = make_project()
