@@ -120,3 +120,168 @@ def test_apply_sync_exclusions_filters_plugins_skills_and_agents(tmp_path: Path)
     assert report.plugins == ("market/beta",)
     assert report.skills == ("market/alpha/cc-only",)
     assert report.agents == ("market/alpha/reviewer.md",)
+
+
+def test_exclude_standalone_skill_by_bare_name(tmp_path: Path):
+    """A 1-part skill exclusion matches standalone skills in all scopes."""
+    discovery = DiscoveryResult(
+        project=ProjectContext(
+            root=tmp_path / "project",
+            agents_md_path=tmp_path / "project" / "AGENTS.md",
+        ),
+        plugins=(),
+        user_skills=(tmp_path / "user-skills" / "my-tool", tmp_path / "user-skills" / "other-tool"),
+        project_skills=(tmp_path / "project-skills" / "my-tool",),
+    )
+    exclusions = SyncExclusions(skills=("my-tool",))
+    filtered, report = apply_sync_exclusions(discovery, exclusions)
+
+    assert len(filtered.user_skills) == 1
+    assert filtered.user_skills[0].name == "other-tool"
+    assert len(filtered.project_skills) == 0
+    assert "user/my-tool" in report.skills
+    assert "project/my-tool" in report.skills
+
+
+def test_exclude_scoped_standalone_skill(tmp_path: Path):
+    """A 2-part skill exclusion matches only the specified scope."""
+    discovery = DiscoveryResult(
+        project=ProjectContext(
+            root=tmp_path / "project",
+            agents_md_path=tmp_path / "project" / "AGENTS.md",
+        ),
+        plugins=(),
+        user_skills=(tmp_path / "user-skills" / "run-tests",),
+        project_skills=(tmp_path / "project-skills" / "run-tests",),
+    )
+    exclusions = SyncExclusions(skills=("user/run-tests",))
+    filtered, report = apply_sync_exclusions(discovery, exclusions)
+
+    assert len(filtered.user_skills) == 0
+    assert len(filtered.project_skills) == 1
+    assert "user/run-tests" in report.skills
+
+
+def test_exclude_standalone_agent_by_bare_name(tmp_path: Path):
+    """A 1-part agent exclusion matches standalone agents in all scopes."""
+    discovery = DiscoveryResult(
+        project=ProjectContext(
+            root=tmp_path / "project",
+            agents_md_path=tmp_path / "project" / "AGENTS.md",
+        ),
+        plugins=(),
+        user_agents=(tmp_path / "user-agents" / "reviewer.md", tmp_path / "user-agents" / "helper.md"),
+        project_agents=(tmp_path / "project-agents" / "reviewer.md",),
+    )
+    exclusions = SyncExclusions(agents=("reviewer.md",))
+    filtered, report = apply_sync_exclusions(discovery, exclusions)
+
+    assert len(filtered.user_agents) == 1
+    assert filtered.user_agents[0].name == "helper.md"
+    assert len(filtered.project_agents) == 0
+
+
+def test_exclude_scoped_standalone_agent(tmp_path: Path):
+    """A 2-part agent exclusion matches only the specified scope."""
+    discovery = DiscoveryResult(
+        project=ProjectContext(
+            root=tmp_path / "project",
+            agents_md_path=tmp_path / "project" / "AGENTS.md",
+        ),
+        plugins=(),
+        user_agents=(tmp_path / "user-agents" / "reviewer.md",),
+        project_agents=(tmp_path / "project-agents" / "reviewer.md",),
+    )
+    exclusions = SyncExclusions(agents=("project/reviewer.md",))
+    filtered, report = apply_sync_exclusions(discovery, exclusions)
+
+    assert len(filtered.user_agents) == 1
+    assert len(filtered.project_agents) == 0
+
+
+def test_normalize_accepts_1_and_2_part_skill_exclusions():
+    """The normalize path accepts 1-part and 2-part skill exclusion IDs."""
+    exclusions = SyncExclusions(skills=("my-tool", "user/my-tool", "market/plugin/my-tool"))
+    # Should not raise — all formats valid
+    assert "my-tool" in exclusions.skills
+    assert "user/my-tool" in exclusions.skills
+    assert "market/plugin/my-tool" in exclusions.skills
+
+
+def test_load_project_exclusions_accepts_standalone_ids(make_project):
+    """bridge.toml accepts 1-part and 2-part skill/agent exclusion IDs."""
+    project_root, _agents_md = make_project()
+    config_path = project_root / ".codex" / "bridge.toml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        "[exclude]\n"
+        'skills = ["my-tool", "user/my-tool", "market/plugin/my-tool"]\n'
+        'agents = ["reviewer", "project/reviewer.md"]\n'
+    )
+
+    exclusions = load_project_exclusions(project_root)
+    assert "my-tool" in exclusions.skills
+    assert "user/my-tool" in exclusions.skills
+    assert "market/plugin/my-tool" in exclusions.skills
+    assert "reviewer.md" in exclusions.agents
+    assert "project/reviewer.md" in exclusions.agents
+
+
+def test_bare_name_exclusion_also_matches_plugin_skills(tmp_path: Path):
+    """A 1-part skill exclusion matches plugin skills by bare name too."""
+    plugin = InstalledPlugin(
+        marketplace="market",
+        plugin_name="alpha",
+        version_text="1.0.0",
+        version=SemVer.parse("1.0.0"),
+        installed_path=tmp_path / "installed-alpha",
+        source_path=tmp_path / "source-alpha",
+        skills=(
+            tmp_path / "source-alpha" / "skills" / "my-tool",
+            tmp_path / "source-alpha" / "skills" / "other-tool",
+        ),
+        agents=(),
+    )
+    discovery = DiscoveryResult(
+        project=ProjectContext(
+            root=tmp_path / "project",
+            agents_md_path=tmp_path / "project" / "AGENTS.md",
+        ),
+        plugins=(plugin,),
+    )
+    exclusions = SyncExclusions(skills=("my-tool",))
+    filtered, report = apply_sync_exclusions(discovery, exclusions)
+
+    assert len(filtered.plugins) == 1
+    assert tuple(p.name for p in filtered.plugins[0].skills) == ("other-tool",)
+    assert "market/alpha/my-tool" in report.skills
+
+
+def test_bare_name_exclusion_also_matches_plugin_agents(tmp_path: Path):
+    """A 1-part agent exclusion matches plugin agents by bare name too."""
+    plugin = InstalledPlugin(
+        marketplace="market",
+        plugin_name="alpha",
+        version_text="1.0.0",
+        version=SemVer.parse("1.0.0"),
+        installed_path=tmp_path / "installed-alpha",
+        source_path=tmp_path / "source-alpha",
+        skills=(),
+        agents=(
+            tmp_path / "source-alpha" / "agents" / "reviewer.md",
+            tmp_path / "source-alpha" / "agents" / "helper.md",
+        ),
+    )
+    discovery = DiscoveryResult(
+        project=ProjectContext(
+            root=tmp_path / "project",
+            agents_md_path=tmp_path / "project" / "AGENTS.md",
+        ),
+        plugins=(plugin,),
+    )
+    exclusions = SyncExclusions(agents=("reviewer.md",))
+    filtered, report = apply_sync_exclusions(discovery, exclusions)
+
+    assert len(filtered.plugins) == 1
+    assert tuple(p.name for p in filtered.plugins[0].agents) == ("helper.md",)
+    assert "market/alpha/reviewer.md" in report.agents

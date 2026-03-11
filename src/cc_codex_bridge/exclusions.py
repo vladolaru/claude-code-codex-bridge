@@ -120,7 +120,7 @@ def apply_sync_exclusions(
         kept_skills = []
         for skill_path in plugin.skills:
             skill_id = _skill_id(plugin.marketplace, plugin.plugin_name, skill_path.name)
-            if skill_id in excluded_skill_set:
+            if skill_id in excluded_skill_set or skill_path.name in excluded_skill_set:
                 excluded_skills.append(skill_id)
                 continue
             kept_skills.append(skill_path)
@@ -128,7 +128,7 @@ def apply_sync_exclusions(
         kept_agents = []
         for agent_path in plugin.agents:
             agent_id = _agent_id(plugin.marketplace, plugin.plugin_name, agent_path.name)
-            if agent_id in excluded_agent_set:
+            if agent_id in excluded_agent_set or agent_path.name in excluded_agent_set:
                 excluded_agents.append(agent_id)
                 continue
             kept_agents.append(agent_path)
@@ -146,13 +146,45 @@ def apply_sync_exclusions(
             )
         )
 
+    # Filter standalone user skills
+    kept_user_skills: list[Path] = []
+    for skill_path in discovery.user_skills:
+        if _matches_standalone_exclusion(skill_path.name, "user", excluded_skill_set):
+            excluded_skills.append(f"user/{skill_path.name}")
+        else:
+            kept_user_skills.append(skill_path)
+
+    # Filter standalone project skills
+    kept_project_skills: list[Path] = []
+    for skill_path in discovery.project_skills:
+        if _matches_standalone_exclusion(skill_path.name, "project", excluded_skill_set):
+            excluded_skills.append(f"project/{skill_path.name}")
+        else:
+            kept_project_skills.append(skill_path)
+
+    # Filter standalone user agents
+    kept_user_agents: list[Path] = []
+    for agent_path in discovery.user_agents:
+        if _matches_standalone_exclusion(agent_path.name, "user", excluded_agent_set):
+            excluded_agents.append(f"user/{agent_path.name}")
+        else:
+            kept_user_agents.append(agent_path)
+
+    # Filter standalone project agents
+    kept_project_agents: list[Path] = []
+    for agent_path in discovery.project_agents:
+        if _matches_standalone_exclusion(agent_path.name, "project", excluded_agent_set):
+            excluded_agents.append(f"project/{agent_path.name}")
+        else:
+            kept_project_agents.append(agent_path)
+
     filtered_result = DiscoveryResult(
         project=discovery.project,
         plugins=tuple(filtered_plugins),
-        user_skills=discovery.user_skills,
-        user_agents=discovery.user_agents,
-        project_skills=discovery.project_skills,
-        project_agents=discovery.project_agents,
+        user_skills=tuple(kept_user_skills),
+        user_agents=tuple(kept_user_agents),
+        project_skills=tuple(kept_project_skills),
+        project_agents=tuple(kept_project_agents),
         user_claude_md=discovery.user_claude_md,
     )
     report = ExclusionReport(
@@ -179,19 +211,56 @@ def _normalize_id_list(values: list[str] | tuple[str, ...], *, kind: str) -> tup
 
 
 def _normalize_entity_id(value: str, *, kind: str) -> str:
-    """Normalize one exclusion entity id and validate shape."""
+    """Normalize one exclusion entity id and validate shape.
+
+    Plugins require exactly 2 parts (marketplace/plugin).
+
+    Skills and agents accept 1, 2, or 3 parts:
+    - 1 part (``name``): matches by name against all scopes
+    - 2 parts (``scope/name``): matches by scope + name (user, project)
+    - 3 parts (``marketplace/plugin/name``): matches plugin sources
+    """
     raw = value.strip()
     parts = [part.strip() for part in raw.split("/")]
-    required_parts = 2 if kind == "plugin" else 3
-    if len(parts) != required_parts or any(not part for part in parts):
+
+    if kind == "plugin":
+        if len(parts) != 2 or any(not part for part in parts):
+            raise ReconcileError(
+                f"Invalid exclusion id `{value}` for kind `{kind}`; expected "
+                "marketplace/plugin"
+            )
+        return "/".join(parts)
+
+    # skills and agents: 1, 2, or 3 parts
+    if len(parts) not in (1, 2, 3) or any(not part for part in parts):
         raise ReconcileError(
             f"Invalid exclusion id `{value}` for kind `{kind}`; expected "
-            f"{'marketplace/plugin' if kind == 'plugin' else 'marketplace/plugin/name'}"
+            "name, scope/name, or marketplace/plugin/name"
         )
 
-    if kind == "agent" and not parts[2].endswith(".md"):
-        parts[2] = f"{parts[2]}.md"
+    # Auto-append .md to the agent leaf name
+    if kind == "agent":
+        leaf_index = len(parts) - 1
+        if not parts[leaf_index].endswith(".md"):
+            parts[leaf_index] = f"{parts[leaf_index]}.md"
+
     return "/".join(parts)
+
+
+def _matches_standalone_exclusion(name: str, scope: str, exclusion_set: set[str]) -> bool:
+    """Check if a standalone entity matches any exclusion pattern.
+
+    A standalone entity matches if the exclusion set contains:
+    - the bare name (1-part match, applies to all scopes), or
+    - the scoped name ``scope/name`` (2-part match, scope-specific).
+    """
+    # 1-part match: bare name matches all scopes
+    if name in exclusion_set:
+        return True
+    # 2-part match: scope/name
+    if f"{scope}/{name}" in exclusion_set:
+        return True
+    return False
 
 
 def _plugin_id(marketplace: str, plugin_name: str) -> str:
