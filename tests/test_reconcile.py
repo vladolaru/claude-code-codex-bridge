@@ -1341,6 +1341,246 @@ def test_reconcile_rejects_symlinked_global_instructions(
         reconcile_desired_state(desired)
 
 
+# ---------------------------------------------------------------------------
+# clean_project tests
+# ---------------------------------------------------------------------------
+
+
+def test_clean_removes_all_managed_project_files(
+    make_project, make_plugin_version, tmp_path: Path
+):
+    """clean_project removes all managed project files and the state file."""
+    project_root, _agents_md = make_project()
+    cache_root, _v1_dir = make_plugin_version(
+        "market", "tools", "1.0.0",
+        skill_names=("review",), agent_names=("checker",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    from cc_codex_bridge.reconcile import clean_project
+
+    desired = _reconcile_once(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    # Verify artifacts exist before clean
+    assert (project_root / ".codex" / "config.toml").exists()
+    assert (project_root / "CLAUDE.md").exists()
+    state_path = project_root / ".codex" / "claude-code-bridge-state.json"
+    assert state_path.exists()
+
+    report = clean_project(project_root, codex_home=codex_home)
+    assert report.applied is True
+    assert len(report.changes) > 0
+
+    # All managed project files gone
+    assert not (project_root / ".codex" / "config.toml").exists()
+    assert not (project_root / "CLAUDE.md").exists()
+    assert not state_path.exists()
+    # Prompt files gone
+    prompts_dir = project_root / ".codex" / "prompts" / "agents"
+    assert not prompts_dir.exists() or len(list(prompts_dir.glob("*.md"))) == 0
+    # AGENTS.md untouched
+    assert (project_root / "AGENTS.md").exists()
+
+
+def test_clean_releases_last_owner_skill(
+    make_project, make_plugin_version, tmp_path: Path
+):
+    """clean_project deletes the skill directory when this project is the last owner."""
+    project_root, _agents_md = make_project()
+    cache_root, _v1_dir = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("review",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    from cc_codex_bridge.reconcile import clean_project
+
+    desired = _reconcile_once(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    skill_dir = codex_home / "skills" / "market-tools-review"
+    assert skill_dir.exists()
+
+    report = clean_project(project_root, codex_home=codex_home)
+    assert report.applied is True
+    assert not skill_dir.exists()
+
+    # Registry should be empty or not have this skill
+    from cc_codex_bridge.registry import GlobalSkillRegistry, GLOBAL_REGISTRY_FILENAME
+    registry = GlobalSkillRegistry.from_path(codex_home / GLOBAL_REGISTRY_FILENAME)
+    if registry is not None:
+        assert "market-tools-review" not in registry.skills
+
+
+def test_clean_releases_shared_skill_preserves_for_other_owner(
+    make_project, make_plugin_version, tmp_path: Path
+):
+    """clean_project preserves a shared skill when another project still owns it."""
+    project_a, _ = make_project("project-a")
+    project_b, _ = make_project("project-b")
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("review",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    from cc_codex_bridge.reconcile import clean_project
+
+    desired_a = _reconcile_once(project_a, cache_root, codex_home)
+    reconcile_desired_state(desired_a)
+    desired_b = _reconcile_once(project_b, cache_root, codex_home)
+    reconcile_desired_state(desired_b)
+
+    skill_dir = codex_home / "skills" / "market-tools-review"
+    assert skill_dir.exists()
+
+    # Clean project A only
+    report = clean_project(project_a, codex_home=codex_home)
+    assert report.applied is True
+
+    # Skill directory still exists — project B still owns it
+    assert skill_dir.exists()
+
+    from cc_codex_bridge.registry import GlobalSkillRegistry, GLOBAL_REGISTRY_FILENAME
+    registry = GlobalSkillRegistry.from_path(codex_home / GLOBAL_REGISTRY_FILENAME)
+    assert registry is not None
+    entry = registry.skills.get("market-tools-review")
+    assert entry is not None
+    assert project_a.resolve() not in entry.owners
+    assert project_b.resolve() in entry.owners
+
+
+def test_clean_no_state_is_noop(make_project, tmp_path: Path):
+    """clean_project on a project with no bridge state is a no-op."""
+    project_root, _agents_md = make_project()
+    codex_home = tmp_path / "codex-home"
+
+    from cc_codex_bridge.reconcile import clean_project
+
+    report = clean_project(project_root, codex_home=codex_home)
+    assert report.applied is True
+    assert len(report.changes) == 0
+
+
+def test_clean_dry_run_no_side_effects(
+    make_project, make_plugin_version, tmp_path: Path
+):
+    """clean_project with dry_run=True reports changes but deletes nothing."""
+    project_root, _agents_md = make_project()
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0",
+        skill_names=("review",), agent_names=("checker",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    from cc_codex_bridge.reconcile import clean_project
+
+    desired = _reconcile_once(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    report = clean_project(project_root, codex_home=codex_home, dry_run=True)
+    assert report.applied is False
+    assert len(report.changes) > 0
+
+    # Everything still exists
+    assert (project_root / ".codex" / "config.toml").exists()
+    assert (project_root / "CLAUDE.md").exists()
+    assert (codex_home / "skills" / "market-tools-review").exists()
+
+
+def test_clean_preserves_bridge_toml(
+    make_project, make_plugin_version, tmp_path: Path
+):
+    """clean_project does not remove hand-authored bridge.toml."""
+    project_root, _agents_md = make_project()
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("review",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    # Write a hand-authored bridge.toml
+    bridge_toml = project_root / ".codex" / "bridge.toml"
+    bridge_toml.parent.mkdir(parents=True, exist_ok=True)
+    bridge_toml.write_text('[exclude]\nplugins = []\n')
+
+    from cc_codex_bridge.reconcile import clean_project
+
+    desired = _reconcile_once(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    clean_project(project_root, codex_home=codex_home)
+
+    # bridge.toml survives
+    assert bridge_toml.exists()
+    assert bridge_toml.read_text() == '[exclude]\nplugins = []\n'
+
+
+def test_clean_removes_claude_md_shim(
+    make_project, make_plugin_version, tmp_path: Path
+):
+    """clean_project removes the CLAUDE.md shim when it is generator-owned."""
+    project_root, _agents_md = make_project()
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("review",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    from cc_codex_bridge.reconcile import clean_project
+
+    desired = _reconcile_once(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
+
+    clean_project(project_root, codex_home=codex_home)
+
+    assert not (project_root / "CLAUDE.md").exists()
+
+
+def test_clean_does_not_touch_global_agents_md(
+    make_project, make_plugin_version, tmp_path: Path
+):
+    """clean_project does not remove ~/.codex/AGENTS.md (that's uninstall's job)."""
+    project_root, _agents_md = make_project()
+    codex_home = tmp_path / "codex-home"
+
+    # Create a global AGENTS.md manually (simulating a prior reconcile with user CLAUDE.md)
+    (codex_home / "AGENTS.md").parent.mkdir(parents=True, exist_ok=True)
+    (codex_home / "AGENTS.md").write_text("# Global instructions\n")
+
+    # Create minimal state so clean has something to work with
+    cache_root = tmp_path / "cache"
+    from cc_codex_bridge.reconcile import clean_project
+    desired = _reconcile_once(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    clean_project(project_root, codex_home=codex_home)
+
+    # Global AGENTS.md untouched
+    assert (codex_home / "AGENTS.md").exists()
+    assert (codex_home / "AGENTS.md").read_text() == "# Global instructions\n"
+
+
+def _reconcile_once(project_root, cache_root, codex_home):
+    """Run a full discover+translate+reconcile and return the desired state."""
+    from cc_codex_bridge.discover import discover
+    from cc_codex_bridge.claude_shim import plan_claude_shim
+    from cc_codex_bridge.translate_agents import translate_installed_agents_with_diagnostics
+    from cc_codex_bridge.translate_skills import translate_installed_skills
+    from cc_codex_bridge.render_codex_config import render_inline_codex_config, render_prompt_files
+    from cc_codex_bridge.reconcile import build_desired_state
+
+    result = discover(project_path=project_root, cache_dir=cache_root)
+    shim_decision = plan_claude_shim(result.project)
+    agent_result = translate_installed_agents_with_diagnostics(result.plugins)
+    skills = translate_installed_skills(result.plugins)
+    prompt_files = render_prompt_files(agent_result.roles)
+    rendered_config = render_inline_codex_config(agent_result.roles)
+    return build_desired_state(
+        result, shim_decision, prompt_files, rendered_config, skills,
+        codex_home=codex_home,
+    )
+
+
 def _build_desired(
     project_root: Path,
     cache_root: Path,
