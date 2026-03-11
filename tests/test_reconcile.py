@@ -1202,9 +1202,158 @@ def test_reconcile_rejects_empty_paths_in_corrupted_state(
         diff_desired_state(desired)
 
 
-def _build_desired(project_root: Path, cache_root: Path, codex_home: Path):
+def test_reconcile_writes_user_claude_md_to_codex_agents_md(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """User-level CLAUDE.md content is written to ~/.codex/AGENTS.md."""
+    project_root, _agents_md = make_project()
+    cache_root, _version_dir = make_plugin_version(
+        "market", "test-plugin", "1.0.0", skill_names=("minimal",)
+    )
+    codex_home = tmp_path / "codex-home"
+    claude_home = tmp_path / "claude-home"
+    claude_home.mkdir(parents=True)
+    (claude_home / "CLAUDE.md").write_text("Always use conventional commits.\n")
+
+    desired = _build_desired(
+        project_root, cache_root, codex_home, claude_home=claude_home
+    )
+    report = reconcile_desired_state(desired)
+
+    assert report.applied is True
+    assert (codex_home / "AGENTS.md").read_text() == "Always use conventional commits.\n"
+
+
+def test_reconcile_skips_codex_agents_md_when_no_user_claude_md(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Absent user-level CLAUDE.md means no global instructions file."""
+    project_root, _agents_md = make_project()
+    cache_root, _version_dir = make_plugin_version(
+        "market", "test-plugin", "1.0.0", skill_names=("minimal",)
+    )
+    codex_home = tmp_path / "codex-home"
+    claude_home = tmp_path / "claude-home"
+    claude_home.mkdir(parents=True)
+
+    desired = _build_desired(
+        project_root, cache_root, codex_home, claude_home=claude_home
+    )
+    reconcile_desired_state(desired)
+
+    assert not (codex_home / "AGENTS.md").exists()
+
+
+def test_reconcile_updates_codex_agents_md_when_content_changes(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Content change in user-level CLAUDE.md triggers update."""
+    project_root, _agents_md = make_project()
+    cache_root, _version_dir = make_plugin_version(
+        "market", "test-plugin", "1.0.0", skill_names=("minimal",)
+    )
+    codex_home = tmp_path / "codex-home"
+    claude_home = tmp_path / "claude-home"
+    claude_home.mkdir(parents=True)
+
+    (claude_home / "CLAUDE.md").write_text("Version 1\n")
+    desired = _build_desired(
+        project_root, cache_root, codex_home, claude_home=claude_home
+    )
+    reconcile_desired_state(desired)
+    assert (codex_home / "AGENTS.md").read_text() == "Version 1\n"
+
+    (claude_home / "CLAUDE.md").write_text("Version 2\n")
+    desired = _build_desired(
+        project_root, cache_root, codex_home, claude_home=claude_home
+    )
+    report = reconcile_desired_state(desired)
+
+    assert any(
+        change.resource_kind == "global_instructions" and change.kind == "update"
+        for change in report.changes
+    )
+    assert (codex_home / "AGENTS.md").read_text() == "Version 2\n"
+
+
+def test_reconcile_no_change_when_global_instructions_match(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Identical user-level CLAUDE.md content does not produce a change."""
+    project_root, _agents_md = make_project()
+    cache_root, _version_dir = make_plugin_version(
+        "market", "test-plugin", "1.0.0", skill_names=("minimal",)
+    )
+    codex_home = tmp_path / "codex-home"
+    claude_home = tmp_path / "claude-home"
+    claude_home.mkdir(parents=True)
+    (claude_home / "CLAUDE.md").write_text("Stable content.\n")
+
+    desired = _build_desired(
+        project_root, cache_root, codex_home, claude_home=claude_home
+    )
+    reconcile_desired_state(desired)
+
+    desired2 = _build_desired(
+        project_root, cache_root, codex_home, claude_home=claude_home
+    )
+    report = reconcile_desired_state(desired2)
+
+    assert not any(
+        change.resource_kind == "global_instructions" for change in report.changes
+    )
+
+
+def test_reconcile_rejects_symlinked_global_instructions(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Symlinked global instructions file is rejected."""
+    project_root, _agents_md = make_project()
+    cache_root, _version_dir = make_plugin_version(
+        "market", "test-plugin", "1.0.0", skill_names=("minimal",)
+    )
+    codex_home = tmp_path / "codex-home"
+    claude_home = tmp_path / "claude-home"
+    claude_home.mkdir(parents=True)
+    (claude_home / "CLAUDE.md").write_text("Instructions.\n")
+
+    # Create a symlinked AGENTS.md in codex_home
+    codex_home.mkdir(parents=True)
+    real_file = tmp_path / "real-agents.md"
+    real_file.write_text("old content\n")
+    (codex_home / "AGENTS.md").symlink_to(real_file)
+
+    desired = _build_desired(
+        project_root, cache_root, codex_home, claude_home=claude_home
+    )
+
+    with pytest.raises(ReconcileError, match="symlinked global instructions"):
+        reconcile_desired_state(desired)
+
+
+def _build_desired(
+    project_root: Path,
+    cache_root: Path,
+    codex_home: Path,
+    *,
+    claude_home: Path | None = None,
+):
     """Build desired state from fixture project and cache roots."""
-    discovery = discover(project_path=project_root, cache_dir=cache_root)
+    discovery = discover(
+        project_path=project_root,
+        cache_dir=cache_root,
+        claude_home=claude_home,
+    )
     shim_decision = plan_claude_shim(discovery.project)
     roles = translate_installed_agents(discovery.plugins)
     skills = translate_installed_skills(discovery.plugins)

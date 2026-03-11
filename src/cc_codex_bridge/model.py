@@ -139,6 +139,7 @@ class DiscoveryResult:
     user_agents: tuple[Path, ...] = ()
     project_skills: tuple[Path, ...] = ()
     project_agents: tuple[Path, ...] = ()
+    user_claude_md: str | None = None
 
 
 @dataclass(frozen=True)

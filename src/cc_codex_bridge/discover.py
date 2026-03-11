@@ -13,6 +13,7 @@ from cc_codex_bridge.model import (
     ProjectContext,
     SemVer,
 )
+from cc_codex_bridge.text import read_utf8_text
 
 
 AGENTS_MD = "AGENTS.md"
@@ -69,6 +70,7 @@ def discover(
         user_agents=discover_user_agents(claude_home),
         project_skills=discover_project_skills(project.root),
         project_agents=discover_project_agents(project.root),
+        user_claude_md=discover_user_claude_md(claude_home),
     )
 
 
@@ -79,7 +81,7 @@ def discover_latest_plugins(
     """Discover the latest installed version of each Claude plugin."""
     root = _resolve_cache_dir(cache_dir, claude_home)
     if not root.is_dir():
-        raise DiscoveryError(f"Claude plugin cache not found: {root}")
+        return ()  # No cache directory — no plugins
 
     grouped_versions: dict[tuple[str, str], list[InstalledPluginVersion]] = defaultdict(list)
 
@@ -94,7 +96,7 @@ def discover_latest_plugins(
             grouped_versions[(marketplace_dir.name, plugin_dir.name)].extend(versions)
 
     if not grouped_versions:
-        raise DiscoveryError(f"No installed Claude plugins found in cache: {root}")
+        return ()  # Empty cache — no plugins
 
     latest_plugins = []
     for key in sorted(grouped_versions):
@@ -159,6 +161,15 @@ def discover_project_agents(project_root: Path) -> tuple[Path, ...]:
         path for path in agents_dir.iterdir()
         if path.is_file() and path.suffix == ".md"
     ))
+
+
+def discover_user_claude_md(claude_home: str | Path | None = None) -> str | None:
+    """Read user-level CLAUDE.md content if present."""
+    home = Path(claude_home or DEFAULT_CLAUDE_HOME).expanduser().resolve()
+    claude_md = home / "CLAUDE.md"
+    if not claude_md.is_file():
+        return None
+    return read_utf8_text(claude_md, label="user-level CLAUDE.md", error_type=DiscoveryError)
 
 
 def _collect_plugin_versions(

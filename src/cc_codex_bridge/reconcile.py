@@ -41,6 +41,7 @@ class DesiredState:
     preserved_project_files: tuple[Path, ...]
     skills: tuple[GeneratedSkill, ...]
     state_path: Path
+    global_instructions: bytes | None = None
 
 
 @dataclass(frozen=True)
@@ -140,6 +141,10 @@ def build_desired_state(
                 )
             )
 
+    global_instructions = None
+    if discovery.user_claude_md is not None:
+        global_instructions = discovery.user_claude_md.encode()
+
     return DesiredState(
         project_root=project_root,
         codex_home=codex_home_path,
@@ -147,6 +152,7 @@ def build_desired_state(
         preserved_project_files=tuple(sorted(set(preserved_project_files), key=str)),
         skills=skills_tuple,
         state_path=project_root / STATE_RELATIVE_PATH,
+        global_instructions=global_instructions,
     )
 
 
@@ -174,6 +180,10 @@ def _apply_changes(desired: DesiredState, plan: _MutationPlan) -> None:
     skills_by_name = {skill.install_dir_name: skill for skill in desired.skills}
 
     for change in plan.changes:
+        if change.resource_kind == "global_instructions":
+            if change.kind in ("create", "update"):
+                _atomic_write_file(change.path, desired.global_instructions)
+            continue
         if change.resource_kind == "skill":
             if change.kind in ("create", "update"):
                 if change.path.exists():
@@ -258,8 +268,9 @@ def _plan_mutations(
     """Plan file, skill, and registry mutations for one reconcile run."""
     project_changes = _compute_project_file_changes(desired, previous_state)
     skill_changes, registry_writes = _plan_skill_mutations(desired, previous_state)
+    global_changes = _plan_global_instructions_changes(desired)
     return _MutationPlan(
-        changes=tuple((*project_changes, *skill_changes)),
+        changes=tuple((*project_changes, *skill_changes, *global_changes)),
         registry_writes=registry_writes,
     )
 
@@ -427,6 +438,21 @@ def _plan_skill_mutations(
             registry_writes.append(previous_write)
 
     return tuple(changes), tuple(registry_writes)
+
+
+def _plan_global_instructions_changes(desired: DesiredState) -> tuple[Change, ...]:
+    """Plan changes for the global instructions file (~/.codex/AGENTS.md)."""
+    if desired.global_instructions is None:
+        return ()
+
+    path = desired.codex_home / "AGENTS.md"
+    if not path.exists():
+        return (Change("create", path, resource_kind="global_instructions"),)
+    if path.is_symlink():
+        raise ReconcileError(f"Refusing to overwrite symlinked global instructions: {path}")
+    if path.read_bytes() == desired.global_instructions:
+        return ()
+    return (Change("update", path, resource_kind="global_instructions"),)
 
 
 def _build_registry_write(

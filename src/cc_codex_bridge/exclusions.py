@@ -153,6 +153,7 @@ def apply_sync_exclusions(
         user_agents=discovery.user_agents,
         project_skills=discovery.project_skills,
         project_agents=discovery.project_agents,
+        user_claude_md=discovery.user_claude_md,
     )
     report = ExclusionReport(
         plugins=tuple(sorted(set(excluded_plugins))),
