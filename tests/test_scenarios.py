@@ -1020,3 +1020,65 @@ def test_uninstall_skips_vanished_project_cleans_rest(make_project, tmp_path: Pa
     # Global registry removed
     from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
     assert not (codex_home / GLOBAL_REGISTRY_FILENAME).exists()
+
+
+# ===========================================================================
+# reconcile-all scenario tests
+# ===========================================================================
+
+
+def test_reconcile_all_reconciles_registered_projects(make_project, tmp_path: Path):
+    """Two projects reconciled individually, then reconcile-all updates both."""
+    project_a, _ = make_project("project-a")
+    project_b, _ = make_project("project-b")
+    claude_home = tmp_path / "claude-home"
+    codex_home = tmp_path / "codex-home"
+    cache_root = claude_home / "plugins" / "cache"
+
+    build_plugin(cache_root, "vlad-plugins", "review-tools", "1.12.0")
+    build_user_skill_simple(claude_home, "url-shorthand")
+
+    # Register both projects
+    assert reconcile(project_a, claude_home, codex_home) == 0
+    assert reconcile(project_b, claude_home, codex_home) == 0
+
+    # Verify both in registry
+    import json as json_mod
+    from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
+    reg = json_mod.loads((codex_home / GLOBAL_REGISTRY_FILENAME).read_text())
+    assert str(project_a) in reg["projects"]
+    assert str(project_b) in reg["projects"]
+
+    # Run reconcile-all
+    exit_code = cli.main(["reconcile-all", "--codex-home", str(codex_home)])
+    assert exit_code == 0
+
+    # Both projects have artifacts
+    assert (project_a / ".codex" / "config.toml").exists()
+    assert (project_b / ".codex" / "config.toml").exists()
+
+
+def test_reconcile_all_handles_missing_project(make_project, tmp_path: Path):
+    """reconcile-all reports error for deleted project, reconciles the rest."""
+    import shutil as shutil_mod
+
+    project_a, _ = make_project("project-a")
+    project_b, _ = make_project("project-b")
+    claude_home = tmp_path / "claude-home"
+    codex_home = tmp_path / "codex-home"
+    cache_root = claude_home / "plugins" / "cache"
+
+    build_plugin(cache_root, "vlad-plugins", "review-tools", "1.12.0")
+
+    assert reconcile(project_a, claude_home, codex_home) == 0
+    assert reconcile(project_b, claude_home, codex_home) == 0
+
+    # Delete project A
+    shutil_mod.rmtree(project_a)
+
+    # reconcile-all should report error but exit 1 (partial failure)
+    exit_code = cli.main(["reconcile-all", "--codex-home", str(codex_home)])
+    assert exit_code == 1
+
+    # Project B was still reconciled successfully
+    assert (project_b / ".codex" / "config.toml").exists()
