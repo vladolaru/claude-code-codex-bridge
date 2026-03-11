@@ -763,3 +763,260 @@ def test_selective_exclusion_via_config_and_cli(make_project, tmp_path: Path):
     assert "project_reviewer" in config_after
     # Plugin agents removed
     assert "security_reviewer" not in config_after
+
+
+# ===========================================================================
+# Clean and uninstall scenario tests
+# ===========================================================================
+
+
+def test_clean_undoes_reconcile(make_project, tmp_path: Path):
+    """Reconcile a full setup, clean it, verify everything is removed.
+
+    After clean:
+    - All managed project files are gone (config.toml, prompts, CLAUDE.md, state file)
+    - Global skills owned only by this project are deleted
+    - AGENTS.md (hand-authored) survives
+    - bridge.toml (hand-authored) survives
+    - Re-running clean is a no-op
+    """
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "claude-home"
+    codex_home = tmp_path / "codex-home"
+    cache_root = claude_home / "plugins" / "cache"
+
+    # Full setup
+    build_plugin(cache_root, "vlad-plugins", "review-tools", "1.12.0")
+    build_user_skill_simple(claude_home, "url-shorthand")
+    build_user_claude_md(claude_home)
+    build_project_agent(project_root, "reviewer", tools=("Read", "Grep"))
+    build_project_skill(project_root, "run-tests")
+    build_bridge_toml(project_root, '[exclude]\nplugins = []\n')
+
+    assert reconcile(project_root, claude_home, codex_home) == 0
+
+    # Verify artifacts exist
+    assert (project_root / "CLAUDE.md").exists()
+    assert (project_root / ".codex" / "config.toml").exists()
+    assert (project_root / ".codex" / "claude-code-bridge-state.json").exists()
+    assert (project_root / ".codex" / "skills" / "run-tests" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "vlad-plugins-review-tools-code-review" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "user-url-shorthand" / "SKILL.md").exists()
+    assert (codex_home / "AGENTS.md").exists()
+    prompts = list((project_root / ".codex" / "prompts" / "agents").glob("*.md"))
+    assert len(prompts) > 0
+
+    # Clean
+    exit_code = cli.main([
+        "clean",
+        "--project", str(project_root),
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+
+    # All managed project files gone
+    assert not (project_root / "CLAUDE.md").exists()
+    assert not (project_root / ".codex" / "config.toml").exists()
+    assert not (project_root / ".codex" / "claude-code-bridge-state.json").exists()
+    assert not (project_root / ".codex" / "skills" / "run-tests").exists()
+    prompts_dir = project_root / ".codex" / "prompts" / "agents"
+    assert not prompts_dir.exists() or len(list(prompts_dir.glob("*.md"))) == 0
+
+    # Global skills removed (this project was the only owner)
+    assert not (codex_home / "skills" / "vlad-plugins-review-tools-code-review").exists()
+    assert not (codex_home / "skills" / "user-url-shorthand").exists()
+
+    # Hand-authored files survive
+    assert (project_root / "AGENTS.md").exists()
+    assert (project_root / ".codex" / "bridge.toml").exists()
+
+    # Global AGENTS.md untouched (clean doesn't touch it)
+    assert (codex_home / "AGENTS.md").exists()
+
+    # Re-running clean is a no-op
+    exit_code = cli.main([
+        "clean",
+        "--project", str(project_root),
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+
+
+def test_clean_dry_run_previews_without_side_effects(make_project, tmp_path: Path):
+    """clean --dry-run lists removals but does not delete anything."""
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "claude-home"
+    codex_home = tmp_path / "codex-home"
+    cache_root = claude_home / "plugins" / "cache"
+
+    build_plugin(cache_root, "vlad-plugins", "review-tools", "1.12.0")
+    build_user_skill_simple(claude_home, "url-shorthand")
+
+    assert reconcile(project_root, claude_home, codex_home) == 0
+
+    exit_code = cli.main([
+        "clean",
+        "--project", str(project_root),
+        "--codex-home", str(codex_home),
+        "--dry-run",
+    ])
+    assert exit_code == 0
+
+    # Everything still exists
+    assert (project_root / "CLAUDE.md").exists()
+    assert (project_root / ".codex" / "config.toml").exists()
+    assert (project_root / ".codex" / "claude-code-bridge-state.json").exists()
+    assert (codex_home / "skills" / "vlad-plugins-review-tools-code-review" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "user-url-shorthand" / "SKILL.md").exists()
+
+
+def test_uninstall_cleans_entire_machine(make_project, tmp_path: Path):
+    """Set up two projects with shared skills, uninstall removes everything."""
+    project_a, _ = make_project("project-a")
+    project_b, _ = make_project("project-b")
+    claude_home = tmp_path / "claude-home"
+    codex_home = tmp_path / "codex-home"
+    cache_root = claude_home / "plugins" / "cache"
+    la_dir = tmp_path / "LaunchAgents"
+    la_dir.mkdir()
+
+    # Shared setup
+    build_plugin(cache_root, "vlad-plugins", "review-tools", "1.12.0")
+    build_user_skill_simple(claude_home, "url-shorthand")
+    build_user_claude_md(claude_home)
+
+    # Project-specific sources
+    build_project_agent(project_a, "deployer", tools=("Bash",))
+    build_project_skill(project_b, "lint-check")
+
+    assert reconcile(project_a, claude_home, codex_home) == 0
+    assert reconcile(project_b, claude_home, codex_home) == 0
+
+    # Plant a bridge LaunchAgent plist
+    (la_dir / "com.openai.codex-bridge.project-a.abc123.plist").write_bytes(b"<plist/>")
+
+    # Verify everything exists
+    assert (project_a / ".codex" / "config.toml").exists()
+    assert (project_b / ".codex" / "config.toml").exists()
+    assert (codex_home / "skills" / "vlad-plugins-review-tools-code-review" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "user-url-shorthand" / "SKILL.md").exists()
+    assert (codex_home / "AGENTS.md").exists()
+
+    # Uninstall
+    exit_code = cli.main([
+        "uninstall",
+        "--codex-home", str(codex_home),
+        "--launchagents-dir", str(la_dir),
+    ])
+    assert exit_code == 0
+
+    # Both projects cleaned
+    assert not (project_a / ".codex" / "config.toml").exists()
+    assert not (project_a / "CLAUDE.md").exists()
+    assert not (project_b / ".codex" / "config.toml").exists()
+    assert not (project_b / "CLAUDE.md").exists()
+
+    # Global artifacts removed
+    assert not (codex_home / "skills" / "vlad-plugins-review-tools-code-review").exists()
+    assert not (codex_home / "skills" / "user-url-shorthand").exists()
+    assert not (codex_home / "AGENTS.md").exists()
+    from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
+    assert not (codex_home / GLOBAL_REGISTRY_FILENAME).exists()
+
+    # LaunchAgent plist removed
+    assert not (la_dir / "com.openai.codex-bridge.project-a.abc123.plist").exists()
+
+    # AGENTS.md (hand-authored) survives on both projects
+    assert (project_a / "AGENTS.md").exists()
+    assert (project_b / "AGENTS.md").exists()
+
+
+def test_uninstall_dry_run_json_structure(make_project, tmp_path: Path, capsys):
+    """uninstall --dry-run --json produces valid structured JSON."""
+    import json as json_mod
+
+    project_a, _ = make_project("project-a")
+    project_b, _ = make_project("project-b")
+    claude_home = tmp_path / "claude-home"
+    codex_home = tmp_path / "codex-home"
+    cache_root = claude_home / "plugins" / "cache"
+    la_dir = tmp_path / "LaunchAgents"
+    la_dir.mkdir()
+
+    build_plugin(cache_root, "vlad-plugins", "review-tools", "1.12.0")
+    build_user_claude_md(claude_home)
+
+    assert reconcile(project_a, claude_home, codex_home) == 0
+    assert reconcile(project_b, claude_home, codex_home) == 0
+    capsys.readouterr()  # discard reconcile output
+
+    (la_dir / "com.openai.codex-bridge.test.abc.plist").write_bytes(b"<plist/>")
+
+    exit_code = cli.main([
+        "uninstall",
+        "--codex-home", str(codex_home),
+        "--launchagents-dir", str(la_dir),
+        "--dry-run",
+        "--json",
+    ])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    data = json_mod.loads(captured.out)
+
+    # Structure validation
+    assert isinstance(data["projects"], list)
+    assert len(data["projects"]) == 2
+    for project in data["projects"]:
+        assert "root" in project
+        assert project["status"] in ("will_clean", "not_found", "no_state")
+        assert "removals" in project
+
+    assert isinstance(data["global"], dict)
+    assert "skills" in data["global"]
+    assert "agents_md" in data["global"]
+    assert "registry" in data["global"]
+
+    assert isinstance(data["launchagents"], list)
+    assert len(data["launchagents"]) == 1
+    assert "path" in data["launchagents"][0]
+    assert "bootout_command" in data["launchagents"][0]
+
+
+def test_uninstall_skips_vanished_project_cleans_rest(make_project, tmp_path: Path):
+    """When a project root no longer exists, uninstall skips it and cleans the rest."""
+    import shutil as shutil_mod
+
+    project_a, _ = make_project("project-a")
+    project_b, _ = make_project("project-b")
+    claude_home = tmp_path / "claude-home"
+    codex_home = tmp_path / "codex-home"
+    cache_root = claude_home / "plugins" / "cache"
+
+    build_plugin(cache_root, "vlad-plugins", "review-tools", "1.12.0")
+    build_user_skill_simple(claude_home, "url-shorthand")
+
+    assert reconcile(project_a, claude_home, codex_home) == 0
+    assert reconcile(project_b, claude_home, codex_home) == 0
+
+    # Delete project A entirely
+    shutil_mod.rmtree(project_a)
+    assert not project_a.exists()
+
+    exit_code = cli.main([
+        "uninstall",
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+
+    # Project B was cleaned
+    assert not (project_b / ".codex" / "config.toml").exists()
+    assert not (project_b / "CLAUDE.md").exists()
+
+    # Global skills fully removed (even skills owned by the vanished project)
+    assert not (codex_home / "skills" / "vlad-plugins-review-tools-code-review").exists()
+    assert not (codex_home / "skills" / "user-url-shorthand").exists()
+
+    # Global registry removed
+    from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
+    assert not (codex_home / GLOBAL_REGISTRY_FILENAME).exists()
