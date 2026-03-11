@@ -24,4 +24,4 @@ dist/
 *.egg-info/
 pip-wheel-metadata/
 
-.claude/docs/plans/
+.claude/docs/
