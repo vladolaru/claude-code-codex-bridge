@@ -184,6 +184,108 @@ def build_desired_state(
     )
 
 
+@dataclass(frozen=True)
+class ProjectBuildResult:
+    """Result of running the full project build pipeline."""
+
+    desired_state: DesiredState
+    discovery: DiscoveryResult
+    shim_decision: ClaudeShimDecision
+    role_count: int
+    prompt_count: int
+    skill_count: int
+    exclusion_report: object  # ExclusionReport from exclusions module
+    rendered_config: str
+    diagnostics: tuple  # AgentTranslationDiagnostic tuple
+
+
+def build_project_desired_state(
+    project_root: str | Path | None = None,
+    *,
+    codex_home: str | Path | None = None,
+    claude_home: str | Path | None = None,
+    cache_dir: str | Path | None = None,
+    exclude_plugins: Iterable[str] = (),
+    exclude_skills: Iterable[str] = (),
+    exclude_agents: Iterable[str] = (),
+) -> ProjectBuildResult:
+    """Run the full discover-translate-build pipeline for one project.
+
+    Returns a ProjectBuildResult containing the desired state and all
+    intermediate values both callers (CLI and reconcile_all) need.
+    """
+    from cc_codex_bridge.claude_shim import plan_claude_shim
+    from cc_codex_bridge.discover import discover
+    from cc_codex_bridge.exclusions import (
+        apply_sync_exclusions,
+        load_project_exclusions,
+        resolve_effective_exclusions,
+    )
+    from cc_codex_bridge.render_codex_config import render_inline_codex_config, render_prompt_files
+    from cc_codex_bridge.translate_agents import (
+        translate_installed_agents_with_diagnostics,
+        translate_standalone_agents,
+    )
+    from cc_codex_bridge.translate_skills import translate_installed_skills, translate_standalone_skills
+
+    result = discover(
+        project_path=project_root,
+        cache_dir=cache_dir,
+        claude_home=claude_home,
+    )
+    config_exclusions = load_project_exclusions(result.project.root)
+    exclusions = resolve_effective_exclusions(
+        config_exclusions,
+        cli_exclude_plugins=tuple(exclude_plugins) or None,
+        cli_exclude_skills=tuple(exclude_skills) or None,
+        cli_exclude_agents=tuple(exclude_agents) or None,
+    )
+    result, exclusion_report = apply_sync_exclusions(result, exclusions)
+    shim_decision = plan_claude_shim(result.project)
+
+    agent_result = translate_installed_agents_with_diagnostics(result.plugins)
+    user_agent_result = translate_standalone_agents(result.user_agents, scope="user")
+    project_agent_result = translate_standalone_agents(result.project_agents, scope="project")
+
+    all_diagnostics = (
+        *agent_result.diagnostics,
+        *user_agent_result.diagnostics,
+        *project_agent_result.diagnostics,
+    )
+
+    all_roles = (*agent_result.roles, *user_agent_result.roles, *project_agent_result.roles)
+    plugin_skills = translate_installed_skills(result.plugins)
+    user_skills = translate_standalone_skills(result.user_skills, scope="user")
+    all_global_skills = (*plugin_skills, *user_skills)
+    project_skills = translate_standalone_skills(result.project_skills, scope="project")
+    extra_project_files: list[tuple[Path, bytes]] = []
+    for gen_skill in project_skills:
+        for f in gen_skill.files:
+            rel = Path(".codex") / "skills" / gen_skill.install_dir_name / f.relative_path
+            extra_project_files.append((rel, f.content))
+
+    prompt_files = render_prompt_files(all_roles)
+    rendered_config = render_inline_codex_config(all_roles)
+    total_skill_count = len(all_global_skills) + len(project_skills)
+    desired_state = build_desired_state(
+        result, shim_decision, prompt_files, rendered_config,
+        all_global_skills, codex_home=codex_home,
+        extra_project_files=extra_project_files,
+    )
+
+    return ProjectBuildResult(
+        desired_state=desired_state,
+        discovery=result,
+        shim_decision=shim_decision,
+        role_count=len(all_roles),
+        prompt_count=len(prompt_files),
+        skill_count=total_skill_count,
+        exclusion_report=exclusion_report,
+        rendered_config=rendered_config,
+        diagnostics=tuple(all_diagnostics),
+    )
+
+
 def diff_desired_state(desired: DesiredState) -> ReconcileReport:
     """Compare current outputs to desired state without writing."""
     previous_state = _load_previous_state(desired)
@@ -358,20 +460,7 @@ def reconcile_all(
     dry_run: bool = False,
 ) -> ReconcileAllReport:
     """Reconcile all registered projects."""
-    from cc_codex_bridge.claude_shim import plan_claude_shim
-    from cc_codex_bridge.discover import discover
-    from cc_codex_bridge.exclusions import (
-        apply_sync_exclusions,
-        load_project_exclusions,
-        resolve_effective_exclusions,
-    )
-    from cc_codex_bridge.render_codex_config import render_inline_codex_config, render_prompt_files
-    from cc_codex_bridge.translate_agents import (
-        format_agent_translation_diagnostics,
-        translate_installed_agents_with_diagnostics,
-        translate_standalone_agents,
-    )
-    from cc_codex_bridge.translate_skills import translate_installed_skills, translate_standalone_skills
+    from cc_codex_bridge.translate_agents import format_agent_translation_diagnostics
 
     codex_home_path = Path(codex_home or DEFAULT_CODEX_HOME).expanduser().resolve()
     registry_path = codex_home_path / GLOBAL_REGISTRY_FILENAME
@@ -394,51 +483,21 @@ def reconcile_all(
             continue
 
         try:
-            result = discover(project_path=project_root)
-            config_exclusions = load_project_exclusions(result.project.root)
-            exclusions = resolve_effective_exclusions(config_exclusions)
-            result, _ = apply_sync_exclusions(result, exclusions)
-            shim_decision = plan_claude_shim(result.project)
-
-            agent_result = translate_installed_agents_with_diagnostics(result.plugins)
-            user_agent_result = translate_standalone_agents(result.user_agents, scope="user")
-            project_agent_result = translate_standalone_agents(result.project_agents, scope="project")
-
-            all_diagnostics = (
-                *agent_result.diagnostics,
-                *user_agent_result.diagnostics,
-                *project_agent_result.diagnostics,
+            build = build_project_desired_state(
+                project_root,
+                codex_home=codex_home_path,
             )
-            if all_diagnostics:
+            if build.diagnostics:
                 errors.append(ReconcileAllError(
                     project_root=project_root,
-                    error=format_agent_translation_diagnostics(all_diagnostics),
+                    error=format_agent_translation_diagnostics(build.diagnostics),
                 ))
                 continue
 
-            all_roles = (*agent_result.roles, *user_agent_result.roles, *project_agent_result.roles)
-            plugin_skills = translate_installed_skills(result.plugins)
-            user_skills = translate_standalone_skills(result.user_skills, scope="user")
-            all_global_skills = (*plugin_skills, *user_skills)
-            project_skills = translate_standalone_skills(result.project_skills, scope="project")
-            extra_project_files: list[tuple[Path, bytes]] = []
-            for gen_skill in project_skills:
-                for f in gen_skill.files:
-                    rel = Path(".codex") / "skills" / gen_skill.install_dir_name / f.relative_path
-                    extra_project_files.append((rel, f.content))
-
-            prompt_files = render_prompt_files(all_roles)
-            rendered_config = render_inline_codex_config(all_roles)
-            desired_state = build_desired_state(
-                result, shim_decision, prompt_files, rendered_config,
-                all_global_skills, codex_home=codex_home_path,
-                extra_project_files=extra_project_files,
-            )
-
             if dry_run:
-                report = diff_desired_state(desired_state)
+                report = diff_desired_state(build.desired_state)
             else:
-                report = reconcile_desired_state(desired_state)
+                report = reconcile_desired_state(build.desired_state)
 
             results.append(ReconcileAllProjectResult(project_root=project_root, report=report))
         except Exception as exc:

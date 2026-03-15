@@ -12,20 +12,14 @@ PACKAGE_PARENT = Path(__file__).resolve().parent.parent
 if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
 
-from cc_codex_bridge.claude_shim import plan_claude_shim
-from cc_codex_bridge.discover import discover, resolve_project_root
+from cc_codex_bridge.discover import resolve_project_root
 from cc_codex_bridge.doctor import (
     doctor_exit_code,
     format_doctor_json,
     format_doctor_report,
     run_doctor,
 )
-from cc_codex_bridge.exclusions import (
-    ExclusionReport,
-    apply_sync_exclusions,
-    load_project_exclusions,
-    resolve_effective_exclusions,
-)
+from cc_codex_bridge.exclusions import ExclusionReport
 from cc_codex_bridge.install_launchagent import (
     DEFAULT_START_INTERVAL,
     GLOBAL_LAUNCHAGENT_LABEL,
@@ -37,19 +31,13 @@ from cc_codex_bridge.install_launchagent import (
 )
 from cc_codex_bridge.model import DiscoveryError, ReconcileError, TranslationError
 from cc_codex_bridge.reconcile import (
-    build_desired_state,
+    build_project_desired_state,
     diff_desired_state,
     format_change_report,
     format_diff_report,
     reconcile_desired_state,
 )
-from cc_codex_bridge.render_codex_config import render_inline_codex_config, render_prompt_files
-from cc_codex_bridge.translate_agents import (
-    format_agent_translation_diagnostics,
-    translate_installed_agents_with_diagnostics,
-    translate_standalone_agents,
-)
-from cc_codex_bridge.translate_skills import translate_installed_skills, translate_standalone_skills
+from cc_codex_bridge.translate_agents import format_agent_translation_diagnostics
 
 
 PIPELINE_COMMANDS = {"reconcile", "validate", "status"}
@@ -247,120 +235,69 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        result = discover(
-            project_path=args.project,
-            cache_dir=args.cache_dir,
+        build = build_project_desired_state(
+            args.project,
+            codex_home=args.codex_home,
             claude_home=args.claude_home,
+            cache_dir=args.cache_dir,
+            exclude_plugins=args.exclude_plugin or (),
+            exclude_skills=args.exclude_skill or (),
+            exclude_agents=args.exclude_agent or (),
         )
-        config_exclusions = load_project_exclusions(result.project.root)
-        exclusions = resolve_effective_exclusions(
-            config_exclusions,
-            cli_exclude_plugins=args.exclude_plugin,
-            cli_exclude_skills=args.exclude_skill,
-            cli_exclude_agents=args.exclude_agent,
-        )
-        result, exclusion_report = apply_sync_exclusions(result, exclusions)
-        shim_decision = plan_claude_shim(result.project)
     except (DiscoveryError, TranslationError, ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
     try:
-        # Plugin agents
-        agent_result = translate_installed_agents_with_diagnostics(result.plugins)
-
-        # Standalone agents
-        user_agent_result = translate_standalone_agents(result.user_agents, scope="user")
-        project_agent_result = translate_standalone_agents(result.project_agents, scope="project")
-
-        # Merge diagnostics from all sources
-        all_diagnostics = (
-            *agent_result.diagnostics,
-            *user_agent_result.diagnostics,
-            *project_agent_result.diagnostics,
-        )
-        if all_diagnostics:
+        if build.diagnostics:
             if args.command == "status":
                 if args.json:
-                    print(format_status_json(None, exclusion_report, diagnostics=all_diagnostics))
+                    print(format_status_json(None, build.exclusion_report, diagnostics=build.diagnostics))
                 else:
-                    print(format_status_report(None, exclusion_report, diagnostics=all_diagnostics))
+                    print(format_status_report(None, build.exclusion_report, diagnostics=build.diagnostics))
                 return 0
-            raise TranslationError(format_agent_translation_diagnostics(all_diagnostics))
+            raise TranslationError(format_agent_translation_diagnostics(build.diagnostics))
 
-        # Merge roles from all sources
-        all_roles = (*agent_result.roles, *user_agent_result.roles, *project_agent_result.roles)
+        if args.command == "validate":
+            _print_summary(
+                build.discovery,
+                build.shim_decision.action,
+                build.role_count,
+                build.prompt_count,
+                build.skill_count,
+                build.rendered_config,
+                build.exclusion_report,
+            )
+            return 0
 
-        # Plugin skills + user skills → global registry
-        plugin_skills = translate_installed_skills(result.plugins)
-        user_skills = translate_standalone_skills(result.user_skills, scope="user")
-        all_global_skills = (*plugin_skills, *user_skills)
-
-        # Project skills → project file entries
-        project_skills = translate_standalone_skills(result.project_skills, scope="project")
-        extra_project_files: list[tuple[Path, bytes]] = []
-        for gen_skill in project_skills:
-            for f in gen_skill.files:
-                rel = Path(".codex") / "skills" / gen_skill.install_dir_name / f.relative_path
-                extra_project_files.append((rel, f.content))
-
-        prompt_files = render_prompt_files(all_roles)
-        rendered_config = render_inline_codex_config(all_roles)
-        total_skill_count = len(all_global_skills) + len(project_skills)
-        desired_state = build_desired_state(
-            result,
-            shim_decision,
-            prompt_files,
-            rendered_config,
-            all_global_skills,
-            codex_home=args.codex_home,
-            extra_project_files=extra_project_files,
-        )
-    except (TranslationError, ReconcileError, OSError, UnicodeError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-
-    if args.command == "validate":
-        _print_summary(
-            result,
-            shim_decision.action,
-            len(all_roles),
-            len(prompt_files),
-            total_skill_count,
-            rendered_config,
-            exclusion_report,
-        )
-        return 0
-
-    try:
         if args.command == "reconcile":
             if args.dry_run:
-                report = diff_desired_state(desired_state)
+                report = diff_desired_state(build.desired_state)
             else:
-                report = reconcile_desired_state(desired_state)
+                report = reconcile_desired_state(build.desired_state)
             _print_summary(
-                result,
-                shim_decision.action,
-                len(all_roles),
-                len(prompt_files),
-                total_skill_count,
-                rendered_config,
-                exclusion_report,
+                build.discovery,
+                build.shim_decision.action,
+                build.role_count,
+                build.prompt_count,
+                build.skill_count,
+                build.rendered_config,
+                build.exclusion_report,
             )
             if args.diff:
-                print(format_diff_report(desired_state, report))
+                print(format_diff_report(build.desired_state, report))
             else:
                 print(format_change_report(report))
             return 0
 
         if args.command == "status":
-            report = diff_desired_state(desired_state)
+            report = diff_desired_state(build.desired_state)
             if args.json:
-                print(format_status_json(report, exclusion_report))
+                print(format_status_json(report, build.exclusion_report))
             else:
-                print(format_status_report(report, exclusion_report))
+                print(format_status_report(report, build.exclusion_report))
             return 0
-    except (ReconcileError, OSError, UnicodeError) as exc:
+    except (TranslationError, ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 

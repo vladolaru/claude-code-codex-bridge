@@ -259,7 +259,7 @@ def test_reconcile_diff_requires_dry_run(make_project, make_plugin_version, tmp_
 
 def test_validate_surfaces_os_errors_as_user_facing_errors(monkeypatch: pytest.MonkeyPatch, capsys):
     """Filesystem errors during pipeline setup should not escape as tracebacks."""
-    monkeypatch.setattr(cli, "discover", lambda **_kwargs: (_ for _ in ()).throw(PermissionError("boom")))
+    monkeypatch.setattr(cli, "build_project_desired_state", lambda *_a, **_kw: (_ for _ in ()).throw(PermissionError("boom")))
 
     exit_code = cli.main(["validate", "--project", "."])
 
