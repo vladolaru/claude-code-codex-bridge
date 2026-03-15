@@ -75,16 +75,18 @@ python3 -m pip install -e ".[dev]"
 
 ### Testing
 
+**Always run tests through the project venv.** The package depends on PyYAML and other libraries that are not available in the system Python. Running bare `pytest` without the venv will fail with `ModuleNotFoundError`.
+
 Run the full test suite after code changes:
 
 ```bash
-pytest tests -q
+source .venv/bin/activate && pytest tests -q
 ```
 
 Run coverage:
 
 ```bash
-pytest --cov=cc_codex_bridge --cov-report=term-missing tests -q
+source .venv/bin/activate && pytest --cov=cc_codex_bridge --cov-report=term-missing tests -q
 ```
 
 ### Packaging
