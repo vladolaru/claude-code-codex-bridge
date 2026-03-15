@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sys
 from typing import Iterable
@@ -148,18 +149,41 @@ def _check_claude_cache(cache_dir: Path) -> DoctorCheck:
         )
 
     try:
-        plugin_count = sum(
-            1
-            for marketplace_dir in cache_dir.iterdir()
-            if marketplace_dir.is_dir()
-            for plugin_dir in marketplace_dir.iterdir()
-            if plugin_dir.is_dir()
-        )
+        plugin_count = 0
+        malformed_plugins: list[str] = []
+        for marketplace_dir in sorted(cache_dir.iterdir()):
+            if not marketplace_dir.is_dir():
+                continue
+            for plugin_dir in sorted(marketplace_dir.iterdir()):
+                if not plugin_dir.is_dir():
+                    continue
+                has_valid_version = any(
+                    _looks_like_semver(version_dir.name)
+                    for version_dir in plugin_dir.iterdir()
+                    if version_dir.is_dir()
+                )
+                if has_valid_version:
+                    plugin_count += 1
+                else:
+                    malformed_plugins.append(
+                        f"{marketplace_dir.name}/{plugin_dir.name}"
+                    )
     except OSError as exc:
         return DoctorCheck(
             name="claude_cache",
             status="warning",
             message=f"Unable to inspect Claude plugin cache at {cache_dir}: {exc}",
+        )
+
+    if malformed_plugins:
+        return DoctorCheck(
+            name="claude_cache",
+            status="warning",
+            message=(
+                f"Claude plugin cache at {cache_dir} has plugins with no valid "
+                f"semantic versions: {', '.join(malformed_plugins)}; "
+                f"discovery will fail for these plugins"
+            ),
         )
 
     if plugin_count == 0:
@@ -271,6 +295,14 @@ def _directory_is_writable(path: Path) -> bool:
     except OSError:
         return False
     return True
+
+
+_SEMVER_BASIC_RE = re.compile(r"^\d+\.\d+\.\d+")
+
+
+def _looks_like_semver(name: str) -> bool:
+    """Return True if a directory name starts with a semver-like pattern."""
+    return bool(_SEMVER_BASIC_RE.match(name))
 
 
 def _check_command_on_path(command_name: str, path_env: str) -> DoctorCheck:
