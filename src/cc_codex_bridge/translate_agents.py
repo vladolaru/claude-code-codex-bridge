@@ -43,6 +43,8 @@ def translate_standalone_agents(
     """
     roles: list[GeneratedAgentRole] = []
     diagnostics: list[AgentTranslationDiagnostic] = []
+    seen_role_names: set[str] = set()
+    seen_prompt_paths: set[Path] = set()
 
     for agent_path in agent_paths:
         parsed_fm, body = frontmatter.parse_markdown_with_frontmatter(agent_path)
@@ -69,6 +71,21 @@ def translate_standalone_agents(
         normalized_name = _normalize_name(agent_name)
         role_name = f"{scope}_{normalized_name}"
         prompt_stem = f"{scope}-{_normalize_prompt_component(agent_name, kind='agent name')}"
+        prompt_relpath = Path("prompts") / "agents" / f"{prompt_stem}.md"
+
+        if role_name in seen_role_names:
+            raise TranslationError(
+                f"Generated duplicate role name: {role_name} "
+                f"(from {scope} agent '{agent_name}' at {agent_path})"
+            )
+        seen_role_names.add(role_name)
+
+        if prompt_relpath in seen_prompt_paths:
+            raise TranslationError(
+                f"Generated duplicate prompt path: {prompt_relpath} "
+                f"(from {scope} agent '{agent_name}' at {agent_path})"
+            )
+        seen_prompt_paths.add(prompt_relpath)
 
         roles.append(
             GeneratedAgentRole(
@@ -79,7 +96,7 @@ def translate_standalone_agents(
                 original_model_hint=_optional_str(parsed_fm.get("model")),
                 model=default_model,
                 tools=translated_tools,
-                prompt_relpath=Path("prompts") / "agents" / f"{prompt_stem}.md",
+                prompt_relpath=prompt_relpath,
                 prompt_body=body.strip() + ("\n" if body.strip() else ""),
             )
         )
