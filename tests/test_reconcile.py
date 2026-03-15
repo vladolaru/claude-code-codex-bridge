@@ -1584,15 +1584,15 @@ def test_clean_does_not_touch_global_agents_md(
     project_root, _agents_md = make_project()
     codex_home = tmp_path / "codex-home"
 
-    # Create a global AGENTS.md manually (simulating a prior reconcile with user CLAUDE.md)
-    (codex_home / "AGENTS.md").parent.mkdir(parents=True, exist_ok=True)
-    (codex_home / "AGENTS.md").write_text("# Global instructions\n")
-
     # Create minimal state so clean has something to work with
     cache_root = tmp_path / "cache"
     from cc_codex_bridge.reconcile import clean_project
     desired = _reconcile_once(project_root, cache_root, codex_home)
     reconcile_desired_state(desired)
+
+    # Create a global AGENTS.md after reconcile (simulating a prior reconcile with user CLAUDE.md)
+    (codex_home / "AGENTS.md").parent.mkdir(parents=True, exist_ok=True)
+    (codex_home / "AGENTS.md").write_text("# Global instructions\n")
 
     clean_project(project_root, codex_home=codex_home)
 

@@ -576,6 +576,8 @@ def _apply_changes(desired: DesiredState, plan: _MutationPlan) -> None:
         if change.resource_kind == "global_instructions":
             if change.kind in ("create", "update"):
                 _atomic_write_file(change.path, desired.global_instructions)
+            elif change.kind == "remove":
+                change.path.unlink(missing_ok=True)
             continue
         if change.resource_kind == "skill":
             if change.kind in ("create", "update"):
@@ -840,10 +842,14 @@ def _plan_skill_mutations(
 
 def _plan_global_instructions_changes(desired: DesiredState) -> tuple[Change, ...]:
     """Plan changes for the global instructions file (~/.codex/AGENTS.md)."""
+    path = desired.codex_home / "AGENTS.md"
+
     if desired.global_instructions is None:
+        # Source is absent — remove the generated file if it exists
+        if path.exists() and not path.is_symlink():
+            return (Change("remove", path, resource_kind="global_instructions"),)
         return ()
 
-    path = desired.codex_home / "AGENTS.md"
     if not path.exists():
         return (Change("create", path, resource_kind="global_instructions"),)
     if path.is_symlink():
