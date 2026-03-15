@@ -190,6 +190,8 @@ The global registry records:
 - project files are written atomically via temp-file-then-rename to avoid partial reads
 - if a write fails mid-apply, the next idempotent reconcile run self-heals
 - stale managed outputs are removed when no longer desired
+- cleanup uses the codex_home recorded in bridge state, not the caller-supplied value, to ensure registry operations target the correct global state
+- project-local generated skill directories are removed as whole directories, not individual files, consistent with global skill directory ownership
 - if the configured Codex home changes, the current project's old registry claims are released from the previous Codex home during the same reconcile
 
 ## 7. Discovery Architecture
@@ -396,7 +398,7 @@ Supported kinds in current reporting:
 
 1. load previous state if present
 2. load the current global skill registry under the resolved Codex home
-3. compute desired project file changes (including project-local skill files)
+3. compute desired project file changes (config, prompts, project-local skill directories)
 4. compute desired generated-skill claims and reconcile changes from registry ownership plus on-disk content hashes
 5. compute desired global instructions changes for `~/.codex/AGENTS.md`
 6. validate ownership constraints
