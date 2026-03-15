@@ -1662,6 +1662,117 @@ def test_clean_removes_project_from_registry_projects_list(
     assert str(project_b) in registry_data["projects"]
 
 
+def test_clean_uses_state_recorded_codex_home(make_project, tmp_path: Path):
+    """clean_project uses the codex_home from bridge state, not the caller-supplied one."""
+    from cc_codex_bridge.reconcile import clean_project
+    from cc_codex_bridge.registry import GlobalSkillEntry, GlobalSkillRegistry, GLOBAL_REGISTRY_FILENAME
+    from cc_codex_bridge.state import BridgeState
+
+    project_root, _ = make_project()
+    actual_codex = tmp_path / "actual-codex"
+    actual_codex.mkdir()
+    wrong_codex = tmp_path / "wrong-codex"
+    wrong_codex.mkdir()
+
+    # Build state that records actual_codex as the codex_home
+    state = BridgeState(
+        project_root=project_root.resolve(),
+        codex_home=actual_codex.resolve(),
+        managed_project_files=(STATE_RELATIVE_PATH.as_posix(),),
+    )
+    state_path = project_root / STATE_RELATIVE_PATH
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(state.to_json())
+
+    # Write a registry in the actual codex home with this project as owner
+    registry = GlobalSkillRegistry(
+        skills={
+            "test-skill": GlobalSkillEntry(
+                content_hash="sha256:abc",
+                owners=(project_root.resolve(),),
+            ),
+        },
+        projects=(project_root.resolve(),),
+    )
+    (actual_codex / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
+    skill_dir = actual_codex / "skills" / "test-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("content\n")
+
+    # Clean with the wrong codex_home — should still clean the actual one
+    report = clean_project(project_root, codex_home=wrong_codex)
+    assert report.applied is True
+
+    # The actual codex registry should have the project removed
+    updated = GlobalSkillRegistry.from_path(actual_codex / GLOBAL_REGISTRY_FILENAME)
+    assert updated is not None
+    assert "test-skill" not in updated.skills
+    assert project_root.resolve() not in updated.projects
+
+    # The skill directory should be removed
+    assert not skill_dir.exists()
+
+
+def test_clean_dry_run_reports_state_file_removal(make_project, tmp_path: Path):
+    """clean --dry-run must report the state file in the removal set."""
+    from cc_codex_bridge.reconcile import clean_project
+    from cc_codex_bridge.state import BridgeState
+
+    project_root, _ = make_project()
+    codex = tmp_path / "codex"
+    codex.mkdir()
+
+    state = BridgeState(
+        project_root=project_root.resolve(),
+        codex_home=codex.resolve(),
+        managed_project_files=(STATE_RELATIVE_PATH.as_posix(),),
+    )
+    state_path = project_root / STATE_RELATIVE_PATH
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(state.to_json())
+
+    report = clean_project(project_root, codex_home=codex, dry_run=True)
+
+    removed_paths = {change.path for change in report.changes}
+    assert state_path in removed_paths, "dry-run must report state file removal"
+
+    # State file should still exist (dry-run)
+    assert state_path.exists()
+
+
+def test_clean_removes_full_project_skill_directory(make_project, tmp_path: Path):
+    """clean_project removes the entire project-local skill directory, not just tracked files."""
+    from cc_codex_bridge.reconcile import clean_project
+    from cc_codex_bridge.state import BridgeState
+
+    project_root, _ = make_project()
+    codex = tmp_path / "codex"
+    codex.mkdir()
+
+    skill_dir = project_root / ".codex" / "skills" / "demo"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("generated\n")
+    (skill_dir / "extra.txt").write_text("also in the dir\n")
+
+    state = BridgeState(
+        project_root=project_root.resolve(),
+        codex_home=codex.resolve(),
+        managed_project_files=(
+            STATE_RELATIVE_PATH.as_posix(),
+            ".codex/skills/demo/SKILL.md",
+        ),
+    )
+    state_path = project_root / STATE_RELATIVE_PATH
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(state.to_json())
+
+    report = clean_project(project_root, codex_home=codex)
+    assert report.applied is True
+
+    # The entire skill directory should be gone, including extra.txt
+    assert not skill_dir.exists()
+
+
 def test_reconcile_registers_project_in_global_registry(
     make_project,
     make_plugin_version,
