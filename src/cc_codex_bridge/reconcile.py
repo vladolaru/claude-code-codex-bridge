@@ -188,7 +188,7 @@ def build_desired_state(
 class ProjectBuildResult:
     """Result of running the full project build pipeline."""
 
-    desired_state: DesiredState
+    desired_state: DesiredState | None
     discovery: DiscoveryResult
     shim_decision: ClaudeShimDecision
     role_count: int
@@ -252,6 +252,22 @@ def build_project_desired_state(
         *user_agent_result.diagnostics,
         *project_agent_result.diagnostics,
     )
+
+    # Short-circuit before skill translation when agent diagnostics exist.
+    # Skill translation may raise on unrelated errors (e.g. missing sibling
+    # references), masking the diagnostics that callers need to inspect.
+    if all_diagnostics:
+        return ProjectBuildResult(
+            desired_state=None,
+            discovery=result,
+            shim_decision=shim_decision,
+            role_count=0,
+            prompt_count=0,
+            skill_count=0,
+            exclusion_report=exclusion_report,
+            rendered_config="",
+            diagnostics=tuple(all_diagnostics),
+        )
 
     all_roles = (*agent_result.roles, *user_agent_result.roles, *project_agent_result.roles)
     plugin_skills = translate_installed_skills(result.plugins)

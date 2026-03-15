@@ -1341,6 +1341,46 @@ def test_reconcile_rejects_symlinked_global_instructions(
         reconcile_desired_state(desired)
 
 
+def test_build_project_desired_state_short_circuits_on_agent_diagnostics(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Agent diagnostics are returned before skill translation runs.
+
+    If skill translation would raise (e.g. missing sibling reference),
+    the diagnostics must still be returned so callers can report the
+    unsupported-tools issue instead of a skill error.
+    """
+    from cc_codex_bridge.reconcile import build_project_desired_state
+
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "demo", "1.0.0",
+        agent_names=("broken-agent",),
+        skill_names=("broken-skill",),
+    )
+    # Agent with unsupported tool → diagnostic
+    (version_dir / "agents" / "broken-agent.md").write_text(
+        "---\nname: broken-agent\ndescription: Review\ntools:\n  - NotebookEdit\n---\n\nPrompt.\n"
+    )
+    # Skill referencing a missing sibling → would raise TranslationError
+    (version_dir / "skills" / "broken-skill" / "SKILL.md").write_text(
+        "---\nname: broken-skill\ndescription: Broken\nreferences:\n  sibling: ../nonexistent/\n---\n\nBody.\n"
+    )
+
+    build = build_project_desired_state(
+        project_root,
+        codex_home=tmp_path / "codex-home",
+        cache_dir=cache_root,
+    )
+
+    # Should return diagnostics, not raise
+    assert len(build.diagnostics) == 1
+    assert build.diagnostics[0].agent_name == "broken-agent"
+    assert build.desired_state is None
+
+
 def test_reconcile_removes_stale_global_instructions(
     make_project,
     make_plugin_version,
