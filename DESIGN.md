@@ -555,6 +555,7 @@ Current runtime module responsibilities:
   - Codex skill translation for plugins and standalone sources, plus relative-reference resolution and vendoring helpers
 - `reconcile.py`
   - desired-state modeling, diffing, atomic apply, report formatting
+  - shared project build pipeline via `build_project_desired_state()`
   - project-level cleanup via `clean_project()`
   - multi-project reconcile via `reconcile_all()`
   - machine-level uninstall via `uninstall_all()`

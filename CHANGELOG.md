@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `clean` using caller-supplied `--codex-home` instead of the state-recorded value, which could orphan global registry claims when the Codex home changed.
+- Fixed `clean --dry-run` under-reporting removals by omitting the state file from the preview.
+- Fixed project-local generated skill cleanup removing only tracked files instead of the full skill directory.
+- Fixed stale `~/.codex/AGENTS.md` persisting indefinitely when the source `~/.claude/CLAUDE.md` was removed.
+- Fixed standalone agents with names that normalize to the same role silently colliding instead of failing fast.
+- Fixed `doctor` reporting the plugin cache as healthy when plugins had no valid semver versions that discovery would reject.
+
+### Changed
+
+- Extracted the hardcoded Codex model name to a single `DEFAULT_CODEX_MODEL` constant.
+- Extracted the shared project build pipeline into `build_project_desired_state()` so single-project and reconcile-all paths cannot drift.
+
 ## [0.6.0] - 2026-03-12
 
 ### Added
