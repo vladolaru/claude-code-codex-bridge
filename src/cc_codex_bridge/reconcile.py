@@ -215,7 +215,6 @@ def clean_project(
     state file.  Returns a report of what was (or would be) removed.
     """
     project_root_path = Path(project_root).expanduser().resolve()
-    codex_home_path = Path(codex_home or DEFAULT_CODEX_HOME).expanduser().resolve()
     state_path = project_root_path / STATE_RELATIVE_PATH
 
     if state_path.is_symlink():
@@ -230,13 +229,33 @@ def clean_project(
             f"{previous_state.project_root}"
         )
 
+    # Use the state-recorded codex_home — it is authoritative for where this
+    # project's generated outputs live.
+    codex_home_path = previous_state.codex_home
+
     changes: list[Change] = []
 
-    # Remove managed project files (except the state file itself — removed last)
+    # Identify project-local skill directories from managed file paths.
+    # Skill files live under .codex/skills/<name>/... — group by skill dir
+    # so we can remove the full directory instead of individual files.
+    skill_dirs_to_remove: set[Path] = set()
     for relative in sorted(previous_state.managed_project_files):
-        if relative == STATE_RELATIVE_PATH.as_posix():
-            continue
+        parts = Path(relative).parts
+        if len(parts) >= 3 and parts[0] == ".codex" and parts[1] == "skills":
+            skill_dir = project_root_path / parts[0] / parts[1] / parts[2]
+            if skill_dir.exists() and not skill_dir.is_symlink():
+                skill_dirs_to_remove.add(skill_dir)
+
+    # Remove managed project files — skill dirs are handled as directory
+    # removals instead of individual file deletions.
+    for skill_dir in sorted(skill_dirs_to_remove):
+        changes.append(Change("remove", skill_dir, resource_kind="project_skill"))
+
+    for relative in sorted(previous_state.managed_project_files):
         path = project_root_path / relative
+        # Skip files that fall inside an already-scheduled skill dir removal
+        if any(path == sd or _is_under(path, sd) for sd in skill_dirs_to_remove):
+            continue
         if path.exists() and not path.is_symlink():
             changes.append(Change("remove", path))
 
@@ -288,9 +307,11 @@ def clean_project(
     if dry_run:
         return ReconcileReport(changes=tuple(changes), applied=False)
 
-    # Apply removals
+    # Apply removals — state file last to preserve cleanup atomicity
     for change in changes:
-        if change.resource_kind == "skill":
+        if change.path == state_path:
+            continue  # deferred to end
+        if change.resource_kind in ("skill", "project_skill"):
             if change.path.exists():
                 shutil.rmtree(change.path)
         else:
@@ -923,6 +944,15 @@ def _project_relative(desired: DesiredState, path: Path) -> str:
         path.relative_to(desired.project_root),
         label="managed project path",
     ).as_posix()
+
+
+def _is_under(path: Path, parent: Path) -> bool:
+    """Return True if path is strictly under parent."""
+    try:
+        path.relative_to(parent)
+        return path != parent
+    except ValueError:
+        return False
 
 
 def _cleanup_empty_parents(path: Path, stop_at: Path) -> None:
