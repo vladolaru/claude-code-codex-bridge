@@ -6,13 +6,13 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import sys
 from typing import Iterable
 
 import cc_codex_bridge.discover as discover_module
 import cc_codex_bridge.install_launchagent as launchagent_module
+from cc_codex_bridge.model import SemVer
 
 
 DEFAULT_CODEX_HOME = Path.home() / ".codex"
@@ -158,7 +158,7 @@ def _check_claude_cache(cache_dir: Path) -> DoctorCheck:
                 if not plugin_dir.is_dir():
                     continue
                 has_valid_version = any(
-                    _looks_like_semver(version_dir.name)
+                    _is_valid_semver(version_dir.name)
                     for version_dir in plugin_dir.iterdir()
                     if version_dir.is_dir()
                 )
@@ -297,12 +297,17 @@ def _directory_is_writable(path: Path) -> bool:
     return True
 
 
-_SEMVER_BASIC_RE = re.compile(r"^\d+\.\d+\.\d+")
+def _is_valid_semver(name: str) -> bool:
+    """Return True if a directory name is a valid semantic version.
 
-
-def _looks_like_semver(name: str) -> bool:
-    """Return True if a directory name starts with a semver-like pattern."""
-    return bool(_SEMVER_BASIC_RE.match(name))
+    Uses the same SemVer parser as discovery to avoid accepting names
+    that discovery would reject.
+    """
+    try:
+        SemVer.parse(name)
+        return True
+    except ValueError:
+        return False
 
 
 def _check_command_on_path(command_name: str, path_env: str) -> DoctorCheck:

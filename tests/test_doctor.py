@@ -72,6 +72,20 @@ def test_doctor_warns_when_cache_has_plugin_without_valid_versions(tmp_path: Pat
     assert "no valid" in cache_check.message.lower() or "invalid" in cache_check.message.lower()
 
 
+def test_doctor_rejects_semver_lookalikes_that_discovery_rejects(tmp_path: Path):
+    """Doctor must reject version names that look like semver but fail SemVer.parse."""
+    cache = tmp_path / "cache"
+    for bad_name in ("1.0.0foo", "01.2.3", "1.2.3-"):
+        plugin = cache / "market" / f"plugin-{bad_name}"
+        (plugin / bad_name).mkdir(parents=True)
+
+    checks = run_doctor(cache_dir=cache, codex_home=tmp_path / "codex")
+
+    cache_check = next(c for c in checks if c.name == "claude_cache")
+    assert cache_check.status == "warning"
+    assert "no valid" in cache_check.message.lower()
+
+
 def test_doctor_cli_supports_json_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     """The CLI doctor command should return JSON output for installer use."""
     codex_home = tmp_path / "codex-home"
