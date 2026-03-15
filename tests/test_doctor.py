@@ -57,6 +57,21 @@ def test_run_doctor_fails_for_unsupported_python_or_invalid_codex_home(tmp_path:
     assert any(check.name == "codex_home" and check.status == "error" for check in checks)
 
 
+def test_doctor_warns_when_cache_has_plugin_without_valid_versions(tmp_path: Path):
+    """Doctor should warn when a plugin dir has no valid semver versions."""
+    cache = tmp_path / "cache"
+    marketplace = cache / "market"
+    plugin = marketplace / "bad-plugin"
+    invalid_version = plugin / "not-a-semver"
+    invalid_version.mkdir(parents=True)
+
+    checks = run_doctor(cache_dir=cache, codex_home=tmp_path / "codex")
+
+    cache_check = next(c for c in checks if c.name == "claude_cache")
+    assert cache_check.status == "warning"
+    assert "no valid" in cache_check.message.lower() or "invalid" in cache_check.message.lower()
+
+
 def test_doctor_cli_supports_json_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     """The CLI doctor command should return JSON output for installer use."""
     codex_home = tmp_path / "codex-home"

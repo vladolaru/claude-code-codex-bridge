@@ -1341,6 +1341,47 @@ def test_reconcile_rejects_symlinked_global_instructions(
         reconcile_desired_state(desired)
 
 
+def test_reconcile_removes_stale_global_instructions(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """When user-level CLAUDE.md disappears, stale ~/.codex/AGENTS.md is removed."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "demo", "1.0.0",
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\ntools:\n  - Read\n---\n\nReview.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    claude_home = tmp_path / "claude-home"
+    claude_home.mkdir()
+
+    # First reconcile WITH user-level CLAUDE.md
+    user_claude_md = claude_home / "CLAUDE.md"
+    user_claude_md.write_text("User instructions.\n")
+
+    desired = _build_desired(
+        project_root, cache_root, codex_home, claude_home=claude_home,
+    )
+    reconcile_desired_state(desired)
+    assert (codex_home / "AGENTS.md").exists()
+
+    # Second reconcile WITHOUT user-level CLAUDE.md
+    user_claude_md.unlink()
+    desired2 = _build_desired(
+        project_root, cache_root, codex_home, claude_home=claude_home,
+    )
+    report = reconcile_desired_state(desired2)
+
+    # The stale global instructions should be removed
+    assert not (codex_home / "AGENTS.md").exists()
+    remove_changes = [c for c in report.changes if c.kind == "remove" and c.resource_kind == "global_instructions"]
+    assert len(remove_changes) == 1
+
+
 # ---------------------------------------------------------------------------
 # clean_project tests
 # ---------------------------------------------------------------------------

@@ -518,6 +518,21 @@ def test_translate_standalone_agent_with_unsupported_tools(tmp_path: Path):
     assert result.diagnostics[0].unsupported_tools == ("NotebookEdit",)
 
 
+def test_translate_standalone_agents_rejects_duplicate_normalized_role_names(tmp_path: Path):
+    """Standalone agents with names that normalize to the same role name are rejected."""
+    a = tmp_path / "same-role.md"
+    b = tmp_path / "same role.md"
+    a.write_text(
+        "---\nname: same-role\ndescription: First agent\n---\n\nPrompt A\n"
+    )
+    b.write_text(
+        "---\nname: same role\ndescription: Second agent\n---\n\nPrompt B\n"
+    )
+
+    with pytest.raises(TranslationError, match="duplicate role name"):
+        translate_standalone_agents((a, b), scope="user")
+
+
 def test_translate_standalone_agent_empty_input():
     """Empty agent paths produce empty result."""
     result = translate_standalone_agents((), scope="user")
