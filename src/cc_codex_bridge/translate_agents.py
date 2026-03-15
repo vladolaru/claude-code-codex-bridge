@@ -28,13 +28,14 @@ TOOL_TRANSLATIONS = {
 ROLE_NAMESPACE_RE = re.compile(r"[^A-Za-z0-9_-]+")
 ROLE_AGENT_RE = re.compile(r"[^A-Za-z0-9_]+")
 PROMPT_COMPONENT_RE = re.compile(r"[^A-Za-z0-9-]+")
+DEFAULT_CODEX_MODEL = "gpt-5.3-codex"
 
 
 def translate_standalone_agents(
     agent_paths: Iterable[Path],
     *,
     scope: str,
-    default_model: str = "gpt-5.3-codex",
+    default_model: str = DEFAULT_CODEX_MODEL,
 ) -> AgentTranslationResult:
     """Translate user-level or project-level Claude agent files into Codex roles.
 
@@ -110,7 +111,7 @@ def translate_standalone_agents(
 def translate_installed_agents(
     plugins: Iterable[InstalledPlugin],
     *,
-    default_model: str = "gpt-5.3-codex",
+    default_model: str = DEFAULT_CODEX_MODEL,
 ) -> tuple[GeneratedAgentRole, ...]:
     """Translate installed Claude agent files into Codex role definitions."""
     result = translate_installed_agents_with_diagnostics(
@@ -125,7 +126,7 @@ def translate_installed_agents(
 def translate_installed_agents_with_diagnostics(
     plugins: Iterable[InstalledPlugin],
     *,
-    default_model: str = "gpt-5.3-codex",
+    default_model: str = DEFAULT_CODEX_MODEL,
 ) -> AgentTranslationResult:
     """Translate installed Claude agent files into Codex role definitions."""
     roles: list[GeneratedAgentRole] = []
