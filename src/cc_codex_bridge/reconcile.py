@@ -950,8 +950,13 @@ def _plan_global_instructions_changes(desired: DesiredState) -> tuple[Change, ..
         return (Change("create", path, resource_kind="global_instructions"),)
     if path.is_symlink():
         raise ReconcileError(f"Refusing to overwrite symlinked global instructions: {path}")
-    if path.read_bytes() == desired.global_instructions:
+    existing = path.read_bytes()
+    if existing == desired.global_instructions:
         return ()
+    if not _has_bridge_sentinel(existing):
+        raise ReconcileError(
+            f"Refusing to overwrite hand-authored global instructions: {path}"
+        )
     return (Change("update", path, resource_kind="global_instructions"),)
 
 
