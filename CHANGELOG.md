@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-03-16
+
 ### Fixed
 
 - Fixed `clean` using caller-supplied `--codex-home` instead of the state-recorded value, which could orphan global registry claims when the Codex home changed.
