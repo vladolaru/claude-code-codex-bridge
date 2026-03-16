@@ -521,11 +521,8 @@ def reconcile_all(
     codex_home_path = Path(codex_home or DEFAULT_CODEX_HOME).expanduser().resolve()
     registry_path = codex_home_path / GLOBAL_REGISTRY_FILENAME
 
-    registry = None
-    if registry_path.exists() and not registry_path.is_symlink():
-        registry = GlobalSkillRegistry.from_path(registry_path)
-
-    project_roots = list(registry.projects) if registry else []
+    snapshot = _load_registry_snapshot(registry_path)
+    project_roots = list(snapshot.registry.projects) if snapshot.existed else []
 
     results: list[ReconcileAllProjectResult] = []
     errors: list[ReconcileAllError] = []
@@ -580,14 +577,13 @@ def uninstall_all(
 
     # Step 1: Discover project roots from the registry
     project_roots: set[Path] = set()
-    if registry_path.exists() and not registry_path.is_symlink():
-        registry = GlobalSkillRegistry.from_path(registry_path)
-        if registry is not None:
-            project_roots.update(registry.projects)
-            # Also include skill owners for backwards compatibility with
-            # registries that predate the projects list
-            for entry in registry.skills.values():
-                project_roots.update(entry.owners)
+    snapshot = _load_registry_snapshot(registry_path)
+    if snapshot.existed:
+        project_roots.update(snapshot.registry.projects)
+        # Also include skill owners for backwards compatibility with
+        # registries that predate the projects list
+        for entry in snapshot.registry.skills.values():
+            project_roots.update(entry.owners)
 
     # Step 2: Clean each discovered project
     project_results: list[UninstallProjectResult] = []
@@ -630,10 +626,10 @@ def uninstall_all(
 
     # Force-remove any remaining skill directories still in the registry
     # (handles skills owned by skipped projects)
-    if registry_path.exists() and not registry_path.is_symlink():
-        registry = GlobalSkillRegistry.from_path(registry_path)
-        if registry is not None:
-            for install_dir_name in sorted(registry.skills):
+    if registry_path.exists():
+        post_clean_snapshot = _load_registry_snapshot(registry_path)
+        if post_clean_snapshot.existed:
+            for install_dir_name in sorted(post_clean_snapshot.registry.skills):
                 skill_path = codex_home_path / "skills" / install_dir_name
                 if skill_path.exists():
                     global_removals.append(

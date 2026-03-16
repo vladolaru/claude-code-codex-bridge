@@ -2012,6 +2012,34 @@ def test_reconcile_all_dry_run_no_side_effects(
     assert config.read_text() == "# tampered\n"
 
 
+def test_reconcile_all_rejects_symlinked_registry(tmp_path: Path):
+    """reconcile_all must fail on a symlinked global registry."""
+    from cc_codex_bridge.reconcile import reconcile_all
+
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    real_registry = tmp_path / "real-registry.json"
+    real_registry.write_text("{}")
+    (codex_home / "claude-code-bridge-global-state.json").symlink_to(real_registry)
+
+    with pytest.raises(ReconcileError, match="symlinked global skill registry"):
+        reconcile_all(codex_home=codex_home)
+
+
+def test_uninstall_rejects_symlinked_registry(tmp_path: Path):
+    """uninstall_all must fail on a symlinked global registry."""
+    from cc_codex_bridge.reconcile import uninstall_all
+
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    real_registry = tmp_path / "real-registry.json"
+    real_registry.write_text("{}")
+    (codex_home / "claude-code-bridge-global-state.json").symlink_to(real_registry)
+
+    with pytest.raises(ReconcileError, match="symlinked global skill registry"):
+        uninstall_all(codex_home=codex_home)
+
+
 def test_clean_removes_project_from_registry_projects_list(
     make_project,
     make_plugin_version,
