@@ -1490,6 +1490,41 @@ def test_reconcile_preserves_hand_authored_global_instructions(
     )
 
 
+def test_reconcile_refuses_to_overwrite_hand_authored_global_instructions(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Reconcile with user CLAUDE.md must not overwrite hand-authored ~/.codex/AGENTS.md."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "demo", "1.0.0",
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\ntools:\n  - Read\n---\n\nReview.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    claude_home = tmp_path / "claude-home"
+    claude_home.mkdir()
+    (claude_home / "CLAUDE.md").write_text("Bridge-sourced instructions.\n")
+
+    # Pre-existing hand-authored AGENTS.md (no sentinel)
+    codex_home.mkdir(parents=True, exist_ok=True)
+    hand_content = "Hand-authored global instructions.\n"
+    (codex_home / "AGENTS.md").write_text(hand_content)
+
+    desired = _build_desired(
+        project_root, cache_root, codex_home, claude_home=claude_home,
+    )
+
+    with pytest.raises(ReconcileError, match="hand-authored"):
+        reconcile_desired_state(desired)
+
+    # Hand-authored file must survive
+    assert (codex_home / "AGENTS.md").read_text() == hand_content
+
+
 # ---------------------------------------------------------------------------
 # clean_project tests
 # ---------------------------------------------------------------------------
