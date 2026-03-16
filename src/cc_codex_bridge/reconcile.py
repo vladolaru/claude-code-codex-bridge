@@ -178,7 +178,9 @@ def build_desired_state(
 
     global_instructions = None
     if discovery.user_claude_md is not None:
-        global_instructions = discovery.user_claude_md.encode()
+        global_instructions = (
+            discovery.user_claude_md + GLOBAL_INSTRUCTIONS_SENTINEL
+        ).encode()
 
     return DesiredState(
         project_root=project_root,
@@ -607,9 +609,13 @@ def uninstall_all(
                         Change("remove", skill_path, resource_kind="skill")
                     )
 
-    # Remove global AGENTS.md
+    # Remove global AGENTS.md only if bridge-generated (sentinel present)
     global_agents_md = codex_home_path / "AGENTS.md"
-    if global_agents_md.exists() and not global_agents_md.is_symlink():
+    if (
+        global_agents_md.exists()
+        and not global_agents_md.is_symlink()
+        and _has_bridge_sentinel(global_agents_md.read_bytes())
+    ):
         global_removals.append(
             Change("remove", global_agents_md, resource_kind="global_instructions")
         )
@@ -927,8 +933,8 @@ def _plan_global_instructions_changes(desired: DesiredState) -> tuple[Change, ..
     path = desired.codex_home / "AGENTS.md"
 
     if desired.global_instructions is None:
-        # Source is absent — remove the generated file if it exists
-        if path.exists() and not path.is_symlink():
+        # Source is absent — only remove if we created it (sentinel present)
+        if path.exists() and not path.is_symlink() and _has_bridge_sentinel(path.read_bytes()):
             return (Change("remove", path, resource_kind="global_instructions"),)
         return ()
 

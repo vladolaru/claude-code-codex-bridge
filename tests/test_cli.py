@@ -1078,7 +1078,8 @@ def test_uninstall_removes_global_agents_md(make_project, tmp_path: Path):
 
     # Simulate a prior reconcile that created global AGENTS.md
     codex_home.mkdir(parents=True, exist_ok=True)
-    (codex_home / "AGENTS.md").write_text("# Global instructions\n")
+    from cc_codex_bridge.reconcile import GLOBAL_INSTRUCTIONS_SENTINEL
+    (codex_home / "AGENTS.md").write_text("# Global instructions\n" + GLOBAL_INSTRUCTIONS_SENTINEL)
 
     exit_code = cli.main([
         "uninstall",

@@ -1222,8 +1222,9 @@ def test_reconcile_writes_user_claude_md_to_codex_agents_md(
     )
     report = reconcile_desired_state(desired)
 
+    from cc_codex_bridge.reconcile import GLOBAL_INSTRUCTIONS_SENTINEL
     assert report.applied is True
-    assert (codex_home / "AGENTS.md").read_text() == "Always use conventional commits.\n"
+    assert (codex_home / "AGENTS.md").read_text() == "Always use conventional commits.\n" + GLOBAL_INSTRUCTIONS_SENTINEL
 
 
 def test_reconcile_skips_codex_agents_md_when_no_user_claude_md(
@@ -1266,8 +1267,9 @@ def test_reconcile_updates_codex_agents_md_when_content_changes(
     desired = _build_desired(
         project_root, cache_root, codex_home, claude_home=claude_home
     )
+    from cc_codex_bridge.reconcile import GLOBAL_INSTRUCTIONS_SENTINEL
     reconcile_desired_state(desired)
-    assert (codex_home / "AGENTS.md").read_text() == "Version 1\n"
+    assert (codex_home / "AGENTS.md").read_text() == "Version 1\n" + GLOBAL_INSTRUCTIONS_SENTINEL
 
     (claude_home / "CLAUDE.md").write_text("Version 2\n")
     desired = _build_desired(
@@ -1279,7 +1281,7 @@ def test_reconcile_updates_codex_agents_md_when_content_changes(
         change.resource_kind == "global_instructions" and change.kind == "update"
         for change in report.changes
     )
-    assert (codex_home / "AGENTS.md").read_text() == "Version 2\n"
+    assert (codex_home / "AGENTS.md").read_text() == "Version 2\n" + GLOBAL_INSTRUCTIONS_SENTINEL
 
 
 def test_reconcile_no_change_when_global_instructions_match(
