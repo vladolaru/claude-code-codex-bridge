@@ -11,7 +11,7 @@ import pytest
 import cc_codex_bridge.reconcile as reconcile_module
 from cc_codex_bridge.claude_shim import plan_claude_shim
 from cc_codex_bridge.discover import discover
-from cc_codex_bridge.model import ReconcileError
+from cc_codex_bridge.model import ReconcileError, TranslationError
 from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
 from cc_codex_bridge.reconcile import (
     STATE_RELATIVE_PATH,
@@ -1485,6 +1485,45 @@ def test_build_project_desired_state_short_circuits_on_agent_diagnostics(
     assert len(build.diagnostics) == 1
     assert build.diagnostics[0].agent_name == "broken-agent"
     assert build.desired_state is None
+
+
+def test_build_project_rejects_cross_scope_agent_role_name_collision(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Cross-scope role name collisions are rejected during build.
+
+    A plugin agent from marketplace="user", plugin="plugin", agent="agent"
+    produces role_name "user_plugin_agent". A user standalone agent named
+    "plugin agent" also normalizes to "user_plugin_agent". The merged set
+    must be rejected.
+    """
+    from cc_codex_bridge.reconcile import build_project_desired_state
+
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "user", "plugin", "1.0.0",
+        agent_names=("agent",),
+    )
+    (version_dir / "agents" / "agent.md").write_text(
+        "---\nname: agent\ndescription: Plugin agent\n---\n\nPlugin prompt.\n"
+    )
+
+    claude_home = tmp_path / "claude-home"
+    agents_dir = claude_home / "agents"
+    agents_dir.mkdir(parents=True)
+    (agents_dir / "plugin-agent.md").write_text(
+        "---\nname: plugin agent\ndescription: User agent\n---\n\nUser prompt.\n"
+    )
+
+    with pytest.raises(TranslationError, match="Duplicate role name"):
+        build_project_desired_state(
+            project_root,
+            cache_dir=cache_root,
+            claude_home=claude_home,
+            codex_home=tmp_path / "codex-home",
+        )
 
 
 def test_reconcile_removes_stale_global_instructions(

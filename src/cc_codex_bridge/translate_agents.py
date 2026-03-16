@@ -31,6 +31,31 @@ PROMPT_COMPONENT_RE = re.compile(r"[^A-Za-z0-9-]+")
 DEFAULT_CODEX_MODEL = "gpt-5.3-codex"
 
 
+def validate_merged_roles(roles: tuple[GeneratedAgentRole, ...]) -> None:
+    """Validate uniqueness of role_name and prompt_relpath across all merged roles.
+
+    Call this after merging plugin, user, and project agent results.
+    Raises TranslationError on collision.
+    """
+    seen_names: dict[str, Path] = {}
+    seen_paths: dict[Path, Path] = {}
+
+    for role in roles:
+        if role.role_name in seen_names:
+            raise TranslationError(
+                f"Duplicate role name after merging all agent scopes: {role.role_name} "
+                f"(from {role.source_path}, previously from {seen_names[role.role_name]})"
+            )
+        seen_names[role.role_name] = role.source_path
+
+        if role.prompt_relpath in seen_paths:
+            raise TranslationError(
+                f"Duplicate prompt path after merging all agent scopes: {role.prompt_relpath} "
+                f"(from {role.source_path}, previously from {seen_paths[role.prompt_relpath]})"
+            )
+        seen_paths[role.prompt_relpath] = role.source_path
+
+
 def translate_standalone_agents(
     agent_paths: Iterable[Path],
     *,

@@ -238,6 +238,7 @@ def build_project_desired_state(
     from cc_codex_bridge.translate_agents import (
         translate_installed_agents_with_diagnostics,
         translate_standalone_agents,
+        validate_merged_roles,
     )
     from cc_codex_bridge.translate_skills import translate_installed_skills, translate_standalone_skills
 
@@ -283,6 +284,7 @@ def build_project_desired_state(
         )
 
     all_roles = (*agent_result.roles, *user_agent_result.roles, *project_agent_result.roles)
+    validate_merged_roles(all_roles)
     plugin_skills = translate_installed_skills(result.plugins)
     user_skills = translate_standalone_skills(result.user_skills, scope="user")
     all_global_skills = (*plugin_skills, *user_skills)

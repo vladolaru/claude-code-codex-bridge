@@ -12,7 +12,7 @@ from cc_codex_bridge.frontmatter import (
     parse_frontmatter_lines,
     parse_markdown_with_frontmatter,
 )
-from cc_codex_bridge.model import InstalledPlugin, SemVer, TranslationError
+from cc_codex_bridge.model import GeneratedAgentRole, InstalledPlugin, SemVer, TranslationError
 from cc_codex_bridge.render_codex_config import (
     render_inline_codex_config,
     render_prompt_files,
@@ -23,6 +23,7 @@ from cc_codex_bridge.translate_agents import (
     translate_tools,
     translate_installed_agents,
     translate_installed_agents_with_diagnostics,
+    validate_merged_roles,
 )
 
 def test_translate_installed_agents_generates_deterministic_roles(make_plugin_version):
@@ -587,3 +588,91 @@ def test_translate_standalone_agent_empty_input():
     result = translate_standalone_agents((), scope="user")
     assert result.roles == ()
     assert result.diagnostics == ()
+
+
+def test_validate_merged_roles_detects_cross_scope_role_name_collision():
+    """Cross-scope role name collisions are rejected after merging."""
+    role_a = GeneratedAgentRole(
+        plugin_name="plugin-a",
+        source_path=Path("/plugins/a/agents/agent.md"),
+        role_name="user_plugin_agent",
+        description="From plugin scope",
+        original_model_hint=None,
+        model="gpt-5.3-codex",
+        tools=(),
+        prompt_relpath=Path("prompts/agents/plugin-a-agent.md"),
+        prompt_body="Prompt A.\n",
+    )
+    role_b = GeneratedAgentRole(
+        plugin_name="_user",
+        source_path=Path("/home/.claude/agents/plugin-agent.md"),
+        role_name="user_plugin_agent",
+        description="From user scope",
+        original_model_hint=None,
+        model="gpt-5.3-codex",
+        tools=(),
+        prompt_relpath=Path("prompts/agents/user-plugin-agent.md"),
+        prompt_body="Prompt B.\n",
+    )
+
+    with pytest.raises(TranslationError, match="Duplicate role name"):
+        validate_merged_roles((role_a, role_b))
+
+
+def test_validate_merged_roles_detects_cross_scope_prompt_path_collision():
+    """Cross-scope prompt path collisions are rejected after merging."""
+    shared_path = Path("prompts/agents/shared-prompt.md")
+    role_a = GeneratedAgentRole(
+        plugin_name="plugin-a",
+        source_path=Path("/plugins/a/agents/agent.md"),
+        role_name="role_alpha",
+        description="First role",
+        original_model_hint=None,
+        model="gpt-5.3-codex",
+        tools=(),
+        prompt_relpath=shared_path,
+        prompt_body="Prompt A.\n",
+    )
+    role_b = GeneratedAgentRole(
+        plugin_name="_user",
+        source_path=Path("/home/.claude/agents/agent.md"),
+        role_name="role_beta",
+        description="Second role",
+        original_model_hint=None,
+        model="gpt-5.3-codex",
+        tools=(),
+        prompt_relpath=shared_path,
+        prompt_body="Prompt B.\n",
+    )
+
+    with pytest.raises(TranslationError, match="Duplicate prompt path"):
+        validate_merged_roles((role_a, role_b))
+
+
+def test_validate_merged_roles_accepts_unique_roles():
+    """Unique role names and prompt paths pass validation."""
+    role_a = GeneratedAgentRole(
+        plugin_name="plugin-a",
+        source_path=Path("/plugins/a/agents/agent.md"),
+        role_name="plugin_agent_alpha",
+        description="First role",
+        original_model_hint=None,
+        model="gpt-5.3-codex",
+        tools=(),
+        prompt_relpath=Path("prompts/agents/plugin-a-alpha.md"),
+        prompt_body="Prompt A.\n",
+    )
+    role_b = GeneratedAgentRole(
+        plugin_name="_user",
+        source_path=Path("/home/.claude/agents/beta.md"),
+        role_name="user_agent_beta",
+        description="Second role",
+        original_model_hint=None,
+        model="gpt-5.3-codex",
+        tools=(),
+        prompt_relpath=Path("prompts/agents/user-beta.md"),
+        prompt_body="Prompt B.\n",
+    )
+
+    # Should not raise
+    validate_merged_roles((role_a, role_b))
