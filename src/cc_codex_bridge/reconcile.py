@@ -667,7 +667,7 @@ def _apply_changes(desired: DesiredState, plan: _MutationPlan) -> None:
             elif change.kind == "remove":
                 change.path.unlink(missing_ok=True)
             continue
-        if change.resource_kind == "skill":
+        if change.resource_kind in ("skill", "project_skill"):
             if change.kind in ("create", "update"):
                 if change.path.exists():
                     shutil.rmtree(change.path)
@@ -808,12 +808,36 @@ def _compute_project_file_changes(
         *(_project_relative(desired, path) for path, _ in desired.project_files),
         *(_project_relative(desired, path) for path in desired.preserved_project_files),
     }
+
+    # Identify stale project skill directories — group individual file removals
+    # into directory-level removals (same pattern as clean_project).
+    stale_skill_dirs: set[Path] = set()
+    stale_non_skill_files: list[Path] = []
     for relative in sorted(managed_project_files - desired_project_paths):
         if relative == STATE_RELATIVE_PATH.as_posix():
             continue
+        parts = Path(relative).parts
+        if len(parts) >= 3 and parts[0] == ".codex" and parts[1] == "skills":
+            skill_dir = desired.project_root / parts[0] / parts[1] / parts[2]
+            # Only escalate if ALL tracked files from this skill dir are stale
+            # (i.e. no desired files land in this same skill dir)
+            skill_prefix = "/".join(parts[:3])
+            if not any(dp.startswith(skill_prefix + "/") or dp == skill_prefix for dp in desired_project_paths):
+                if skill_dir.exists() and not skill_dir.is_symlink():
+                    stale_skill_dirs.add(skill_dir)
+                    continue
         path = desired.project_root / relative
         if path.exists():
-            changes.append(Change("remove", path))
+            stale_non_skill_files.append(path)
+
+    for skill_dir in sorted(stale_skill_dirs):
+        changes.append(Change("remove", skill_dir, resource_kind="project_skill"))
+
+    for path in stale_non_skill_files:
+        # Skip files inside already-scheduled skill dir removals
+        if any(path == sd or _is_under(path, sd) for sd in stale_skill_dirs):
+            continue
+        changes.append(Change("remove", path))
 
     return tuple(changes)
 
