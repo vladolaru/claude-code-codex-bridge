@@ -726,6 +726,37 @@ def test_format_diff_report_handles_no_changes(make_project, make_plugin_version
     assert format_diff_report(desired, report) == "No changes."
 
 
+def test_format_diff_report_includes_global_instructions_diff(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """format_diff_report renders diffs for global instructions changes."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "demo", "1.0.0",
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\ntools:\n  - Read\n---\n\nReview.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    claude_home = tmp_path / "claude-home"
+    claude_home.mkdir()
+    (claude_home / "CLAUDE.md").write_text("Global instructions.\n")
+
+    desired = _build_desired(
+        project_root, cache_root, codex_home, claude_home=claude_home,
+    )
+    report = diff_desired_state(desired)
+
+    # Should not crash and should include a diff for global instructions
+    rendered = format_diff_report(desired, report)
+    assert "CREATE:" in rendered
+    global_path = str(codex_home / "AGENTS.md")
+    assert global_path in rendered
+
+
 def test_reconcile_does_not_modify_symlink_resolved_plugin_cache_or_source(
     make_project,
     tmp_path: Path,
