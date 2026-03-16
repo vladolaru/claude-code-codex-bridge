@@ -1258,6 +1258,39 @@ def test_reconcile_all_dry_run_json(
     assert isinstance(data["projects"], list)
 
 
+def test_reconcile_all_rejects_unused_flags():
+    """reconcile-all does not accept --project, --claude-home, or --cache-dir."""
+    with pytest.raises(SystemExit, match="2"):
+        cli.main(["reconcile-all", "--project", "/tmp/fake"])
+
+    with pytest.raises(SystemExit, match="2"):
+        cli.main(["reconcile-all", "--claude-home", "/tmp/fake"])
+
+    with pytest.raises(SystemExit, match="2"):
+        cli.main(["reconcile-all", "--cache-dir", "/tmp/fake"])
+
+
+def test_uninstall_rejects_unused_flags():
+    """uninstall does not accept --project, --claude-home, or --cache-dir."""
+    with pytest.raises(SystemExit, match="2"):
+        cli.main(["uninstall", "--project", "/tmp/fake"])
+
+    with pytest.raises(SystemExit, match="2"):
+        cli.main(["uninstall", "--claude-home", "/tmp/fake"])
+
+    with pytest.raises(SystemExit, match="2"):
+        cli.main(["uninstall", "--cache-dir", "/tmp/fake"])
+
+
+def test_clean_rejects_unused_flags():
+    """clean does not accept --claude-home or --cache-dir."""
+    with pytest.raises(SystemExit, match="2"):
+        cli.main(["clean", "--claude-home", "/tmp/fake"])
+
+    with pytest.raises(SystemExit, match="2"):
+        cli.main(["clean", "--cache-dir", "/tmp/fake"])
+
+
 def test_validate_works_without_plugins(make_project, tmp_path: Path, capsys):
     """Validate succeeds with no plugins when user-level sources exist."""
     project_root, _agents_md = make_project()
