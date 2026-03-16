@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-03-16
+
 ### Fixed
 
 - Cross-scope agent role_name and prompt_relpath collisions are now detected after merging all scopes, preventing silently corrupt output
