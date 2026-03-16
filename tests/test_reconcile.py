@@ -1422,6 +1422,41 @@ def test_reconcile_removes_stale_global_instructions(
     assert len(remove_changes) == 1
 
 
+def test_reconcile_preserves_hand_authored_global_instructions(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Hand-authored ~/.codex/AGENTS.md without sentinel is never removed."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "demo", "1.0.0",
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\ntools:\n  - Read\n---\n\nReview.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    claude_home = tmp_path / "claude-home"
+    claude_home.mkdir()
+
+    # Pre-existing hand-authored AGENTS.md (no sentinel)
+    codex_home.mkdir(parents=True, exist_ok=True)
+    (codex_home / "AGENTS.md").write_text("Hand-authored global instructions.\n")
+
+    # Reconcile WITHOUT user-level CLAUDE.md — should NOT remove hand-authored file
+    desired = _build_desired(
+        project_root, cache_root, codex_home, claude_home=claude_home,
+    )
+    report = reconcile_desired_state(desired)
+
+    assert (codex_home / "AGENTS.md").exists()
+    assert (codex_home / "AGENTS.md").read_text() == "Hand-authored global instructions.\n"
+    assert not any(
+        change.resource_kind == "global_instructions" for change in report.changes
+    )
+
+
 # ---------------------------------------------------------------------------
 # clean_project tests
 # ---------------------------------------------------------------------------
