@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Cross-scope agent role_name and prompt_relpath collisions are now detected after merging all scopes, preventing silently corrupt output
+- Installed agent translation now checks for duplicate prompt paths, consistent with standalone agent translation
+- Skill translation rejects symlinked files, symlinked subdirectories, and symlinked SKILL.md — not just symlinked resource directories
+- `reconcile-all` and `uninstall` now use the same strict registry loader as normal reconcile, failing on symlinked registries instead of silently skipping them
+- Malformed plugin cache entries (no valid semantic versions) are skipped instead of aborting all plugin discovery
+
 ## [0.7.0] - 2026-03-16
 
 ### Fixed

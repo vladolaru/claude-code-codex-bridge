@@ -192,7 +192,7 @@ The global registry records:
 - conflicting content for an existing generated skill directory is a hard error
 - generated skill directories are removed only when the global registry shows no remaining owners
 - all write targets must resolve within their expected root (`project_root` for project files, `codex_home` for global files) after symlink resolution — this catches symlinked ancestor directories that would redirect operations outside the expected tree
-- skill translation rejects symlinked resource directories and symlinked sibling references
+- skill translation rejects symlinked resource directories, symlinked files (including SKILL.md), and symlinked subdirectories within resource directories
 - project skills are tracked as managed directory names and compared using exact directory-snapshot matching, consistent with global skills
 - project files are written atomically via temp-file-then-rename to avoid partial reads
 - if a write fails mid-apply, the next idempotent reconcile run self-heals
@@ -218,7 +218,7 @@ Discovery lives in `src/cc_codex_bridge/discover.py`.
 - structure is expected as `<cache>/<marketplace>/<plugin>/<version>/`
 - only directories with valid semantic-version names are considered plugin versions
 - malformed version directories are ignored
-- if a plugin has no valid semantic versions, discovery fails
+- malformed plugin directories with no valid semantic-version subdirectories are skipped during discovery; the `doctor` command reports these
 - an empty or missing plugin cache returns an empty tuple (non-fatal) when other sources exist
 
 ### User-level discovery
@@ -300,6 +300,10 @@ Current tool translation table:
 
 Unsupported Claude tools are hard diagnostics. They invalidate agent generation for that run instead of being silently dropped.
 
+Installed-agent translation checks for duplicate `prompt_relpath` values as well as duplicate `role_name` values, consistent with standalone agent translation.
+
+After merging all scopes (plugin, user, project), `validate_merged_roles()` checks uniqueness of both `role_name` and `prompt_relpath` across the full merged set. Per-scope checks provide early detection with better error messages; the post-merge check is the global invariant that prevents cross-scope collisions from producing silently corrupt output.
+
 Frontmatter parsing is shared through `src/cc_codex_bridge/frontmatter.py`.
 
 The parser extracts only frontmatter blocks and parses them with PyYAML's safe
@@ -352,8 +356,7 @@ Current skill rules:
 - `SKILL.md` frontmatter must include `name`
 - generated `SKILL.md` has its `name:` rewritten to match the generated install directory name
 - skill trees are materialized as complete directory snapshots
-- symlinked resource directories (`scripts/`, `references/`, etc.) are rejected during translation
-- symlinked sibling skill references are rejected during translation
+- symlinked resource directories, symlinked files (including `SKILL.md`), and symlinked subdirectories within resource directories are all rejected during translation — no symlinks anywhere in copied skill content
 
 Current relocation behavior:
 
