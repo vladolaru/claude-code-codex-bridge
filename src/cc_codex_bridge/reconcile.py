@@ -722,6 +722,8 @@ def format_diff_report(desired: DesiredState, report: ReconcileReport) -> str:
     for change in report.changes:
         if change.kind not in {"create", "update"}:
             continue
+        if change.resource_kind == "skill":
+            continue
         if change.path.suffix not in {".md", ".toml", ".json"}:
             continue
         existing_text = (
@@ -729,7 +731,13 @@ def format_diff_report(desired: DesiredState, report: ReconcileReport) -> str:
             if change.path.exists()
             else ""
         )
-        desired_text = desired_map[change.path].decode()
+        if change.resource_kind == "global_instructions":
+            desired_content = desired.global_instructions
+        else:
+            desired_content = desired_map.get(change.path)
+        if desired_content is None:
+            continue
+        desired_text = desired_content.decode()
         diff = difflib.unified_diff(
             existing_text.splitlines(),
             desired_text.splitlines(),
