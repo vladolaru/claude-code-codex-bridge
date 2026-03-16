@@ -221,8 +221,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override the LaunchAgent log directory.",
     )
 
-    subparsers.add_parser("print-launchagent", parents=[common, launchagent_common])
-    install_parser = subparsers.add_parser("install-launchagent", parents=[common, launchagent_common])
+    subparsers.add_parser("print-launchagent", parents=[launchagent_common])
+    install_parser = subparsers.add_parser("install-launchagent", parents=[launchagent_common])
     install_parser.add_argument(
         "--launchagents-dir",
         type=Path,

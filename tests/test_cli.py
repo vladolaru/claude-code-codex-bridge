@@ -138,6 +138,14 @@ def test_print_launchagent_cli_produces_global_plist(capsys: pytest.CaptureFixtu
     assert "reconcile-all" in payload["ProgramArguments"]
 
 
+def test_print_launchagent_rejects_pipeline_flags():
+    """LaunchAgent commands should not accept pipeline-only flags."""
+    # --project is a pipeline flag, not a LaunchAgent flag
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["print-launchagent", "--project", "/tmp/fake"])
+    assert exc_info.value.code != 0
+
+
 def test_reconcile_dry_run_with_diff_flag_reports_file_diff(
     make_project, make_plugin_version, tmp_path: Path, capsys
 ):
