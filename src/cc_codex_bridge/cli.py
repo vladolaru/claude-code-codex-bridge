@@ -72,7 +72,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         description="Generate Codex bridge artifacts from installed Claude Code plugins.",
-        parents=[common],
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -89,13 +88,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_parser = subparsers.add_parser("validate", parents=[common])
     status_parser = subparsers.add_parser("status", parents=[common])
-    clean_parser = subparsers.add_parser("clean", parents=[common])
+    clean_parser = subparsers.add_parser("clean")
+    clean_parser.add_argument(
+        "--project",
+        type=Path,
+        help="Project path to resolve instead of the current working directory.",
+    )
+    clean_parser.add_argument(
+        "--codex-home",
+        type=Path,
+        help="Override the Codex home path (mainly for testing).",
+    )
     clean_parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Preview what would be removed without deleting anything.",
     )
-    uninstall_parser = subparsers.add_parser("uninstall", parents=[common])
+    uninstall_parser = subparsers.add_parser("uninstall")
+    uninstall_parser.add_argument(
+        "--codex-home",
+        type=Path,
+        help="Override the Codex home path (mainly for testing).",
+    )
     uninstall_parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -111,7 +125,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Override the LaunchAgents directory to scan.",
     )
-    reconcile_all_parser = subparsers.add_parser("reconcile-all", parents=[common])
+    reconcile_all_parser = subparsers.add_parser("reconcile-all")
+    reconcile_all_parser.add_argument(
+        "--codex-home",
+        type=Path,
+        help="Override the Codex home path (mainly for testing).",
+    )
     reconcile_all_parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -123,7 +142,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit structured JSON output.",
     )
 
-    doctor_parser = subparsers.add_parser("doctor", parents=[common])
+    doctor_parser = subparsers.add_parser("doctor")
+    doctor_parser.add_argument(
+        "--claude-home",
+        type=Path,
+        help="Override the Claude home path (~/.claude) for discovery.",
+    )
+    doctor_parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        help="Override the Claude plugin cache path (mainly for testing).",
+    )
+    doctor_parser.add_argument(
+        "--codex-home",
+        type=Path,
+        help="Override the Codex home path (mainly for testing).",
+    )
     doctor_parser.add_argument(
         "--json",
         action="store_true",
