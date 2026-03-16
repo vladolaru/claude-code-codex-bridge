@@ -132,6 +132,7 @@ def translate_installed_agents_with_diagnostics(
     roles: list[GeneratedAgentRole] = []
     diagnostics: list[AgentTranslationDiagnostic] = []
     seen_role_names: set[str] = set()
+    seen_prompt_paths: set[Path] = set()
 
     for plugin in plugins:
         for agent_path in plugin.agents:
@@ -171,6 +172,15 @@ def translate_installed_agents_with_diagnostics(
             plugin_pc = _normalize_prompt_component(plugin.plugin_name, kind="plugin name")
             agent_pc = _normalize_prompt_component(agent_name, kind="agent name")
             prompt_stem = f"{marketplace_pc}-{plugin_pc}-{agent_pc}"
+            prompt_relpath = Path("prompts") / "agents" / f"{prompt_stem}.md"
+
+            if prompt_relpath in seen_prompt_paths:
+                raise TranslationError(
+                    f"Generated duplicate prompt path: {prompt_relpath} "
+                    f"(from plugin '{plugin.plugin_name}' agent '{agent_name}' "
+                    f"at {agent_path})"
+                )
+            seen_prompt_paths.add(prompt_relpath)
 
             roles.append(
                 GeneratedAgentRole(
@@ -181,7 +191,7 @@ def translate_installed_agents_with_diagnostics(
                     original_model_hint=_optional_str(parsed_frontmatter.get("model")),
                     model=default_model,
                     tools=translated_tools,
-                    prompt_relpath=Path("prompts") / "agents" / f"{prompt_stem}.md",
+                    prompt_relpath=prompt_relpath,
                     prompt_body=body.strip() + ("\n" if body.strip() else ""),
                 )
             )

@@ -533,6 +533,55 @@ def test_translate_standalone_agents_rejects_duplicate_normalized_role_names(tmp
         translate_standalone_agents((a, b), scope="user")
 
 
+def test_translate_installed_agents_detects_duplicate_prompt_paths(make_plugin_version):
+    """Prompt-path collisions across plugins are rejected even when role names differ.
+
+    Plugin "a-b" with agent "c" and plugin "a" with agent "b-c" produce
+    distinct role names (market_a-b_c vs market_a_b_c) but identical
+    prompt path components (market-a-b-c.md), which would silently
+    overwrite one prompt file.
+    """
+    cache_root, first_dir = make_plugin_version(
+        "market", "a-b", "1.0.0", agent_names=("c",)
+    )
+    first_agent = first_dir / "agents" / "c.md"
+    first_agent.write_text(
+        "---\nname: c\ndescription: First\n---\n\nPrompt.\n"
+    )
+
+    _, second_dir = make_plugin_version(
+        "market", "a", "1.0.0", agent_names=("b-c",)
+    )
+    second_agent = second_dir / "agents" / "b-c.md"
+    second_agent.write_text(
+        "---\nname: b-c\ndescription: Second\n---\n\nPrompt.\n"
+    )
+
+    first_plugin = InstalledPlugin(
+        marketplace="market",
+        plugin_name="a-b",
+        version_text="1.0.0",
+        version=SemVer.parse("1.0.0"),
+        installed_path=first_dir,
+        source_path=first_dir,
+        skills=(),
+        agents=(first_agent,),
+    )
+    second_plugin = InstalledPlugin(
+        marketplace="market",
+        plugin_name="a",
+        version_text="1.0.0",
+        version=SemVer.parse("1.0.0"),
+        installed_path=second_dir,
+        source_path=second_dir,
+        skills=(),
+        agents=(second_agent,),
+    )
+
+    with pytest.raises(TranslationError, match="duplicate prompt path"):
+        translate_installed_agents((first_plugin, second_plugin))
+
+
 def test_translate_standalone_agent_empty_input():
     """Empty agent paths produce empty result."""
     result = translate_standalone_agents((), scope="user")
