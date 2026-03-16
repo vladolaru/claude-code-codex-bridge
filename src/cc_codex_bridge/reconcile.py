@@ -30,6 +30,13 @@ STATE_RELATIVE_PATH = Path(".codex") / "claude-code-bridge-state.json"
 CONFIG_RELATIVE_PATH = Path(".codex") / "config.toml"
 PROMPTS_RELATIVE_ROOT = Path(".codex") / "prompts" / "agents"
 
+GLOBAL_INSTRUCTIONS_SENTINEL = "\n<!-- managed by cc-codex-bridge -->\n"
+
+
+def _has_bridge_sentinel(content: bytes) -> bool:
+    """Return True if content contains the bridge ownership sentinel."""
+    return GLOBAL_INSTRUCTIONS_SENTINEL.encode() in content
+
 
 @dataclass(frozen=True)
 class DesiredState:
