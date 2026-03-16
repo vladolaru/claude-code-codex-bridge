@@ -968,6 +968,38 @@ def test_clean_no_state_exits_zero(make_project, tmp_path: Path):
     assert exit_code == 0
 
 
+def test_clean_succeeds_when_agents_md_missing(make_project, make_plugin_version, tmp_path: Path):
+    """clean succeeds using bridge state even when AGENTS.md has been removed."""
+    project_root, agents_md = make_project()
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0",
+        skill_names=("review",), agent_names=("checker",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    # Reconcile to create artifacts
+    exit_code = cli.main([
+        "reconcile",
+        "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+    assert (project_root / ".codex" / "config.toml").exists()
+
+    # Remove AGENTS.md to simulate a partially broken project
+    agents_md.unlink()
+
+    # Clean should still work using bridge state
+    exit_code = cli.main([
+        "clean",
+        "--project", str(project_root),
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+    assert not (project_root / ".codex" / "config.toml").exists()
+
+
 def test_uninstall_command_succeeds(make_project, make_plugin_version, tmp_path: Path):
     """uninstall removes all bridge artifacts from all discovered projects."""
     project_a, _ = make_project("project-a")
