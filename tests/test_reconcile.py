@@ -23,8 +23,9 @@ from cc_codex_bridge.reconcile import (
     reconcile_desired_state,
 )
 from cc_codex_bridge.render_codex_config import render_inline_codex_config, render_prompt_files
+from cc_codex_bridge.discover import discover_project_skills
 from cc_codex_bridge.translate_agents import translate_installed_agents
-from cc_codex_bridge.translate_skills import translate_installed_skills
+from cc_codex_bridge.translate_skills import translate_installed_skills, translate_standalone_skills
 
 
 def test_reconcile_writes_project_and_codex_outputs(
@@ -1566,6 +1567,43 @@ def test_reconcile_refuses_to_overwrite_hand_authored_global_instructions(
     assert (codex_home / "AGENTS.md").read_text() == hand_content
 
 
+def test_reconcile_removes_stale_project_skill_directory(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """When a project skill source disappears, reconcile removes the project skill directory."""
+    import shutil as _shutil
+
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "tools", "1.0.0")
+    codex_home = tmp_path / "codex-home"
+
+    # Create a project-level skill under .claude/skills/helper/
+    project_skill_dir = project_root / ".claude" / "skills" / "helper"
+    project_skill_dir.mkdir(parents=True)
+    (project_skill_dir / "SKILL.md").write_text(
+        "---\nname: helper\ndescription: Help\n---\n\nHelp text.\n"
+    )
+
+    desired = _build_desired_with_project_skills(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    installed_skill_dir = project_root / ".codex" / "skills" / "helper"
+    assert installed_skill_dir.exists()
+
+    # Simulate an untracked file inside the installed skill directory
+    (installed_skill_dir / "notes.txt").write_text("user notes")
+
+    # Remove the skill source and reconcile again
+    _shutil.rmtree(project_skill_dir)
+    desired2 = _build_desired_with_project_skills(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired2)
+
+    # The project-local skill directory should be fully removed (including untracked files)
+    assert not installed_skill_dir.exists()
+
+
 # ---------------------------------------------------------------------------
 # clean_project tests
 # ---------------------------------------------------------------------------
@@ -2068,6 +2106,43 @@ def _build_desired(
         rendered_config,
         skills,
         codex_home=codex_home,
+    )
+
+
+def _build_desired_with_project_skills(
+    project_root: Path,
+    cache_root: Path,
+    codex_home: Path,
+    *,
+    claude_home: Path | None = None,
+):
+    """Build desired state including project-level skills."""
+    discovery = discover(
+        project_path=project_root,
+        cache_dir=cache_root,
+        claude_home=claude_home,
+    )
+    shim_decision = plan_claude_shim(discovery.project)
+    roles = translate_installed_agents(discovery.plugins)
+    skills = translate_installed_skills(discovery.plugins)
+    prompt_files = render_prompt_files(roles)
+    rendered_config = render_inline_codex_config(roles)
+
+    project_skills = translate_standalone_skills(discovery.project_skills, scope="project")
+    extra_project_files: list[tuple[Path, bytes]] = []
+    for gen_skill in project_skills:
+        for f in gen_skill.files:
+            rel = Path(".codex") / "skills" / gen_skill.install_dir_name / f.relative_path
+            extra_project_files.append((rel, f.content))
+
+    return build_desired_state(
+        discovery,
+        shim_decision,
+        prompt_files,
+        rendered_config,
+        skills,
+        codex_home=codex_home,
+        extra_project_files=extra_project_files,
     )
 
 
