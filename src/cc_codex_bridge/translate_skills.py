@@ -139,6 +139,10 @@ def translate_standalone_skills(
 
 def _read_required_skill_name(skill_md_path: Path) -> str:
     """Read the canonical skill name from SKILL.md frontmatter."""
+    if skill_md_path.is_symlink():
+        raise TranslationError(
+            f"Refusing to follow symlinked SKILL.md: {skill_md_path}"
+        )
     parsed_frontmatter, _ = frontmatter.parse_markdown_with_frontmatter(skill_md_path)
     skill_name = str(parsed_frontmatter.get("name", "")).strip()
     if not skill_name:
@@ -156,6 +160,10 @@ def _build_generated_skill(
     _copy_skill_tree(raw_skill.skill_path, Path(), generated_files)
 
     skill_md_path = raw_skill.skill_path / "SKILL.md"
+    if skill_md_path.is_symlink():
+        raise TranslationError(
+            f"Refusing to follow symlinked SKILL.md: {skill_md_path}"
+        )
     skill_content = read_utf8_text(skill_md_path, label="skill file", error_type=TranslationError)
     rewritten, referenced_sources = _resolve_relative_references(
         raw_skill.skill_path, skill_content,
@@ -268,6 +276,11 @@ def _copy_tree(
 ) -> None:
     """Copy a directory tree into the generated file mapping."""
     for path in sorted(source_root.rglob("*")):
+        if path.is_symlink():
+            kind = "directory" if path.is_dir() else "file"
+            raise TranslationError(
+                f"Refusing to follow symlinked {kind}: {path}"
+            )
         if path.is_dir():
             continue
         if _should_ignore(path):
@@ -288,6 +301,10 @@ def _copy_skill_tree(
             continue
 
         if entry.is_file():
+            if entry.is_symlink():
+                raise TranslationError(
+                    f"Refusing to follow symlinked file: {entry}"
+                )
             generated_files[target_prefix / entry.name] = (
                 entry.read_bytes(),
                 entry.stat().st_mode & 0o777,

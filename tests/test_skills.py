@@ -423,6 +423,124 @@ def test_skill_translation_rejects_symlinked_resource_directory(tmp_path):
         translate_installed_skills((plugin,))
 
 
+def test_skill_translation_rejects_symlinked_file_in_resource_dir(tmp_path):
+    """Skill translation must not follow symlinked files inside resource directories."""
+    from cc_codex_bridge.translate_skills import translate_installed_skills
+    from cc_codex_bridge.model import InstalledPlugin, SemVer, TranslationError
+
+    cache_root = tmp_path / "cache"
+    version_dir = cache_root / "market" / "tools" / "1.0.0"
+    skill_dir = version_dir / "skills" / "review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: review\ndescription: test\n---\nBody\n")
+
+    references_dir = skill_dir / "references"
+    references_dir.mkdir()
+    (references_dir / "legit.md").write_text("Real content.\n")
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.md").write_text("Leaked content.\n")
+    (references_dir / "sneaky.md").symlink_to(outside / "secret.md")
+
+    plugin = InstalledPlugin(
+        marketplace="market",
+        plugin_name="tools",
+        version_text="1.0.0",
+        version=SemVer(1, 0, 0),
+        installed_path=version_dir,
+        source_path=version_dir,
+        skills=(skill_dir,),
+        agents=(),
+    )
+
+    with pytest.raises(TranslationError, match="symlinked file"):
+        translate_installed_skills((plugin,))
+
+
+def test_skill_translation_rejects_symlinked_subdir_in_resource_dir(tmp_path):
+    """Skill translation must not follow symlinked subdirectories inside resource directories."""
+    from cc_codex_bridge.translate_skills import translate_installed_skills
+    from cc_codex_bridge.model import InstalledPlugin, SemVer, TranslationError
+
+    cache_root = tmp_path / "cache"
+    version_dir = cache_root / "market" / "tools" / "1.0.0"
+    skill_dir = version_dir / "skills" / "review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: review\ndescription: test\n---\nBody\n")
+
+    references_dir = skill_dir / "references"
+    references_dir.mkdir()
+    (references_dir / "legit.md").write_text("Real content.\n")
+
+    outside = tmp_path / "outside_subdir"
+    outside.mkdir()
+    (outside / "leaked.md").write_text("Leaked content.\n")
+    (references_dir / "sneaky-dir").symlink_to(outside)
+
+    plugin = InstalledPlugin(
+        marketplace="market",
+        plugin_name="tools",
+        version_text="1.0.0",
+        version=SemVer(1, 0, 0),
+        installed_path=version_dir,
+        source_path=version_dir,
+        skills=(skill_dir,),
+        agents=(),
+    )
+
+    with pytest.raises(TranslationError, match="symlinked"):
+        translate_installed_skills((plugin,))
+
+
+def test_skill_translation_rejects_symlinked_top_level_file(tmp_path):
+    """Skill translation must not follow symlinked top-level files in the skill root."""
+    from cc_codex_bridge.translate_skills import translate_installed_skills
+    from cc_codex_bridge.model import InstalledPlugin, SemVer, TranslationError
+
+    cache_root = tmp_path / "cache"
+    version_dir = cache_root / "market" / "tools" / "1.0.0"
+    skill_dir = version_dir / "skills" / "review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: review\ndescription: test\n---\nBody\n")
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "extra.txt").write_text("Leaked content.\n")
+    (skill_dir / "extra.txt").symlink_to(outside / "extra.txt")
+
+    plugin = InstalledPlugin(
+        marketplace="market",
+        plugin_name="tools",
+        version_text="1.0.0",
+        version=SemVer(1, 0, 0),
+        installed_path=version_dir,
+        source_path=version_dir,
+        skills=(skill_dir,),
+        agents=(),
+    )
+
+    with pytest.raises(TranslationError, match="symlinked file"):
+        translate_installed_skills((plugin,))
+
+
+def test_skill_translation_rejects_symlinked_skill_md(tmp_path):
+    """Skill translation must not follow a symlinked SKILL.md."""
+    from cc_codex_bridge.translate_skills import translate_standalone_skills
+    from cc_codex_bridge.model import TranslationError
+
+    skill_dir = tmp_path / "skills" / "my-tool"
+    skill_dir.mkdir(parents=True)
+
+    real_skill = tmp_path / "elsewhere" / "SKILL.md"
+    real_skill.parent.mkdir(parents=True)
+    real_skill.write_text("---\nname: my-tool\ndescription: A tool\n---\n\nLeaked.\n")
+    (skill_dir / "SKILL.md").symlink_to(real_skill)
+
+    with pytest.raises(TranslationError, match="symlinked"):
+        translate_standalone_skills((skill_dir,), scope="user")
+
+
 def test_translate_standalone_skill_empty_input():
     """Empty skill paths produce empty result."""
     result = translate_standalone_skills((), scope="user")
