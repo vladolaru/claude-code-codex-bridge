@@ -616,6 +616,37 @@ def test_reconcile_rejects_unexpected_managed_project_files_in_state(
     assert agents_md.exists()
 
 
+def test_reconcile_rejects_unexpected_managed_project_skill_dirs_in_state(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Corrupted state may not authorize touching arbitrary project skill directories."""
+    project_root, _agents_md = make_project()
+    cache_root, _version_dir = make_plugin_version("market", "prompt-engineer", "1.0.0")
+    state_path = project_root / STATE_RELATIVE_PATH
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "version": 4,
+                "project_root": str(project_root),
+                "codex_home": str(tmp_path / "codex-home"),
+                "managed_project_files": [STATE_RELATIVE_PATH.as_posix()],
+                "managed_project_skill_dirs": ["../../../bridge-victim-test"],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+    desired = _build_desired(project_root, cache_root, tmp_path / "codex-home")
+
+    with pytest.raises(ReconcileError, match="unexpected managed project skill directories"):
+        diff_desired_state(desired)
+
+
 def test_reconcile_rejects_foreign_project_state(
     make_project,
     make_plugin_version,
@@ -2135,6 +2166,25 @@ def test_reconcile_rejects_symlinked_codex_ancestor(
         reconcile_desired_state(desired)
 
 
+def test_diff_rejects_symlinked_codex_ancestor(
+    make_project, make_plugin_version, tmp_path,
+):
+    """Dry-run planning must fail when reconcile write targets resolve outside the project."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "tools", "1.0.0", skill_names=("review",))
+    codex_home = tmp_path / "codex_home"
+    codex_home.mkdir()
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (project_root / ".codex").symlink_to(outside)
+
+    desired = _build_desired(project_root, cache_root, codex_home)
+
+    with pytest.raises(ReconcileError, match="resolves outside"):
+        diff_desired_state(desired)
+
+
 def test_clean_rejects_symlinked_codex_ancestor(make_project, tmp_path):
     """clean must refuse to operate through a symlinked .codex directory."""
     from cc_codex_bridge.reconcile import clean_project
@@ -2162,6 +2212,29 @@ def test_clean_rejects_symlinked_codex_ancestor(make_project, tmp_path):
     (project_root / ".codex").symlink_to(outside)
 
     with pytest.raises(ReconcileError, match="resolves outside"):
+        clean_project(project_root, codex_home=codex_home)
+
+
+def test_clean_rejects_unexpected_managed_project_skill_dirs_in_state(make_project, tmp_path: Path):
+    """clean must reject corrupted managed project skill directory names from state."""
+    from cc_codex_bridge.reconcile import clean_project
+    from cc_codex_bridge.state import BridgeState
+
+    project_root, _ = make_project()
+    codex_home = tmp_path / "codex_home"
+    codex_home.mkdir()
+
+    state_path = project_root / STATE_RELATIVE_PATH
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state = BridgeState(
+        project_root=project_root.resolve(),
+        codex_home=codex_home.resolve(),
+        managed_project_files=(STATE_RELATIVE_PATH.as_posix(),),
+        managed_project_skill_dirs=("../../../bridge-victim-test",),
+    )
+    state_path.write_text(state.to_json())
+
+    with pytest.raises(ReconcileError, match="unexpected managed project skill directories"):
         clean_project(project_root, codex_home=codex_home)
 
 

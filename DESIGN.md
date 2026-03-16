@@ -177,8 +177,10 @@ The global registry records:
 
 - project files are never overwritten unless they were previously recorded as managed
 - the state file may only authorize generator-owned project paths: `CLAUDE.md`, `.codex/config.toml`, `.codex/claude-code-bridge-state.json`, and `.codex/prompts/agents/*` (project skill directories are tracked separately via `managed_project_skill_dirs`)
+- state-tracked project skill directories must be plain generated directory names; traversal, absolute paths, and nested paths are rejected as corrupted state
 - generated project-relative paths are normalized and may not use absolute paths or `..` traversal
 - corrupted or unexpected managed project paths in state are treated as a hard error
+- `status` and `reconcile --dry-run` validate the same planned write targets as mutating reconcile, so preview mode fails when apply would fail on containment checks
 - state is rejected if it belongs to a different project root than the current reconcile target
 - malformed state payload field types are treated as a hard error
 - malformed state path fields are treated as a hard error

@@ -112,6 +112,7 @@ class _RegistryWrite:
 
     destination: Path
     content: bytes
+    container: Path
 
 
 @dataclass(frozen=True)
@@ -313,10 +314,17 @@ def diff_desired_state(desired: DesiredState) -> ReconcileReport:
     """Compare current outputs to desired state without writing."""
     previous_state = _load_previous_state(desired)
     plan = _plan_mutations(desired, previous_state)
+    state_write_needed = _state_write_needed(desired)
+    _validate_mutation_targets(
+        desired,
+        previous_state,
+        plan,
+        state_write_needed=state_write_needed,
+    )
     changes = list(plan.changes)
 
     # Report state file mutations that reconcile would perform
-    if _state_write_needed(desired):
+    if state_write_needed:
         kind = "create" if not desired.state_path.exists() else "update"
         changes.append(Change(kind, desired.state_path, resource_kind="state"))
 
@@ -327,7 +335,14 @@ def reconcile_desired_state(desired: DesiredState) -> ReconcileReport:
     """Apply the desired state to disk."""
     previous_state = _load_previous_state(desired)
     plan = _plan_mutations(desired, previous_state)
-    if not plan.changes and not plan.registry_writes and not _state_write_needed(desired):
+    state_write_needed = _state_write_needed(desired)
+    _validate_mutation_targets(
+        desired,
+        previous_state,
+        plan,
+        state_write_needed=state_write_needed,
+    )
+    if not plan.changes and not plan.registry_writes and not state_write_needed:
         return ReconcileReport(changes=(), applied=True)
 
     _apply_changes(desired, plan)
@@ -370,8 +385,9 @@ def clean_project(
     changes: list[Change] = []
 
     # Remove managed project skill directories
+    managed_project_skill_dirs = _validated_managed_project_skill_dirs(previous_state)
     skill_dirs_to_remove: list[Path] = []
-    for skill_dir_name in sorted(previous_state.managed_project_skill_dirs):
+    for skill_dir_name in sorted(managed_project_skill_dirs):
         skill_dir = project_root_path / SKILLS_RELATIVE_ROOT / skill_dir_name
         if skill_dir.exists() and not skill_dir.is_symlink():
             skill_dirs_to_remove.append(skill_dir)
@@ -456,7 +472,11 @@ def clean_project(
 
     # Update the registry
     if registry_changed and updated_registry is not None:
-        _atomic_write_file(registry_path, updated_registry.to_json().encode())
+        _atomic_write_file(
+            registry_path,
+            updated_registry.to_json().encode(),
+            container=codex_home_path,
+        )
 
     # Remove the state file last
     state_path.unlink(missing_ok=True)
@@ -705,7 +725,11 @@ def _apply_changes(desired: DesiredState, plan: _MutationPlan) -> None:
                 _cleanup_empty_parents(change.path.parent, desired.project_root / ".codex")
 
     for registry_write in plan.registry_writes:
-        _atomic_write_file(registry_write.destination, registry_write.content)
+        _atomic_write_file(
+            registry_write.destination,
+            registry_write.content,
+            container=registry_write.container,
+        )
 
     state_bytes = _build_state_record(desired).to_json().encode()
     _atomic_write_file(desired.state_path, state_bytes, container=desired.project_root)
@@ -725,6 +749,28 @@ def _assert_path_contained(path: Path, root: Path, *, label: str) -> None:
         raise ReconcileError(
             f"{label} resolves outside expected root: {resolved} is not under {root_resolved}"
         )
+
+
+def _assert_path_contained_in_roots(
+    path: Path,
+    roots: Iterable[Path],
+    *,
+    label: str,
+) -> None:
+    """Assert that the resolved path stays within at least one resolved root."""
+    resolved = path.resolve()
+    resolved_roots = tuple(dict.fromkeys(root.resolve() for root in roots))
+    for root_resolved in resolved_roots:
+        try:
+            resolved.relative_to(root_resolved)
+            return
+        except ValueError:
+            continue
+
+    formatted_roots = ", ".join(str(root) for root in resolved_roots)
+    raise ReconcileError(
+        f"{label} resolves outside expected roots: {resolved} is not under any of {formatted_roots}"
+    )
 
 
 def _atomic_write_file(path: Path, content: bytes, *, container: Path | None = None) -> None:
@@ -812,7 +858,11 @@ def _plan_project_skill_mutations(
 ) -> tuple[Change, ...]:
     """Plan project-local skill directory mutations using directory-snapshot comparison."""
     desired_skills = {skill.install_dir_name: skill for skill in desired.project_skills}
-    previously_managed = set(previous_state.managed_project_skill_dirs) if previous_state else set()
+    previously_managed = (
+        _validated_managed_project_skill_dirs(previous_state)
+        if previous_state
+        else set()
+    )
     changes: list[Change] = []
 
     for install_dir_name in sorted(desired_skills):
@@ -1063,6 +1113,7 @@ def _build_registry_write(
     return _RegistryWrite(
         destination=snapshot.path,
         content=updated_registry.to_json().encode(),
+        container=snapshot.path.parent,
     )
 
 
@@ -1128,6 +1179,39 @@ def _load_previous_state(desired: DesiredState) -> BridgeState | None:
     return BridgeState.from_path(desired.state_path)
 
 
+def _validate_mutation_targets(
+    desired: DesiredState,
+    previous_state: BridgeState | None,
+    plan: _MutationPlan,
+    *,
+    state_write_needed: bool,
+) -> None:
+    """Reject plans whose write or delete targets escape managed roots."""
+    allowed_global_roots = [desired.codex_home]
+    if previous_state is not None and previous_state.codex_home != desired.codex_home:
+        allowed_global_roots.append(previous_state.codex_home)
+
+    for change in plan.changes:
+        if change.resource_kind in {"skill", "global_instructions"}:
+            _assert_path_contained_in_roots(
+                change.path,
+                allowed_global_roots,
+                label="Managed global target",
+            )
+            continue
+        _assert_path_contained(change.path, desired.project_root, label="Managed project target")
+
+    for registry_write in plan.registry_writes:
+        _assert_path_contained(
+            registry_write.destination,
+            registry_write.container,
+            label="Registry write target",
+        )
+
+    if state_write_needed:
+        _assert_path_contained(desired.state_path, desired.project_root, label="Write target")
+
+
 def _load_registry_snapshot(path: Path) -> _RegistrySnapshot:
     """Load one global registry only from a regular file at the expected path."""
     if path.is_symlink():
@@ -1177,7 +1261,13 @@ def _build_state_record(desired: DesiredState) -> BridgeState:
     }
     managed_project_files = tuple(sorted(managed_project_paths))
     managed_project_skill_dirs = tuple(
-        sorted(skill.install_dir_name for skill in desired.project_skills)
+        sorted(
+            _normalize_dir_name(
+                skill.install_dir_name,
+                label="managed project skill directory",
+            )
+            for skill in desired.project_skills
+        )
     )
     return BridgeState(
         project_root=desired.project_root,
@@ -1218,6 +1308,35 @@ def _is_allowed_managed_project_relative(relative: str) -> bool:
     return False
 
 
+def _validated_managed_project_skill_dirs(previous_state: BridgeState) -> set[str]:
+    """Return validated managed project skill directory names from bridge state."""
+    managed_project_skill_dirs = set(previous_state.managed_project_skill_dirs)
+    invalid_managed_skill_dirs = sorted(
+        skill_dir_name
+        for skill_dir_name in managed_project_skill_dirs
+        if not _is_allowed_managed_project_skill_dir_name(skill_dir_name)
+    )
+    if invalid_managed_skill_dirs:
+        raise ReconcileError(
+            "Interop state contains unexpected managed project skill directories: "
+            + ", ".join(invalid_managed_skill_dirs)
+        )
+    return managed_project_skill_dirs
+
+
+def _is_allowed_managed_project_skill_dir_name(skill_dir_name: str) -> bool:
+    """Return True for valid state-tracked project skill directory names."""
+    try:
+        _normalize_dir_name(
+            skill_dir_name,
+            label="managed project skill directory",
+        )
+    except ReconcileError:
+        return False
+
+    return True
+
+
 def _resolve_managed_project_path(project_root: Path, relative_path: Path) -> Path:
     """Resolve and validate one generated project-relative output path."""
     normalized = _normalize_relative_path(relative_path, label="managed project output")
@@ -1243,3 +1362,19 @@ def _normalize_relative_path(path: Path, *, label: str) -> Path:
     return Path(*normalized_parts)
 
 
+def _normalize_dir_name(value: str, *, label: str) -> str:
+    """Normalize one generated directory name and reject traversal or separators."""
+    candidate = value
+    if not candidate.strip():
+        raise ReconcileError(f"{label.capitalize()} may not be empty: {value}")
+
+    normalized = Path(candidate)
+    if (
+        normalized.is_absolute()
+        or candidate != normalized.name
+        or candidate != candidate.strip()
+        or candidate in {".", ".."}
+    ):
+        raise ReconcileError(f"{label.capitalize()} must be a plain directory name: {value}")
+
+    return candidate

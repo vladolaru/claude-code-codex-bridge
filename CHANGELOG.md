@@ -11,6 +11,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Reconcile and clean now validate that all write/delete targets resolve within their
   expected root directory, preventing symlinked ancestors from redirecting operations
   outside the project.
+- `status` and `reconcile --dry-run` now fail with the same path-containment errors as
+  real reconcile when managed write targets resolve outside the project.
+- Corrupted bridge state can no longer authorize arbitrary project-skill directory
+  removals; managed project skill directory names are now validated before planning and
+  cleanup.
 - Skill translation rejects symlinked resource directories and sibling references
   instead of following them.
 - `status` and `reconcile --dry-run` now report bridge state file mutations (create/update)
