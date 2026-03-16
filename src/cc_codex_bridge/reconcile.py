@@ -313,7 +313,14 @@ def diff_desired_state(desired: DesiredState) -> ReconcileReport:
     """Compare current outputs to desired state without writing."""
     previous_state = _load_previous_state(desired)
     plan = _plan_mutations(desired, previous_state)
-    return ReconcileReport(changes=plan.changes, applied=False)
+    changes = list(plan.changes)
+
+    # Report state file mutations that reconcile would perform
+    if _state_write_needed(desired):
+        kind = "create" if not desired.state_path.exists() else "update"
+        changes.append(Change(kind, desired.state_path, resource_kind="state"))
+
+    return ReconcileReport(changes=tuple(changes), applied=False)
 
 
 def reconcile_desired_state(desired: DesiredState) -> ReconcileReport:

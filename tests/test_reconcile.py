@@ -1604,6 +1604,31 @@ def test_reconcile_removes_stale_project_skill_directory(
     assert not installed_skill_dir.exists()
 
 
+def test_diff_reports_state_file_repair(
+    make_project, make_plugin_version, tmp_path,
+):
+    """diff must report when the state file needs to be created or updated."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "tools", "1.0.0", skill_names=("review",))
+    codex_home = tmp_path / "codex_home"
+    codex_home.mkdir()
+
+    desired = _build_desired(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    # Delete the state file — all managed files are still correct
+    desired.state_path.unlink()
+
+    desired2 = _build_desired(project_root, cache_root, codex_home)
+    report = diff_desired_state(desired2)
+
+    # Should report state file needs creation, not "no changes"
+    assert len(report.changes) > 0
+    state_changes = [c for c in report.changes if c.path == desired2.state_path]
+    assert len(state_changes) == 1
+    assert state_changes[0].kind == "create"
+
+
 def test_diff_detects_extra_file_in_project_skill_directory(
     make_project, make_plugin_version, tmp_path,
 ):
