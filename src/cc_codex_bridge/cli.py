@@ -665,7 +665,7 @@ def _build_status_payload(
     else:
         rendered_diagnostics = []
         for change in report.changes:
-            category = "skills" if change.resource_kind == "skill" else "project_files"
+            category = "skills" if change.resource_kind in ("skill", "project_skill") else "project_files"
             categorized_changes[category][change.kind].append(str(change.path))
         pending_change_count = len(report.changes)
         status = "in_sync" if not report.changes else "pending_changes"

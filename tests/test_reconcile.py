@@ -598,7 +598,7 @@ def test_reconcile_rejects_unexpected_managed_project_files_in_state(
     state_path.write_text(
         json.dumps(
             {
-                "version": 3,
+                "version": 4,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
                 "managed_project_files": ["AGENTS.md", ".claude/settings.local.json"],
@@ -637,7 +637,7 @@ def test_reconcile_rejects_foreign_project_state(
     state_path.write_text(
         json.dumps(
             {
-                "version": 3,
+                "version": 4,
                 "project_root": str(tmp_path / "different-project"),
                 "codex_home": str(tmp_path / "codex-home"),
                 "managed_project_files": [STATE_RELATIVE_PATH.as_posix()],
@@ -1170,7 +1170,7 @@ def test_reconcile_rejects_traversal_paths_in_corrupted_state(
     state_path.write_text(
         json.dumps(
             {
-                "version": 3,
+                "version": 4,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
                 "managed_project_files": ["..", STATE_RELATIVE_PATH.as_posix()],
@@ -1228,7 +1228,7 @@ def test_reconcile_rejects_absolute_paths_in_corrupted_state(
     state_path.write_text(
         json.dumps(
             {
-                "version": 3,
+                "version": 4,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
                 "managed_project_files": ["/etc/passwd", STATE_RELATIVE_PATH.as_posix()],
@@ -1258,7 +1258,7 @@ def test_reconcile_rejects_empty_paths_in_corrupted_state(
     state_path.write_text(
         json.dumps(
             {
-                "version": 3,
+                "version": 4,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
                 "managed_project_files": [".", STATE_RELATIVE_PATH.as_posix()],
@@ -1602,6 +1602,35 @@ def test_reconcile_removes_stale_project_skill_directory(
 
     # The project-local skill directory should be fully removed (including untracked files)
     assert not installed_skill_dir.exists()
+
+
+def test_diff_detects_extra_file_in_project_skill_directory(
+    make_project, make_plugin_version, tmp_path,
+):
+    """An extra file added to a managed project skill directory must trigger an update."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "tools", "1.0.0")
+    codex_home = tmp_path / "codex_home"
+    codex_home.mkdir()
+
+    # Create a project-level skill
+    skill_dir = project_root / ".claude" / "skills" / "helper"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: helper\ndescription: test\n---\nBody\n")
+
+    desired = _build_desired_with_project_skills(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    # Add an extra file that the bridge didn't generate
+    installed_skill = project_root / ".codex" / "skills" / "helper"
+    (installed_skill / "junk.txt").write_text("unexpected")
+
+    desired2 = _build_desired_with_project_skills(project_root, cache_root, codex_home)
+    report = diff_desired_state(desired2)
+
+    skill_changes = [c for c in report.changes if c.resource_kind == "project_skill"]
+    assert len(skill_changes) == 1
+    assert skill_changes[0].kind == "update"
 
 
 # ---------------------------------------------------------------------------
@@ -2022,8 +2051,8 @@ def test_clean_removes_full_project_skill_directory(make_project, tmp_path: Path
         codex_home=codex.resolve(),
         managed_project_files=(
             STATE_RELATIVE_PATH.as_posix(),
-            ".codex/skills/demo/SKILL.md",
         ),
+        managed_project_skill_dirs=("demo",),
     )
     state_path = project_root / STATE_RELATIVE_PATH
     state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2180,11 +2209,6 @@ def _build_desired_with_project_skills(
     rendered_config = render_inline_codex_config(roles)
 
     project_skills = translate_standalone_skills(discovery.project_skills, scope="project")
-    extra_project_files: list[tuple[Path, bytes]] = []
-    for gen_skill in project_skills:
-        for f in gen_skill.files:
-            rel = Path(".codex") / "skills" / gen_skill.install_dir_name / f.relative_path
-            extra_project_files.append((rel, f.content))
 
     return build_desired_state(
         discovery,
@@ -2193,7 +2217,7 @@ def _build_desired_with_project_skills(
         rendered_config,
         skills,
         codex_home=codex_home,
-        extra_project_files=extra_project_files,
+        project_skills=project_skills,
     )
 
 

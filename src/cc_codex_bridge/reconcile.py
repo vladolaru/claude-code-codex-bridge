@@ -49,6 +49,7 @@ class DesiredState:
     skills: tuple[GeneratedSkill, ...]
     state_path: Path
     global_instructions: bytes | None = None
+    project_skills: tuple[GeneratedSkill, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -130,6 +131,7 @@ def build_desired_state(
     *,
     codex_home: str | Path | None = None,
     extra_project_files: Iterable[tuple[Path, bytes]] | None = None,
+    project_skills: Iterable[GeneratedSkill] | None = None,
 ) -> DesiredState:
     """Build the desired generated outputs for a project."""
     if shim_decision.action == "fail":
@@ -190,6 +192,7 @@ def build_desired_state(
         skills=skills_tuple,
         state_path=project_root / STATE_RELATIVE_PATH,
         global_instructions=global_instructions,
+        project_skills=tuple(project_skills or ()),
     )
 
 
@@ -283,11 +286,6 @@ def build_project_desired_state(
     user_skills = translate_standalone_skills(result.user_skills, scope="user")
     all_global_skills = (*plugin_skills, *user_skills)
     project_skills = translate_standalone_skills(result.project_skills, scope="project")
-    extra_project_files: list[tuple[Path, bytes]] = []
-    for gen_skill in project_skills:
-        for f in gen_skill.files:
-            rel = Path(".codex") / "skills" / gen_skill.install_dir_name / f.relative_path
-            extra_project_files.append((rel, f.content))
 
     prompt_files = render_prompt_files(all_roles)
     rendered_config = render_inline_codex_config(all_roles)
@@ -295,7 +293,7 @@ def build_project_desired_state(
     desired_state = build_desired_state(
         result, shim_decision, prompt_files, rendered_config,
         all_global_skills, codex_home=codex_home,
-        extra_project_files=extra_project_files,
+        project_skills=project_skills,
     )
 
     return ProjectBuildResult(
@@ -364,25 +362,17 @@ def clean_project(
 
     changes: list[Change] = []
 
-    # Identify project-local skill directories from managed file paths.
-    # Skill files live under .codex/skills/<name>/... — group by skill dir
-    # so we can remove the full directory instead of individual files.
-    skill_dirs_to_remove: set[Path] = set()
-    for relative in sorted(previous_state.managed_project_files):
-        parts = Path(relative).parts
-        if len(parts) >= 3 and parts[0] == ".codex" and parts[1] == "skills":
-            skill_dir = project_root_path / parts[0] / parts[1] / parts[2]
-            if skill_dir.exists() and not skill_dir.is_symlink():
-                skill_dirs_to_remove.add(skill_dir)
+    # Remove managed project skill directories
+    skill_dirs_to_remove: list[Path] = []
+    for skill_dir_name in sorted(previous_state.managed_project_skill_dirs):
+        skill_dir = project_root_path / SKILLS_RELATIVE_ROOT / skill_dir_name
+        if skill_dir.exists() and not skill_dir.is_symlink():
+            skill_dirs_to_remove.append(skill_dir)
+            changes.append(Change("remove", skill_dir, resource_kind="project_skill"))
 
-    # Remove managed project files — skill dirs are handled as directory
-    # removals instead of individual file deletions.
-    for skill_dir in sorted(skill_dirs_to_remove):
-        changes.append(Change("remove", skill_dir, resource_kind="project_skill"))
-
+    # Remove managed project files (excluding those inside skill dirs)
     for relative in sorted(previous_state.managed_project_files):
         path = project_root_path / relative
-        # Skip files that fall inside an already-scheduled skill dir removal
         if any(path == sd or _is_under(path, sd) for sd in skill_dirs_to_remove):
             continue
         if path.exists() and not path.is_symlink():
@@ -671,6 +661,7 @@ def _apply_changes(desired: DesiredState, plan: _MutationPlan) -> None:
     """Write all planned changes to disk."""
     desired_map = dict(desired.project_files)
     skills_by_name = {skill.install_dir_name: skill for skill in desired.skills}
+    project_skills_by_name = {skill.install_dir_name: skill for skill in desired.project_skills}
 
     for change in plan.changes:
         if change.resource_kind == "global_instructions":
@@ -679,16 +670,26 @@ def _apply_changes(desired: DesiredState, plan: _MutationPlan) -> None:
             elif change.kind == "remove":
                 change.path.unlink(missing_ok=True)
             continue
-        if change.resource_kind in ("skill", "project_skill"):
-            skill_container = desired.codex_home if change.resource_kind == "skill" else desired.project_root
+        if change.resource_kind == "skill":
             if change.kind in ("create", "update"):
                 if change.path.exists():
                     shutil.rmtree(change.path)
                 change.path.mkdir(parents=True, exist_ok=True)
-                _write_skill_tree(change.path, skills_by_name[change.path.name], container=skill_container)
+                _write_skill_tree(change.path, skills_by_name[change.path.name], container=desired.codex_home)
             elif change.kind == "remove":
                 if change.path.exists():
                     shutil.rmtree(change.path)
+            continue
+        if change.resource_kind == "project_skill":
+            if change.kind in ("create", "update"):
+                if change.path.exists():
+                    shutil.rmtree(change.path)
+                change.path.mkdir(parents=True, exist_ok=True)
+                _write_skill_tree(change.path, project_skills_by_name[change.path.name], container=desired.project_root)
+            elif change.kind == "remove":
+                if change.path.exists():
+                    shutil.rmtree(change.path)
+            continue
         else:
             if change.kind in ("create", "update"):
                 _atomic_write_file(change.path, desired_map[change.path], container=desired.project_root)
@@ -789,12 +790,59 @@ def _plan_mutations(
 ) -> _MutationPlan:
     """Plan file, skill, and registry mutations for one reconcile run."""
     project_changes = _compute_project_file_changes(desired, previous_state)
+    project_skill_changes = _plan_project_skill_mutations(desired, previous_state)
     skill_changes, registry_writes = _plan_skill_mutations(desired, previous_state)
     global_changes = _plan_global_instructions_changes(desired)
     return _MutationPlan(
-        changes=tuple((*project_changes, *skill_changes, *global_changes)),
+        changes=tuple((*project_changes, *project_skill_changes, *skill_changes, *global_changes)),
         registry_writes=registry_writes,
     )
+
+
+def _plan_project_skill_mutations(
+    desired: DesiredState,
+    previous_state: BridgeState | None,
+) -> tuple[Change, ...]:
+    """Plan project-local skill directory mutations using directory-snapshot comparison."""
+    desired_skills = {skill.install_dir_name: skill for skill in desired.project_skills}
+    previously_managed = set(previous_state.managed_project_skill_dirs) if previous_state else set()
+    changes: list[Change] = []
+
+    for install_dir_name in sorted(desired_skills):
+        skill = desired_skills[install_dir_name]
+        destination = desired.project_root / SKILLS_RELATIVE_ROOT / install_dir_name
+
+        if destination.exists() and not destination.is_dir():
+            raise ReconcileError(
+                f"Expected a project skill directory but found a file: {destination}"
+            )
+
+        if not destination.exists():
+            changes.append(Change("create", destination, resource_kind="project_skill"))
+            continue
+
+        if destination.is_symlink():
+            raise ReconcileError(
+                f"Refusing to overwrite symlinked project skill directory: {destination}"
+            )
+
+        if _directory_matches_skill(destination, skill):
+            continue
+
+        # Directory exists but doesn't match — only update if we own it
+        if install_dir_name not in previously_managed:
+            raise ReconcileError(
+                f"Refusing to overwrite non-generated project skill directory: {destination}"
+            )
+        changes.append(Change("update", destination, resource_kind="project_skill"))
+
+    # Detect stale project skill directories
+    for install_dir_name in sorted(previously_managed - set(desired_skills)):
+        stale_path = desired.project_root / SKILLS_RELATIVE_ROOT / install_dir_name
+        if stale_path.exists() and not stale_path.is_symlink():
+            changes.append(Change("remove", stale_path, resource_kind="project_skill"))
+
+    return tuple(changes)
 
 
 def _compute_project_file_changes(
@@ -840,35 +888,12 @@ def _compute_project_file_changes(
         *(_project_relative(desired, path) for path in desired.preserved_project_files),
     }
 
-    # Identify stale project skill directories — group individual file removals
-    # into directory-level removals (same pattern as clean_project).
-    stale_skill_dirs: set[Path] = set()
-    stale_non_skill_files: list[Path] = []
     for relative in sorted(managed_project_files - desired_project_paths):
         if relative == STATE_RELATIVE_PATH.as_posix():
             continue
-        parts = Path(relative).parts
-        if len(parts) >= 3 and parts[0] == ".codex" and parts[1] == "skills":
-            skill_dir = desired.project_root / parts[0] / parts[1] / parts[2]
-            # Only escalate if ALL tracked files from this skill dir are stale
-            # (i.e. no desired files land in this same skill dir)
-            skill_prefix = "/".join(parts[:3])
-            if not any(dp.startswith(skill_prefix + "/") or dp == skill_prefix for dp in desired_project_paths):
-                if skill_dir.exists() and not skill_dir.is_symlink():
-                    stale_skill_dirs.add(skill_dir)
-                    continue
         path = desired.project_root / relative
         if path.exists():
-            stale_non_skill_files.append(path)
-
-    for skill_dir in sorted(stale_skill_dirs):
-        changes.append(Change("remove", skill_dir, resource_kind="project_skill"))
-
-    for path in stale_non_skill_files:
-        # Skip files inside already-scheduled skill dir removals
-        if any(path == sd or _is_under(path, sd) for sd in stale_skill_dirs):
-            continue
-        changes.append(Change("remove", path))
+            changes.append(Change("remove", path))
 
     return tuple(changes)
 
@@ -1144,10 +1169,14 @@ def _build_state_record(desired: DesiredState) -> BridgeState:
         STATE_RELATIVE_PATH.as_posix(),
     }
     managed_project_files = tuple(sorted(managed_project_paths))
+    managed_project_skill_dirs = tuple(
+        sorted(skill.install_dir_name for skill in desired.project_skills)
+    )
     return BridgeState(
         project_root=desired.project_root,
         codex_home=desired.codex_home,
         managed_project_files=managed_project_files,
+        managed_project_skill_dirs=managed_project_skill_dirs,
     )
 
 
@@ -1177,11 +1206,6 @@ def _is_allowed_managed_project_relative(relative: str) -> bool:
         return True
 
     if normalized.parent == PROMPTS_RELATIVE_ROOT and normalized.suffix == ".md":
-        return True
-
-    # Allow project-level skill files under .codex/skills/
-    parts = normalized.parts
-    if len(parts) >= 3 and parts[0] == ".codex" and parts[1] == "skills":
         return True
 
     return False

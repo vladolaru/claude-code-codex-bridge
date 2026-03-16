@@ -25,7 +25,7 @@ def test_bridge_state_round_trips(tmp_path: Path):
     loaded = BridgeState.from_path(path)
 
     assert loaded == state
-    assert json.loads(state.to_json())["version"] == 3
+    assert json.loads(state.to_json())["version"] == 4
 
 
 def test_bridge_state_handles_missing_invalid_and_unsupported_files(tmp_path: Path):
@@ -58,7 +58,7 @@ def test_bridge_state_rejects_invalid_schema_shapes(tmp_path: Path):
     invalid.write_text(
         json.dumps(
             {
-                "version": 3,
+                "version": 4,
                 "project_root": 1,
                 "codex_home": str(tmp_path / "codex-home"),
                 "managed_project_files": [123],
@@ -76,7 +76,7 @@ def test_bridge_state_rejects_non_absolute_paths(tmp_path: Path):
     invalid_paths.write_text(
         json.dumps(
             {
-                "version": 3,
+                "version": 4,
                 "project_root": "relative/project",
                 "codex_home": str(tmp_path / "codex-home"),
                 "managed_project_files": [],
@@ -86,6 +86,21 @@ def test_bridge_state_rejects_non_absolute_paths(tmp_path: Path):
 
     with pytest.raises(ReconcileError, match="Invalid bridge state file"):
         BridgeState.from_path(invalid_paths)
+
+
+def test_bridge_state_round_trips_with_project_skill_dirs(tmp_path):
+    """BridgeState v4 with managed_project_skill_dirs round-trips correctly."""
+    state = BridgeState(
+        project_root=tmp_path / "project",
+        codex_home=tmp_path / "codex",
+        managed_project_files=(".codex/config.toml",),
+        managed_project_skill_dirs=("helper", "review"),
+    )
+    path = tmp_path / "state.json"
+    path.write_text(state.to_json())
+    loaded = BridgeState.from_path(path)
+    assert loaded == state
+    assert loaded.managed_project_skill_dirs == ("helper", "review")
 
 
 def test_global_skill_registry_round_trips(tmp_path: Path):
