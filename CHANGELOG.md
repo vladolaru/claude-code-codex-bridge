@@ -17,6 +17,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Fixed `reconcile-all`, `uninstall`, `clean`, and `doctor` silently accepting CLI flags they ignore (`--project`, `--claude-home`, `--cache-dir`); each command now declares only the flags it uses.
 - Fixed standalone agents with names that normalize to the same role silently colliding instead of failing fast.
 - Fixed `doctor` reporting the plugin cache as healthy when plugins had no valid semver versions that discovery would reject.
+- Fixed reconcile silently overwriting hand-authored `~/.codex/AGENTS.md` when `~/.claude/CLAUDE.md` exists with different content; now raises an error when the existing file lacks the bridge sentinel.
+- Fixed codex-home migration silently dropping the projects list from the previous registry, breaking `reconcile-all` and `uninstall` discovery for other registered projects.
+- Fixed stale project-local skill directories persisting after their source was removed; reconcile now escalates to directory-level removal when all tracked files from a skill directory are stale.
+- Fixed `clean` command failing when `AGENTS.md` was missing from a project that still had bridge state; now falls back to bridge state for project root resolution.
 
 ### Changed
 
