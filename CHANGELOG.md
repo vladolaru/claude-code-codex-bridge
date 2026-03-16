@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Reconcile and clean now validate that all write/delete targets resolve within their
+  expected root directory, preventing symlinked ancestors from redirecting operations
+  outside the project.
+- Skill translation rejects symlinked resource directories and sibling references
+  instead of following them.
+- `status` and `reconcile --dry-run` now report bridge state file mutations (create/update)
+  that a real reconcile would perform.
+
+### Changed
+
+- Project skills now use directory-snapshot comparison matching global skills — extra files
+  in managed project skill directories are detected and trigger updates.
+- Bridge state version bumped to 4 with new `managed_project_skill_dirs` field.
+- `print-launchagent` and `install-launchagent` no longer accept `--project`,
+  `--cache-dir`, `--claude-home`, or `--codex-home` flags.
+
 ## [0.6.1] - 2026-03-16
 
 ### Fixed
