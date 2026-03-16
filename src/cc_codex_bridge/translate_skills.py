@@ -216,6 +216,12 @@ def _resolve_relative_references(
             raise TranslationError(
                 f"Skill references missing sibling `{ref_name}`: {skill_dir / 'SKILL.md'}"
             )
+        # Guard: referenced sibling must not be a symlink
+        raw_path = skill_dir / ".." / ref_name
+        if raw_path.is_symlink():
+            raise TranslationError(
+                f"Refusing to follow symlinked sibling reference `{ref_name}`: {skill_dir / 'SKILL.md'}"
+            )
         if ref_name in existing_dirs:
             raise TranslationError(
                 f"Referenced sibling `{ref_name}` collides with an existing directory in skill: {skill_dir / 'SKILL.md'}"
@@ -289,6 +295,10 @@ def _copy_skill_tree(
             continue
 
         if entry.is_dir() and entry.name in OPTIONAL_SKILL_DIRS:
+            if entry.is_symlink():
+                raise TranslationError(
+                    f"Refusing to follow symlinked resource directory: {entry}"
+                )
             _copy_tree(entry, target_prefix / entry.name, generated_files)
 
 

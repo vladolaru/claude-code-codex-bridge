@@ -391,6 +391,38 @@ def test_translate_standalone_skill_with_sibling_reference(tmp_path: Path):
     assert guide.content == b"Guide content.\n"
 
 
+def test_skill_translation_rejects_symlinked_resource_directory(tmp_path):
+    """Skill translation must not follow symlinked resource directories."""
+    from cc_codex_bridge.translate_skills import translate_installed_skills
+    from cc_codex_bridge.model import InstalledPlugin, SemVer, TranslationError
+
+    # Create a skill with a symlinked scripts/ directory
+    cache_root = tmp_path / "cache"
+    version_dir = cache_root / "market" / "tools" / "1.0.0"
+    skill_dir = version_dir / "skills" / "review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: review\ndescription: test\n---\nBody\n")
+
+    outside = tmp_path / "outside_scripts"
+    outside.mkdir()
+    (outside / "run.sh").write_text("#!/bin/bash\necho hi\n")
+    (skill_dir / "scripts").symlink_to(outside)
+
+    plugin = InstalledPlugin(
+        marketplace="market",
+        plugin_name="tools",
+        version_text="1.0.0",
+        version=SemVer(1, 0, 0),
+        installed_path=version_dir,
+        source_path=version_dir,
+        skills=(skill_dir,),
+        agents=(),
+    )
+
+    with pytest.raises(TranslationError, match="symlink"):
+        translate_installed_skills((plugin,))
+
+
 def test_translate_standalone_skill_empty_input():
     """Empty skill paths produce empty result."""
     result = translate_standalone_skills((), scope="user")

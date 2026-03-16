@@ -346,6 +346,8 @@ def clean_project(
 
     if state_path.is_symlink():
         raise ReconcileError(f"Refusing to use symlinked bridge state file: {state_path}")
+    # Verify state file resolves within the project root (catches symlinked ancestors)
+    _assert_path_contained(state_path, project_root_path, label="Bridge state file")
     previous_state = BridgeState.from_path(state_path)
     if previous_state is None:
         return ReconcileReport(changes=(), applied=True)
@@ -430,6 +432,16 @@ def clean_project(
             )
     else:
         updated_registry = None
+
+    # Verify project-local clean targets resolve within project_root
+    for change in changes:
+        if change.path == state_path:
+            continue
+        if change.resource_kind == "skill":
+            # Global skills live under codex_home, not project_root
+            _assert_path_contained(change.path, codex_home_path, label="Clean target")
+        else:
+            _assert_path_contained(change.path, project_root_path, label="Clean target")
 
     if dry_run:
         return ReconcileReport(changes=tuple(changes), applied=False)
@@ -663,22 +675,23 @@ def _apply_changes(desired: DesiredState, plan: _MutationPlan) -> None:
     for change in plan.changes:
         if change.resource_kind == "global_instructions":
             if change.kind in ("create", "update"):
-                _atomic_write_file(change.path, desired.global_instructions)
+                _atomic_write_file(change.path, desired.global_instructions, container=desired.codex_home)
             elif change.kind == "remove":
                 change.path.unlink(missing_ok=True)
             continue
         if change.resource_kind in ("skill", "project_skill"):
+            skill_container = desired.codex_home if change.resource_kind == "skill" else desired.project_root
             if change.kind in ("create", "update"):
                 if change.path.exists():
                     shutil.rmtree(change.path)
                 change.path.mkdir(parents=True, exist_ok=True)
-                _write_skill_tree(change.path, skills_by_name[change.path.name])
+                _write_skill_tree(change.path, skills_by_name[change.path.name], container=skill_container)
             elif change.kind == "remove":
                 if change.path.exists():
                     shutil.rmtree(change.path)
         else:
             if change.kind in ("create", "update"):
-                _atomic_write_file(change.path, desired_map[change.path])
+                _atomic_write_file(change.path, desired_map[change.path], container=desired.project_root)
             elif change.kind == "remove":
                 change.path.unlink(missing_ok=True)
                 _cleanup_empty_parents(change.path.parent, desired.project_root / ".codex")
@@ -687,11 +700,29 @@ def _apply_changes(desired: DesiredState, plan: _MutationPlan) -> None:
         _atomic_write_file(registry_write.destination, registry_write.content)
 
     state_bytes = _build_state_record(desired).to_json().encode()
-    _atomic_write_file(desired.state_path, state_bytes)
+    _atomic_write_file(desired.state_path, state_bytes, container=desired.project_root)
 
 
-def _atomic_write_file(path: Path, content: bytes) -> None:
+def _assert_path_contained(path: Path, root: Path, *, label: str) -> None:
+    """Assert that the resolved path stays within the resolved root.
+
+    Catches symlinked intermediate directories (e.g. .codex -> /tmp/outside)
+    that would cause reads or writes to escape the expected directory tree.
+    """
+    resolved = path.resolve()
+    root_resolved = root.resolve()
+    try:
+        resolved.relative_to(root_resolved)
+    except ValueError:
+        raise ReconcileError(
+            f"{label} resolves outside expected root: {resolved} is not under {root_resolved}"
+        )
+
+
+def _atomic_write_file(path: Path, content: bytes, *, container: Path | None = None) -> None:
     """Write a file atomically via temp-file-then-rename."""
+    if container is not None:
+        _assert_path_contained(path, container, label="Write target")
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.parent / f".bridge-{uuid4().hex}"
     try:
@@ -1026,8 +1057,10 @@ def _ensure_project_in_list(
     return tuple(sorted((*projects, project_root), key=str))
 
 
-def _write_skill_tree(destination: Path, skill: GeneratedSkill) -> None:
+def _write_skill_tree(destination: Path, skill: GeneratedSkill, *, container: Path | None = None) -> None:
     """Write one staged skill directory tree."""
+    if container is not None:
+        _assert_path_contained(destination, container, label="Skill directory")
     for generated_file in skill.files:
         file_path = destination / generated_file.relative_path
         file_path.parent.mkdir(parents=True, exist_ok=True)

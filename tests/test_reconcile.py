@@ -2060,6 +2060,57 @@ def test_reconcile_registers_project_in_global_registry(
     assert str(project_root) in registry_data.get("projects", [])
 
 
+def test_reconcile_rejects_symlinked_codex_ancestor(
+    make_project, make_plugin_version, tmp_path,
+):
+    """Reconcile must refuse to write through a symlinked .codex directory."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "tools", "1.0.0", skill_names=("review",))
+    codex_home = tmp_path / "codex_home"
+    codex_home.mkdir()
+
+    # Create a .codex symlink pointing outside the project
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    codex_dir = project_root / ".codex"
+    codex_dir.symlink_to(outside)
+
+    desired = _build_desired(project_root, cache_root, codex_home)
+
+    with pytest.raises(ReconcileError, match="resolves outside"):
+        reconcile_desired_state(desired)
+
+
+def test_clean_rejects_symlinked_codex_ancestor(make_project, tmp_path):
+    """clean must refuse to operate through a symlinked .codex directory."""
+    from cc_codex_bridge.reconcile import clean_project
+    from cc_codex_bridge.state import BridgeState
+
+    project_root, _ = make_project()
+    codex_home = tmp_path / "codex_home"
+    codex_home.mkdir()
+
+    # Set up a valid state file first (before the symlink)
+    state_path = project_root / ".codex" / "claude-code-bridge-state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state = BridgeState(
+        project_root=project_root,
+        codex_home=codex_home,
+        managed_project_files=(".codex/config.toml", ".codex/claude-code-bridge-state.json"),
+    )
+    state_path.write_text(state.to_json())
+
+    # Now replace .codex with a symlink
+    import shutil
+    outside = tmp_path / "outside"
+    shutil.copytree(project_root / ".codex", outside)
+    shutil.rmtree(project_root / ".codex")
+    (project_root / ".codex").symlink_to(outside)
+
+    with pytest.raises(ReconcileError, match="resolves outside"):
+        clean_project(project_root, codex_home=codex_home)
+
+
 def _reconcile_once(project_root, cache_root, codex_home):
     """Run a full discover+translate+reconcile and return the desired state."""
     from cc_codex_bridge.discover import discover
