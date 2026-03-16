@@ -911,7 +911,13 @@ def _plan_skill_mutations(
         registry_writes.append(current_write)
 
     if previous_snapshot.path != current_snapshot.path:
-        updated_previous = GlobalSkillRegistry(skills=dict(previous_snapshot.registry.skills))
+        updated_previous = GlobalSkillRegistry(
+            skills=dict(previous_snapshot.registry.skills),
+            projects=tuple(
+                p for p in previous_snapshot.registry.projects
+                if p != desired.project_root
+            ),
+        )
         for install_dir_name in sorted(_owned_skill_names(previous_snapshot.registry, desired.project_root)):
             entry = updated_previous.skills[install_dir_name]
             remaining_owners = tuple(
