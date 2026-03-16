@@ -124,6 +124,7 @@ Utility commands such as `doctor` and the LaunchAgent commands are intentionally
   - prompt bodies derived from Claude agent markdown bodies
 - `.codex/claude-code-bridge-state.json`
   - project-local ownership state for reconcile safety
+  - tracks managed project files, managed project skill directory names, and version
 
 ### User-global outputs
 
@@ -162,7 +163,8 @@ The project-local state file records:
 - project root
 - Codex home path
 - managed project-relative file paths
-- state version
+- managed project skill directory names (tracked separately for directory-snapshot comparison)
+- state version (currently 4)
 
 The global registry records:
 
@@ -174,7 +176,7 @@ The global registry records:
 ### Safety rules
 
 - project files are never overwritten unless they were previously recorded as managed
-- the state file may only authorize generator-owned project paths: `CLAUDE.md`, `.codex/config.toml`, `.codex/claude-code-bridge-state.json`, and `.codex/prompts/agents/*`
+- the state file may only authorize generator-owned project paths: `CLAUDE.md`, `.codex/config.toml`, `.codex/claude-code-bridge-state.json`, and `.codex/prompts/agents/*` (project skill directories are tracked separately via `managed_project_skill_dirs`)
 - generated project-relative paths are normalized and may not use absolute paths or `..` traversal
 - corrupted or unexpected managed project paths in state are treated as a hard error
 - state is rejected if it belongs to a different project root than the current reconcile target
@@ -187,6 +189,9 @@ The global registry records:
 - existing skill directories are adopted only when their content matches the desired generated tree exactly
 - conflicting content for an existing generated skill directory is a hard error
 - generated skill directories are removed only when the global registry shows no remaining owners
+- all write targets must resolve within their expected root (`project_root` for project files, `codex_home` for global files) after symlink resolution — this catches symlinked ancestor directories that would redirect operations outside the expected tree
+- skill translation rejects symlinked resource directories and symlinked sibling references
+- project skills are tracked as managed directory names and compared using exact directory-snapshot matching, consistent with global skills
 - project files are written atomically via temp-file-then-rename to avoid partial reads
 - if a write fails mid-apply, the next idempotent reconcile run self-heals
 - stale managed outputs are removed when no longer desired
@@ -345,6 +350,8 @@ Current skill rules:
 - `SKILL.md` frontmatter must include `name`
 - generated `SKILL.md` has its `name:` rewritten to match the generated install directory name
 - skill trees are materialized as complete directory snapshots
+- symlinked resource directories (`scripts/`, `references/`, etc.) are rejected during translation
+- symlinked sibling skill references are rejected during translation
 
 Current relocation behavior:
 
@@ -363,7 +370,7 @@ All skill install directory names are always-prefixed and deterministic:
 
 ### Skill routing
 
-User-level and plugin skills are installed to the global Codex skill registry at `~/.codex/skills/`. Project-level skills are installed to project-local `.codex/skills/` directories as additional managed project files.
+User-level and plugin skills are installed to the global Codex skill registry at `~/.codex/skills/`. Project-level skills are installed to project-local `.codex/skills/` directories and tracked as managed project skill directory names in the bridge state. Both global and project skills use exact directory-snapshot comparison for change detection.
 
 ## 9. Reconcile Architecture
 
@@ -375,8 +382,9 @@ Reconcile lives in `src/cc_codex_bridge/reconcile.py`.
 
 - project root
 - Codex home
-- project files with desired bytes (includes project-local skill files)
-- generated skills (global registry)
+- project files with desired bytes
+- project skills (directory-snapshot comparison, installed to `.codex/skills/`)
+- generated skills (global registry, installed to `~/.codex/skills/`)
 - global instructions content (for `~/.codex/AGENTS.md`)
 - path to the state file
 
@@ -398,15 +406,18 @@ Supported kinds in current reporting:
 
 1. load previous state if present
 2. load the current global skill registry under the resolved Codex home
-3. compute desired project file changes (config, prompts, project-local skill directories)
-4. compute desired generated-skill claims and reconcile changes from registry ownership plus on-disk content hashes
-5. compute desired global instructions changes for `~/.codex/AGENTS.md`
-6. validate ownership constraints
-7. write project file and skill directory changes directly
-8. write global instructions file if needed
-9. write updated global registry files
-10. write the project-local state file
-11. remove stale managed outputs whose last owner released them
+3. compute desired project file changes (config, prompts)
+4. compute desired project skill directory mutations using directory-snapshot comparison
+5. compute desired generated-skill claims and reconcile changes from registry ownership plus on-disk content hashes
+6. compute desired global instructions changes for `~/.codex/AGENTS.md`
+7. validate ownership constraints
+8. write project file and skill directory changes directly
+9. write global instructions file if needed
+10. write updated global registry files
+11. write the project-local state file
+12. remove stale managed outputs whose last owner released them
+
+`diff_desired_state()` additionally reports state file create/update changes that `reconcile_desired_state()` would perform, ensuring `status` and `reconcile --dry-run` show the same pending changes as a real reconcile.
 
 ### Write model
 
@@ -494,7 +505,7 @@ All exclusion flags are repeatable. `.codex/bridge.toml` can define persistent e
   - write the global plist into a LaunchAgents directory and print the `launchctl bootstrap` next step
   - warn about existing per-project plists with removal commands
 
-LaunchAgent commands no longer require `--project` and produce a global plist that runs `reconcile-all`.
+LaunchAgent commands have their own parser and do not accept pipeline flags (`--project`, `--cache-dir`, `--claude-home`, `--codex-home`). They produce a global plist that runs `reconcile-all`.
 
 ### CLI invariants
 
