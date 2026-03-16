@@ -11,7 +11,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Fixed `clean` using caller-supplied `--codex-home` instead of the state-recorded value, which could orphan global registry claims when the Codex home changed.
 - Fixed `clean --dry-run` under-reporting removals by omitting the state file from the preview.
 - Fixed project-local generated skill cleanup removing only tracked files instead of the full skill directory.
-- Fixed stale `~/.codex/AGENTS.md` persisting indefinitely when the source `~/.claude/CLAUDE.md` was removed.
+- Fixed stale bridge-generated `~/.codex/AGENTS.md` persisting when the source `~/.claude/CLAUDE.md` was removed; hand-authored files without the bridge sentinel are now preserved.
+- Fixed reconcile and uninstall deleting hand-authored `~/.codex/AGENTS.md` that the bridge did not create; bridge-generated files now carry a sentinel comment for ownership detection.
+- Fixed `reconcile --dry-run --diff` crashing with `KeyError` when the diff included global instructions changes.
+- Fixed `reconcile-all`, `uninstall`, `clean`, and `doctor` silently accepting CLI flags they ignore (`--project`, `--claude-home`, `--cache-dir`); each command now declares only the flags it uses.
 - Fixed standalone agents with names that normalize to the same role silently colliding instead of failing fast.
 - Fixed `doctor` reporting the plugin cache as healthy when plugins had no valid semver versions that discovery would reject.
 
