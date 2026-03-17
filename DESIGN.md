@@ -66,6 +66,7 @@ If a behavior is described differently in multiple docs:
 ### In scope
 
 - project discovery from the current directory or `--project`
+- querying the `claude` CLI for plugin enablement status
 - Claude plugin discovery from the installed local Claude cache
 - user-level skill and agent discovery from `~/.claude/skills/` and `~/.claude/agents/`
 - project-level skill and agent discovery from `.claude/skills/` and `.claude/agents/`
@@ -93,20 +94,21 @@ If a behavior is described differently in multiple docs:
 The runtime is a deterministic pipeline:
 
 1. resolve the target project root by searching upward for `AGENTS.md`
-2. discover installed Claude plugins from `~/.claude/plugins/cache` or `--cache-dir`
-3. choose the highest semantic version for each `<marketplace>/<plugin>`
-4. discover user-level skills, agents, and global instructions from `~/.claude/` (or `--claude-home`)
-5. discover project-level skills and agents from `.claude/`
-6. load optional `.codex/bridge.toml` exclusions and merge any CLI exclusion flags
-7. filter discovered plugins/skills/agents by the effective exclusion set
-8. translate plugin agents into `GeneratedAgentRole` objects
-9. translate standalone user and project agents into `GeneratedAgentRole` objects
-10. translate plugin and user skills into `GeneratedSkill` trees (global registry)
-11. translate project skills into project-local `GeneratedSkill` trees
-12. merge all agent roles and render project-local Codex prompt files and `.codex/config.toml`
-13. decide whether `CLAUDE.md` can be created or preserved as an `@AGENTS.md` shim
-14. build a full desired state for project files, Codex skill directories, and global instructions
-15. inspect/preview or reconcile that desired state with ownership and rollback protections
+2. query `claude plugins list --json` for enabled plugin IDs (using the project root as CWD for project-scoped settings)
+3. discover installed Claude plugins from `~/.claude/plugins/cache` or `--cache-dir`
+4. choose the highest semantic version for each `<marketplace>/<plugin>` and filter to only enabled plugins
+5. discover user-level skills, agents, and global instructions from `~/.claude/` (or `--claude-home`)
+6. discover project-level skills and agents from `.claude/`
+7. load optional `.codex/bridge.toml` exclusions and merge any CLI exclusion flags
+8. filter discovered plugins/skills/agents by the effective exclusion set
+9. translate plugin agents into `GeneratedAgentRole` objects
+10. translate standalone user and project agents into `GeneratedAgentRole` objects
+11. translate plugin and user skills into `GeneratedSkill` trees (global registry)
+12. translate project skills into project-local `GeneratedSkill` trees
+13. merge all agent roles and render project-local Codex prompt files and `.codex/config.toml`
+14. decide whether `CLAUDE.md` can be created or preserved as an `@AGENTS.md` shim
+15. build a full desired state for project files, Codex skill directories, and global instructions
+16. inspect/preview or reconcile that desired state with ownership and rollback protections
 
 The reconcile pipeline is shared by `validate`, `status`, and `reconcile`.
 
@@ -235,6 +237,18 @@ Discovery lives in `src/cc_codex_bridge/discover.py`.
 - project-level skills are read from `<project>/.claude/skills/`
 - each subdirectory containing `SKILL.md` is a discovered skill
 - project-level agents are read from `<project>/.claude/agents/` as `*.md` files
+
+### Plugin enablement
+
+- the `claude` CLI is a hard runtime dependency for the bridge
+- `query_enabled_plugin_ids()` shells out to `claude plugins list --json` using the project root as CWD
+- the CLI output provides an authoritative enablement status that reflects the merged settings hierarchy (user → project → local)
+- the CLI's `id` format (`plugin-name@marketplace`) is converted to the bridge's internal `marketplace/plugin_name` format
+- after cache scanning, `discover_latest_plugins()` filters to only plugins present in the enabled set
+- uninstalled-but-cached plugins are excluded because the CLI only lists installed plugins
+- the CLI's `installPath` and `version` fields are not used — they are stale for a significant portion of enabled plugins due to auto-updates that don't refresh the install metadata
+- if the `claude` CLI is not on PATH, discovery raises a `DiscoveryError` with installation instructions
+- `doctor` includes a `claude_cli` check as the first machine-level verification
 
 ### Version selection
 
@@ -462,7 +476,7 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
 
 - `doctor`
   - run machine-level environment checks without requiring a project
-  - report Python version support, Claude cache visibility, Codex-home writability, LaunchAgents directory access, and CLI PATH visibility
+  - report Python version support, Claude CLI availability, Claude cache visibility, Codex-home writability, LaunchAgents directory access, and CLI PATH visibility
   - support JSON output with `--json`
 - `validate`
   - run discovery, translation, and rendering in memory
@@ -630,6 +644,7 @@ The test suite is the executable check for the invariants described in this file
 
 These are current implemented simplifications, not necessarily permanent design ideals:
 
+- the `claude` CLI must be available on PATH — without it, `discover()` raises a `DiscoveryError` and the bridge cannot function
 - agent model mapping is fixed to one default Codex model
 - unsupported Claude tools are hard errors rather than being preserved or partially translated
 - frontmatter parsing uses safe YAML loading for frontmatter blocks plus strict

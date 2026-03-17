@@ -51,6 +51,10 @@ claude-code-codex-bridge/
 - The installable CLI command is `cc-codex-bridge`.
 - The Python module entrypoint is `python3 -m cc_codex_bridge`.
 
+### Runtime Dependencies
+
+The `claude` CLI must be available on PATH. The bridge shells out to `claude plugins list --json` to determine which plugins are enabled. Without it, `discover()` raises a `DiscoveryError` and the bridge cannot function.
+
 ### Runtime Contract
 
 The bridge reads local Claude Code state and produces Codex-compatible outputs such as:
