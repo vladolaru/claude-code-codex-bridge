@@ -159,7 +159,7 @@ def build_desired_state(
     preserved_project_files: list[Path] = []
     skills_tuple = tuple(skills)
 
-    if shim_decision.content is not None:
+    if shim_decision.action in ("create", "bootstrap") and shim_decision.content is not None:
         project_files.append(
             (
                 _resolve_managed_project_path(project_root, Path("CLAUDE.md")),
@@ -346,8 +346,9 @@ def build_project_desired_state(
 def diff_desired_state(desired: DesiredState) -> ReconcileReport:
     """Compare current outputs to desired state without writing."""
     previous_state = _load_previous_state(desired)
+    prev_managed = _previously_managed_set(previous_state)
     plan = _plan_mutations(desired, previous_state)
-    state_write_needed = _state_write_needed(desired)
+    state_write_needed = _state_write_needed(desired, prev_managed)
     _validate_mutation_targets(
         desired,
         previous_state,
@@ -367,8 +368,9 @@ def diff_desired_state(desired: DesiredState) -> ReconcileReport:
 def reconcile_desired_state(desired: DesiredState) -> ReconcileReport:
     """Apply the desired state to disk."""
     previous_state = _load_previous_state(desired)
+    prev_managed = _previously_managed_set(previous_state)
     plan = _plan_mutations(desired, previous_state)
-    state_write_needed = _state_write_needed(desired)
+    state_write_needed = _state_write_needed(desired, prev_managed)
     _validate_mutation_targets(
         desired,
         previous_state,
@@ -378,7 +380,7 @@ def reconcile_desired_state(desired: DesiredState) -> ReconcileReport:
     if not plan.changes and not plan.registry_writes and not state_write_needed:
         return ReconcileReport(changes=(), applied=True)
 
-    _apply_changes(desired, plan)
+    _apply_changes(desired, plan, prev_managed)
     return ReconcileReport(changes=plan.changes, applied=True)
 
 
@@ -748,7 +750,11 @@ def uninstall_all(
     )
 
 
-def _apply_changes(desired: DesiredState, plan: _MutationPlan) -> None:
+def _apply_changes(
+    desired: DesiredState,
+    plan: _MutationPlan,
+    previously_managed: frozenset[str] = frozenset(),
+) -> None:
     """Write all planned changes to disk."""
     desired_map = dict(desired.project_files)
     skills_by_name = {skill.install_dir_name: skill for skill in desired.skills}
@@ -795,7 +801,7 @@ def _apply_changes(desired: DesiredState, plan: _MutationPlan) -> None:
             container=registry_write.container,
         )
 
-    state_bytes = _build_state_record(desired).to_json().encode()
+    state_bytes = _build_state_record(desired, previously_managed).to_json().encode()
     _atomic_write_file(desired.state_path, state_bytes, container=desired.project_root)
 
 
@@ -1316,11 +1322,23 @@ def _cleanup_empty_parents(path: Path, stop_at: Path) -> None:
         current = current.parent
 
 
-def _build_state_record(desired: DesiredState) -> BridgeState:
-    """Build the desired stable state payload."""
+def _build_state_record(
+    desired: DesiredState,
+    previously_managed: frozenset[str] = frozenset(),
+) -> BridgeState:
+    """Build the desired stable state payload.
+
+    Preserved project files are only included when they were previously
+    managed — this distinguishes files the bridge created from files that
+    existed before the bridge ran.
+    """
+    preserved_relatives = {
+        _project_relative(desired, path)
+        for path in desired.preserved_project_files
+    }
     managed_project_paths = {
         *(_project_relative(desired, path) for path, _ in desired.project_files),
-        *(_project_relative(desired, path) for path in desired.preserved_project_files),
+        *(rel for rel in preserved_relatives if rel in previously_managed),
         STATE_RELATIVE_PATH.as_posix(),
     }
     managed_project_files = tuple(sorted(managed_project_paths))
@@ -1341,9 +1359,19 @@ def _build_state_record(desired: DesiredState) -> BridgeState:
     )
 
 
-def _state_write_needed(desired: DesiredState) -> bool:
+def _previously_managed_set(previous_state: BridgeState | None) -> frozenset[str]:
+    """Extract the managed project file set from previous state."""
+    if previous_state is None:
+        return frozenset()
+    return frozenset(previous_state.managed_project_files)
+
+
+def _state_write_needed(
+    desired: DesiredState,
+    previously_managed: frozenset[str] = frozenset(),
+) -> bool:
     """Return True when the project-local state file must be updated."""
-    state_bytes = _build_state_record(desired).to_json().encode()
+    state_bytes = _build_state_record(desired, previously_managed).to_json().encode()
     return not desired.state_path.exists() or desired.state_path.read_bytes() != state_bytes
 
 

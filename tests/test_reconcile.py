@@ -1972,6 +1972,35 @@ def test_clean_removes_claude_md_shim(
     assert not (project_root / "CLAUDE.md").exists()
 
 
+def test_clean_preserves_preexisting_claude_md_shim(
+    make_project, make_plugin_version, tmp_path: Path
+):
+    """clean_project does not remove a CLAUDE.md that existed before the bridge ran."""
+    project_root, _agents_md = make_project()
+    # Pre-create CLAUDE.md before the bridge runs — simulates a project that
+    # already has the @AGENTS.md shim checked into version control.
+    (project_root / "CLAUDE.md").write_text("@AGENTS.md\n")
+
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("review",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    from cc_codex_bridge.reconcile import clean_project
+
+    desired = _reconcile_once(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    # Bridge preserved the existing CLAUDE.md (action=preserve, not create)
+    assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
+
+    clean_project(project_root, codex_home=codex_home)
+
+    # CLAUDE.md must survive clean — it was not created by the bridge
+    assert (project_root / "CLAUDE.md").exists()
+    assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
+
+
 def test_clean_does_not_touch_global_agents_md(
     make_project, make_plugin_version, tmp_path: Path
 ):
