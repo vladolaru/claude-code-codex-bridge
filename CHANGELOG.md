@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-03-17
+
+### Fixed
+
+- Fixed `clean` trusting corrupted `managed_project_files` from state without allowlist validation, which could delete hand-authored files like `AGENTS.md` when the state file was corrupted.
+- Fixed `uninstall` exiting 0 unconditionally even when accessible projects had cleanup failures, masking partial uninstall results.
+- Fixed `clean` and `uninstall` crashing with `NotADirectoryError` when a regular file existed at a managed skill directory path.
+- Added trailing summary line to `uninstall` text output showing cleaned/skipped/no-state project counts.
+
 ## [0.8.0] - 2026-03-17
 
 ### Added

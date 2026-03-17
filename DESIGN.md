@@ -179,7 +179,7 @@ The global registry records:
 - the state file may only authorize generator-owned project paths: `CLAUDE.md`, `.codex/config.toml`, `.codex/claude-code-bridge-state.json`, and `.codex/prompts/agents/*` (project skill directories are tracked separately via `managed_project_skill_dirs`)
 - state-tracked project skill directories must be plain generated directory names; traversal, absolute paths, and nested paths are rejected as corrupted state
 - generated project-relative paths are normalized and may not use absolute paths or `..` traversal
-- corrupted or unexpected managed project paths in state are treated as a hard error
+- corrupted or unexpected managed project paths in state are treated as a hard error — this applies to both reconcile and cleanup paths
 - `status` and `reconcile --dry-run` validate the same planned write targets as mutating reconcile, so preview mode fails when apply would fail on containment checks
 - state is rejected if it belongs to a different project root than the current reconcile target
 - malformed state payload field types are treated as a hard error
@@ -187,7 +187,7 @@ The global registry records:
 - symlinked managed project targets are rejected
 - symlinked bridge state files are rejected
 - malformed or symlinked global registry files are treated as a hard error
-- non-directory skill targets are rejected
+- non-directory skill targets are rejected during reconcile; during cleanup and uninstall, non-directory paths at skill locations are removed with `unlink()` instead of `rmtree()`
 - existing skill directories are adopted only when their content matches the desired generated tree exactly
 - conflicting content for an existing generated skill directory is a hard error
 - generated skill directories are removed only when the global registry shows no remaining owners
@@ -484,6 +484,7 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
   - clean each accessible project (skip and report inaccessible ones)
   - remove remaining global skills, registry, and AGENTS.md
   - remove bridge LaunchAgent plists
+  - exit code 0 if all accessible projects cleaned successfully, 1 if any accessible project had a cleanup error (vanished project directories are not treated as errors)
   - support `--dry-run` for preview
   - support `--dry-run --json` for structured output
   - support `--launchagents-dir` override
