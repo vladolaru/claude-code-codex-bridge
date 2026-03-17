@@ -283,6 +283,33 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
+    # Bootstrap: CLAUDE.md exists without AGENTS.md
+    if build.shim_decision.action == "bootstrap":
+        if args.command == "reconcile" and not args.dry_run:
+            from cc_codex_bridge.claude_shim import execute_bootstrap
+            execute_bootstrap(build.discovery.project)
+            try:
+                build = build_project_desired_state(
+                    args.project,
+                    codex_home=args.codex_home,
+                    claude_home=args.claude_home,
+                    cache_dir=args.cache_dir,
+                    exclude_plugins=args.exclude_plugin or (),
+                    exclude_skills=args.exclude_skill or (),
+                    exclude_agents=args.exclude_agent or (),
+                )
+            except (DiscoveryError, TranslationError, ReconcileError, OSError, UnicodeError) as exc:
+                print(f"Error: {exc}", file=sys.stderr)
+                return 1
+        else:
+            print(
+                "Bootstrap required: CLAUDE.md exists without AGENTS.md.\n"
+                "Run `cc-codex-bridge reconcile` to copy CLAUDE.md to AGENTS.md "
+                "and replace CLAUDE.md with the @AGENTS.md shim.",
+                file=sys.stderr,
+            )
+            return 1
+
     try:
         if build.diagnostics:
             if args.command == "status":

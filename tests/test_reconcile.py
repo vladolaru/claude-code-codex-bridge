@@ -1526,8 +1526,8 @@ def test_build_project_rejects_cross_scope_agent_role_name_collision(
         )
 
 
-def test_build_project_bootstraps_agents_md_from_claude_md(tmp_path: Path):
-    """build_project_desired_state creates AGENTS.md from CLAUDE.md when missing."""
+def test_build_project_returns_bootstrap_without_mutating(tmp_path: Path):
+    """build_project_desired_state returns bootstrap decision without writing files."""
     from cc_codex_bridge.reconcile import build_project_desired_state
 
     project_root = tmp_path / "project"
@@ -1540,44 +1540,39 @@ def test_build_project_bootstraps_agents_md_from_claude_md(tmp_path: Path):
         codex_home=tmp_path / "codex-home",
     )
 
-    # AGENTS.md should now exist with the original CLAUDE.md content
-    assert (project_root / "AGENTS.md").exists()
-    assert (project_root / "AGENTS.md").read_text() == claude_content
+    # Should NOT mutate the filesystem
+    assert not (project_root / "AGENTS.md").exists()
+    assert (project_root / "CLAUDE.md").read_text() == claude_content
 
-    # CLAUDE.md should now contain the shim
-    assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
-
-    # The shim decision should be "preserve" since bootstrap already wrote the shim
-    assert build.shim_decision.action == "preserve"
-    assert build.desired_state is not None
+    # Should return bootstrap decision for the caller to handle
+    assert build.shim_decision.action == "bootstrap"
+    assert build.desired_state is None
 
 
-def test_build_project_bootstrap_is_idempotent(tmp_path: Path):
-    """Running bootstrap twice does not corrupt AGENTS.md."""
-    from cc_codex_bridge.reconcile import build_project_desired_state
+def test_execute_bootstrap_copies_claude_md_to_agents_md(tmp_path: Path):
+    """execute_bootstrap copies CLAUDE.md to AGENTS.md and writes shim."""
+    from cc_codex_bridge.claude_shim import execute_bootstrap
+    from cc_codex_bridge.model import ProjectContext
 
     project_root = tmp_path / "project"
     project_root.mkdir()
     claude_content = "# My project instructions\n"
     (project_root / "CLAUDE.md").write_text(claude_content)
 
-    build_project_desired_state(
-        project_root,
-        codex_home=tmp_path / "codex-home",
-    )
+    project = ProjectContext(root=project_root, agents_md_path=project_root / "AGENTS.md")
+    execute_bootstrap(project)
 
-    # After first run, AGENTS.md has original content and CLAUDE.md has shim
     assert (project_root / "AGENTS.md").read_text() == claude_content
     assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
 
-    # Second run should succeed with AGENTS.md already present
-    build2 = build_project_desired_state(
+    # After bootstrap, build should proceed normally
+    from cc_codex_bridge.reconcile import build_project_desired_state
+    build = build_project_desired_state(
         project_root,
         codex_home=tmp_path / "codex-home",
     )
-
-    assert build2.shim_decision.action == "preserve"
-    assert (project_root / "AGENTS.md").read_text() == claude_content
+    assert build.shim_decision.action == "preserve"
+    assert build.desired_state is not None
 
 
 def test_reconcile_removes_stale_global_instructions(

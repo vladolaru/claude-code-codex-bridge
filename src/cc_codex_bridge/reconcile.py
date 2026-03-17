@@ -227,7 +227,7 @@ def build_project_desired_state(
     Returns a ProjectBuildResult containing the desired state and all
     intermediate values both callers (CLI and reconcile_all) need.
     """
-    from cc_codex_bridge.claude_shim import execute_bootstrap, plan_claude_shim
+    from cc_codex_bridge.claude_shim import plan_claude_shim
     from cc_codex_bridge.discover import discover
     from cc_codex_bridge.exclusions import (
         apply_sync_exclusions,
@@ -257,16 +257,21 @@ def build_project_desired_state(
     result, exclusion_report = apply_sync_exclusions(result, exclusions)
     shim_decision = plan_claude_shim(result.project)
 
-    # Bootstrap: copy CLAUDE.md to AGENTS.md, then re-discover and re-plan
+    # Bootstrap needed: CLAUDE.md exists without AGENTS.md.
+    # Return early so the caller can decide whether to execute the bootstrap
+    # (reconcile) or just report it (status/validate/dry-run).
     if shim_decision.action == "bootstrap":
-        execute_bootstrap(result.project)
-        result = discover(
-            project_path=project_root,
-            cache_dir=cache_dir,
-            claude_home=claude_home,
+        return ProjectBuildResult(
+            desired_state=None,
+            discovery=result,
+            shim_decision=shim_decision,
+            role_count=0,
+            prompt_count=0,
+            skill_count=0,
+            exclusion_report=exclusion_report,
+            rendered_config="",
+            diagnostics=(),
         )
-        result, exclusion_report = apply_sync_exclusions(result, exclusions)
-        shim_decision = plan_claude_shim(result.project)
 
     agent_result = translate_installed_agents_with_diagnostics(result.plugins)
     user_agent_result = translate_standalone_agents(result.user_agents, scope="user")
@@ -551,6 +556,21 @@ def reconcile_all(
                 project_root,
                 codex_home=codex_home_path,
             )
+            if build.shim_decision.action == "bootstrap":
+                if not dry_run:
+                    from cc_codex_bridge.claude_shim import execute_bootstrap
+                    execute_bootstrap(build.discovery.project)
+                    build = build_project_desired_state(
+                        project_root,
+                        codex_home=codex_home_path,
+                    )
+                else:
+                    errors.append(ReconcileAllError(
+                        project_root=project_root,
+                        error="bootstrap required: CLAUDE.md exists without AGENTS.md",
+                    ))
+                    continue
+
             if build.diagnostics:
                 errors.append(ReconcileAllError(
                     project_root=project_root,

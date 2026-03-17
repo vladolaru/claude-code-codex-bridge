@@ -1351,3 +1351,68 @@ def test_validate_works_without_plugins(make_project, tmp_path: Path, capsys):
     captured = capsys.readouterr()
     assert "PLUGINS_FOUND: 0" in captured.out
     assert "GENERATED_SKILLS: 1" in captured.out
+
+
+def test_status_reports_bootstrap_needed(tmp_path: Path, capsys):
+    """status exits with error when CLAUDE.md exists without AGENTS.md."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "CLAUDE.md").write_text("# My instructions\n")
+
+    exit_code = cli.main([
+        "status", "--project", str(project_root),
+        "--codex-home", str(tmp_path / "codex-home"),
+    ])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "Bootstrap required" in captured.err
+
+
+def test_validate_reports_bootstrap_needed(tmp_path: Path, capsys):
+    """validate exits with error when CLAUDE.md exists without AGENTS.md."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "CLAUDE.md").write_text("# My instructions\n")
+
+    exit_code = cli.main([
+        "validate", "--project", str(project_root),
+        "--codex-home", str(tmp_path / "codex-home"),
+    ])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "Bootstrap required" in captured.err
+
+
+def test_reconcile_dry_run_reports_bootstrap_needed(tmp_path: Path, capsys):
+    """reconcile --dry-run exits with error when bootstrap needed."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "CLAUDE.md").write_text("# My instructions\n")
+
+    exit_code = cli.main([
+        "reconcile", "--dry-run", "--project", str(project_root),
+        "--codex-home", str(tmp_path / "codex-home"),
+    ])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "Bootstrap required" in captured.err
+
+
+def test_reconcile_executes_bootstrap(tmp_path: Path, capsys):
+    """reconcile copies CLAUDE.md to AGENTS.md and proceeds."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    claude_content = "# My instructions\n"
+    (project_root / "CLAUDE.md").write_text(claude_content)
+
+    exit_code = cli.main([
+        "reconcile", "--project", str(project_root),
+        "--codex-home", str(tmp_path / "codex-home"),
+    ])
+
+    assert exit_code == 0
+    assert (project_root / "AGENTS.md").read_text() == claude_content
+    assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
