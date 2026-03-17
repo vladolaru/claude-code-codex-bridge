@@ -96,6 +96,21 @@ class UninstallReport:
     launchagent_removals: tuple[LaunchAgentRemoval, ...]
     applied: bool
 
+    @property
+    def has_errors(self) -> bool:
+        """True when any accessible project had a cleanup error.
+
+        Projects skipped because the directory no longer exists are not treated
+        as errors (vanished projects are expected during uninstall).  Projects
+        that were accessible but failed cleanup (status ``"skipped"`` with a
+        reason other than ``"directory not found"``) are actionable errors.
+        """
+        return any(
+            result.status == "skipped"
+            and result.skip_reason != "directory not found"
+            for result in self.projects
+        )
+
 
 @dataclass(frozen=True)
 class _RegistrySnapshot:
@@ -402,6 +417,19 @@ def clean_project(
 
     changes: list[Change] = []
 
+    # Validate managed project files against the allowlist (same check as
+    # _compute_project_file_changes) to prevent corrupted state from deleting
+    # hand-authored files like AGENTS.md.
+    invalid_managed_paths = sorted(
+        relative for relative in previous_state.managed_project_files
+        if not _is_allowed_managed_project_relative(relative)
+    )
+    if invalid_managed_paths:
+        raise ReconcileError(
+            "Interop state contains unexpected managed project files: "
+            + ", ".join(invalid_managed_paths)
+        )
+
     # Remove managed project skill directories
     managed_project_skill_dirs = _validated_managed_project_skill_dirs(previous_state)
     skill_dirs_to_remove: list[Path] = []
@@ -482,8 +510,10 @@ def clean_project(
         if change.path == state_path:
             continue  # deferred to end
         if change.resource_kind in ("skill", "project_skill"):
-            if change.path.exists():
+            if change.path.is_dir():
                 shutil.rmtree(change.path)
+            elif change.path.exists() or change.path.is_symlink():
+                change.path.unlink()
         else:
             change.path.unlink(missing_ok=True)
             _cleanup_empty_parents(change.path.parent, project_root_path / ".codex")
@@ -699,8 +729,10 @@ def uninstall_all(
         # Apply global removals
         for change in global_removals:
             if change.resource_kind == "skill":
-                if change.path.exists():
+                if change.path.is_dir():
                     shutil.rmtree(change.path)
+                elif change.path.exists() or change.path.is_symlink():
+                    change.path.unlink()
             else:
                 change.path.unlink(missing_ok=True)
 

@@ -2354,6 +2354,146 @@ def test_clean_rejects_unexpected_managed_project_skill_dirs_in_state(make_proje
         clean_project(project_root, codex_home=codex_home)
 
 
+def test_clean_rejects_unexpected_managed_project_files_in_state(make_project, tmp_path: Path):
+    """clean must reject corrupted managed project file paths from state.
+
+    This is the counterpart to test_clean_rejects_unexpected_managed_project_skill_dirs_in_state.
+    A corrupted state file listing AGENTS.md must NOT cause clean to delete
+    the hand-authored file.
+    """
+    from cc_codex_bridge.reconcile import clean_project
+    from cc_codex_bridge.state import BridgeState
+
+    project_root, agents_md = make_project()
+    codex_home = tmp_path / "codex_home"
+    codex_home.mkdir()
+
+    state_path = project_root / STATE_RELATIVE_PATH
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state = BridgeState(
+        project_root=project_root.resolve(),
+        codex_home=codex_home.resolve(),
+        managed_project_files=(
+            STATE_RELATIVE_PATH.as_posix(),
+            "AGENTS.md",  # NOT a valid managed path
+        ),
+    )
+    state_path.write_text(state.to_json())
+
+    with pytest.raises(ReconcileError, match="unexpected managed project files"):
+        clean_project(project_root, codex_home=codex_home)
+
+    # AGENTS.md must survive
+    assert agents_md.exists()
+
+
+def test_clean_handles_file_at_skill_path(make_project, make_plugin_version, tmp_path: Path):
+    """clean must not crash when a regular file exists at a skill directory path."""
+    from cc_codex_bridge.reconcile import clean_project
+
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("review",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    desired = _reconcile_once(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    skill_dir = codex_home / "skills" / "market-tools-review"
+    assert skill_dir.is_dir()
+
+    # Replace the skill directory with a regular file
+    import shutil
+    shutil.rmtree(skill_dir)
+    skill_dir.write_text("not a directory")
+
+    report = clean_project(project_root, codex_home=codex_home)
+    assert report.applied is True
+    # The file should have been removed
+    assert not skill_dir.exists()
+
+
+def test_uninstall_handles_file_at_global_skill_path(
+    make_project, make_plugin_version, tmp_path: Path
+):
+    """uninstall must not crash when a regular file exists at a global skill path."""
+    from cc_codex_bridge.reconcile import uninstall_all
+
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("review",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    desired = _reconcile_once(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    skill_dir = codex_home / "skills" / "market-tools-review"
+    assert skill_dir.is_dir()
+
+    # Replace the skill directory with a regular file
+    import shutil
+    shutil.rmtree(skill_dir)
+    skill_dir.write_text("not a directory")
+
+    report = uninstall_all(codex_home=codex_home)
+    assert report.applied is True
+    assert not skill_dir.exists()
+
+
+def test_uninstall_has_errors_on_cleanup_failure(make_project, tmp_path: Path):
+    """UninstallReport.has_errors is True when a project cleanup fails."""
+    from cc_codex_bridge.reconcile import uninstall_all
+    from cc_codex_bridge.state import BridgeState
+    from cc_codex_bridge.registry import GlobalSkillRegistry
+
+    project_root, _ = make_project()
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+
+    # Set up a state file with corrupted managed paths
+    state_path = project_root / STATE_RELATIVE_PATH
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state = BridgeState(
+        project_root=project_root.resolve(),
+        codex_home=codex_home.resolve(),
+        managed_project_files=("AGENTS.md",),  # invalid
+    )
+    state_path.write_text(state.to_json())
+
+    # Register the project in the global registry
+    from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
+    registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
+    (codex_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
+
+    report = uninstall_all(codex_home=codex_home)
+    assert report.has_errors is True
+    # The project should be skipped, not cleaned
+    assert report.projects[0].status == "skipped"
+
+
+def test_uninstall_no_errors_on_vanished_project(make_project, tmp_path: Path):
+    """Vanished projects (directory not found) are NOT treated as errors."""
+    import shutil as shutil_mod
+    from cc_codex_bridge.reconcile import uninstall_all
+    from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME, GlobalSkillRegistry
+
+    project_root, _ = make_project()
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+
+    # Register the project then delete it
+    registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
+    (codex_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
+    shutil_mod.rmtree(project_root)
+
+    report = uninstall_all(codex_home=codex_home)
+    assert report.has_errors is False
+    assert report.projects[0].status == "skipped"
+    assert report.projects[0].skip_reason == "directory not found"
+
+
 def _reconcile_once(project_root, cache_root, codex_home):
     """Run a full discover+translate+reconcile and return the desired state."""
     from cc_codex_bridge.discover import discover
