@@ -343,7 +343,7 @@ def test_agent_and_skill_translation_share_the_same_frontmatter_entrypoint(
 
 
 def test_translate_user_skill(tmp_path: Path):
-    """User-level skills are translated with a user- prefix."""
+    """User-level skills use bare directory names."""
     skill_dir = tmp_path / "skills" / "my-tool"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
@@ -353,10 +353,10 @@ def test_translate_user_skill(tmp_path: Path):
     result = translate_standalone_skills((skill_dir,), scope="user")
 
     assert len(result) == 1
-    assert result[0].install_dir_name == "user-my-tool"
-    assert result[0].codex_skill_name == "user-my-tool"
+    assert result[0].install_dir_name == "my-tool"
+    assert result[0].codex_skill_name == "my-tool"
     skill_md = next(f for f in result[0].files if f.relative_path == Path("SKILL.md"))
-    assert b"name: user-my-tool" in skill_md.content
+    assert b"name: my-tool" in skill_md.content
 
 
 def test_translate_project_skill(tmp_path: Path):

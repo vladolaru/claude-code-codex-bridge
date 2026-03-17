@@ -152,22 +152,15 @@ def translate_standalone_skills(
 ) -> tuple[GeneratedSkill, ...]:
     """Translate user-level or project-level Claude skills into Codex skills.
 
-    User-level skills get a ``user-`` prefix for the install directory name
-    to avoid collisions in the global ``~/.codex/skills/`` registry.
-
-    Project-level skills keep their raw directory name because they are
-    installed to project-local ``.codex/skills/`` where project scope
-    provides natural isolation.
+    Both user-level and project-level skills use their raw directory name.
+    Collision resolution across scopes is handled by ``assign_skill_names()``.
     """
     generated: list[GeneratedSkill] = []
 
     for skill_path in skill_paths:
         original_name = _read_required_skill_name(skill_path / "SKILL.md")
 
-        if scope == "project":
-            install_dir_name = skill_path.name
-        else:
-            install_dir_name = f"{scope}-{skill_path.name}"
+        install_dir_name = skill_path.name
 
         generated_files: dict[Path, tuple[bytes, int]] = {}
         _copy_skill_tree(skill_path, Path(), generated_files)
