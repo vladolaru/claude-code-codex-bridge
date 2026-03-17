@@ -74,7 +74,7 @@ If a behavior is described differently in multiple docs:
 - selection of the latest installed plugin version by semantic version
 - translation of Claude agents into self-contained Codex agent `.toml` files
 - translation of Claude skills into self-contained Codex skills
-- safe reconcile of generated project files and generated Codex skill directories
+- safe reconcile of generated project files, generated Codex agent files, and generated Codex skill directories
 - state tracking for generator-owned outputs
 - project-level artifact cleanup via `clean`
 - machine-level full artifact removal via `uninstall`
@@ -107,7 +107,7 @@ The runtime is a deterministic pipeline:
 12. translate project skills into project-local `GeneratedSkill` trees
 13. merge all agents, render project-local agent `.toml` files to `.codex/agents/`, and collect global agents for `~/.codex/agents/`
 14. decide whether `CLAUDE.md` can be created or preserved as an `@AGENTS.md` shim
-15. build a full desired state for project files, Codex skill directories, and global instructions
+15. build a full desired state for project files, Codex skill directories, global agent files, and global instructions
 16. inspect/preview or reconcile that desired state with ownership and rollback protections
 
 The reconcile pipeline is shared by `validate`, `status`, and `reconcile`.
@@ -499,15 +499,15 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
   - print summary and applied changes
 - `clean`
   - remove all bridge-generated artifacts from one project
-  - release global skill registry claims for the project
-  - delete last-owner skill directories
+  - release global skill and agent registry claims for the project
+  - delete last-owner skill directories and agent files
   - preserve hand-authored files (AGENTS.md, bridge.toml)
   - do not touch global instructions (~/.codex/AGENTS.md)
   - support `--dry-run` for preview
 - `uninstall`
   - discover all projects from the global registry projects list (with fallback to skill owners for backwards compatibility)
   - clean each accessible project (skip and report inaccessible ones)
-  - remove remaining global skills, registry, and AGENTS.md
+  - remove remaining global skills, agents, registry, and AGENTS.md
   - remove bridge LaunchAgent plists
   - exit code 0 if all accessible projects cleaned successfully, 1 if any accessible project had a cleanup error (vanished project directories are not treated as errors)
   - support `--dry-run` for preview
@@ -592,11 +592,11 @@ Current runtime module responsibilities:
 - `text.py`
   - shared UTF-8 text loading helpers for runtime-managed text files
 - `translate_agents.py`
-  - Claude agent translation and unsupported-tool diagnostics
+  - Claude agent translation to `GeneratedAgentFile` objects, sandbox mode derivation, and unsupported-tool diagnostics
 - `render_agent_toml.py`
-  - prompt-file and inline config rendering
+  - self-contained Codex agent `.toml` file rendering and Claude-tool-to-sandbox-mode mapping
 - `registry.py`
-  - global generated-skill registry serialization and deterministic skill hashing
+  - global generated-skill and agent ownership registry serialization, deterministic skill and agent content hashing
 - `translate_skills.py`
   - Codex skill translation for plugins and standalone sources, plus relative-reference resolution, vendoring helpers, and collision-free name assignment via `assign_skill_names()`
 - `reconcile.py`
@@ -623,7 +623,7 @@ The suite currently verifies:
 - semver behavior
 - plugin symlink resolution
 - `CLAUDE.md` shim safety
-- agent translation and deterministic rendering
+- agent translation, `.toml` file rendering, sandbox mode derivation, and global agent registry tracking
 - skill translation, relocation rewriting, vendoring, and standalone skill translation
 - exclusion filtering for plugins and standalone sources with part-count disambiguation
 - reconcile idempotence, stale cleanup, ownership safety, diff reporting, and global instructions bridging
@@ -642,11 +642,11 @@ The test suite is the executable check for the invariants described in this file
 These are current implemented simplifications, not necessarily permanent design ideals:
 
 - the `claude` CLI must be available on PATH — without it, `discover()` raises a `DiscoveryError` and the bridge cannot function
-- agent model mapping is fixed to one default Codex model
-- unsupported Claude tools are hard errors rather than being preserved or partially translated
+- Claude `model` hints are preserved as metadata only; agents rely on Codex's native model selection
+- Claude tools are mapped to a coarse `sandbox_mode` value (`workspace-write`, `read-only`, or omitted) rather than individual tool identifiers — unsupported Claude tools are hard errors rather than being silently dropped
+- agents use Codex's native auto-discovery from `.codex/agents/` and `~/.codex/agents/` — no `config.toml` is generated
 - frontmatter parsing uses safe YAML loading for frontmatter blocks plus strict
   post-parse validation of supported runtime shapes
-- generated Codex config is inline rather than split across multiple files
 - exclusion ids are exact-match identifiers, not wildcard/glob patterns
 - LaunchAgent scheduling is supported; watcher mode is not
 
