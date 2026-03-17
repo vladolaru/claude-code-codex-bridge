@@ -1416,3 +1416,20 @@ def test_reconcile_executes_bootstrap(tmp_path: Path, capsys):
     assert exit_code == 0
     assert (project_root / "AGENTS.md").read_text() == claude_content
     assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
+
+
+def test_reconcile_bootstrap_reports_error_on_symlinked_agents_md(tmp_path: Path, capsys):
+    """Bootstrap failure (symlinked AGENTS.md) is reported cleanly, not as a traceback."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "CLAUDE.md").write_text("# Real instructions\n")
+    (project_root / "AGENTS.md").symlink_to(tmp_path / "external.md")
+
+    exit_code = cli.main([
+        "reconcile", "--project", str(project_root),
+        "--codex-home", str(tmp_path / "codex-home"),
+    ])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "Error:" in captured.err

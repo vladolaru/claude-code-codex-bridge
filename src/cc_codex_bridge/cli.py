@@ -287,7 +287,11 @@ def main(argv: list[str] | None = None) -> int:
     if build.shim_decision.action == "bootstrap":
         if args.command == "reconcile" and not args.dry_run:
             from cc_codex_bridge.claude_shim import execute_bootstrap
-            execute_bootstrap(build.discovery.project)
+            try:
+                execute_bootstrap(build.discovery.project)
+            except (ReconcileError, OSError, UnicodeError) as exc:
+                print(f"Error: {exc}", file=sys.stderr)
+                return 1
             try:
                 build = build_project_desired_state(
                     args.project,

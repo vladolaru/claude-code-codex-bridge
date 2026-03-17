@@ -37,9 +37,9 @@ def resolve_project_root(start_path: str | Path | None = None) -> ProjectContext
         agents_md_path = directory / AGENTS_MD
         if agents_md_path.is_file():
             return ProjectContext(root=directory, agents_md_path=agents_md_path)
-
-    # Fallback: accept CLAUDE.md as project marker for bootstrap
-    for directory in (candidate, *candidate.parents):
+        # Fallback: accept CLAUDE.md as project marker for bootstrap
+        # at the same directory level, so a nearer CLAUDE.md wins over
+        # a farther AGENTS.md in an ancestor.
         claude_md_path = directory / "CLAUDE.md"
         if claude_md_path.is_file():
             return ProjectContext(root=directory, agents_md_path=directory / AGENTS_MD)

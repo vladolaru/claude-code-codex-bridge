@@ -138,6 +138,21 @@ def test_resolve_project_root_prefers_agents_md_over_claude_md(tmp_path: Path):
     assert ctx.agents_md_path == agents_md.resolve()
 
 
+def test_resolve_project_root_nearer_claude_md_beats_farther_agents_md(tmp_path: Path):
+    """A nearer CLAUDE.md wins over a farther AGENTS.md in an ancestor."""
+    outer = tmp_path / "outer"
+    inner = outer / "inner"
+    inner.mkdir(parents=True)
+    (outer / "AGENTS.md").write_text("# Outer\n")
+    (inner / "CLAUDE.md").write_text("# Inner instructions\n")
+
+    ctx = resolve_project_root(inner)
+
+    assert ctx.root == inner.resolve()
+    assert ctx.agents_md_path == inner.resolve() / "AGENTS.md"
+    assert not ctx.agents_md_path.exists()
+
+
 def test_discover_latest_plugins_uses_semver_order(make_plugin_version):
     """Latest installed plugin version is selected by semantic version precedence."""
     cache_root, _ = make_plugin_version(
