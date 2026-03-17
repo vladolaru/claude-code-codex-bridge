@@ -52,6 +52,7 @@ def run_doctor(
 
     return (
         _check_python(resolved_python, version_info),
+        _check_claude_cli(),
         _check_claude_cache(resolved_cache_dir),
         _check_codex_home(resolved_codex_home),
         _check_launchagents_dir(resolved_launchagents_dir),
@@ -128,6 +129,26 @@ def _check_python(
         name="python",
         status="ok",
         message=f"Using Python {rendered_version} at {python_executable}",
+    )
+
+
+def _check_claude_cli() -> DoctorCheck:
+    """Check that the Claude CLI is available on PATH."""
+    claude_path = shutil.which("claude")
+    if claude_path is None:
+        return DoctorCheck(
+            name="claude_cli",
+            status="error",
+            message=(
+                "Claude CLI not found on PATH. "
+                "The bridge requires Claude Code to be installed. "
+                "See https://docs.anthropic.com/en/docs/claude-code"
+            ),
+        )
+    return DoctorCheck(
+        name="claude_cli",
+        status="ok",
+        message=f"Claude CLI found at {claude_path}",
     )
 
 

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from cc_codex_bridge import cli
-from cc_codex_bridge.doctor import doctor_exit_code, overall_status, run_doctor
+from cc_codex_bridge.doctor import _check_claude_cli, doctor_exit_code, overall_status, run_doctor
 
 
 def test_run_doctor_reports_warnings_without_failing_for_missing_optional_state(tmp_path: Path):
@@ -110,8 +110,41 @@ def test_doctor_cli_supports_json_output(tmp_path: Path, capsys: pytest.CaptureF
     assert payload["status"] == "warning"
     assert {check["name"] for check in payload["checks"]} == {
         "python",
+        "claude_cli",
         "claude_cache",
         "codex_home",
         "launchagents_dir",
         "command_path",
     }
+
+
+def test_check_claude_cli_reports_ok_when_found(monkeypatch: pytest.MonkeyPatch):
+    """Doctor reports ok when the claude CLI is available on PATH."""
+    monkeypatch.setattr("shutil.which", lambda name, **kw: "/usr/local/bin/claude" if name == "claude" else None)
+    check = _check_claude_cli()
+    assert check.name == "claude_cli"
+    assert check.status == "ok"
+    assert "/usr/local/bin/claude" in check.message
+
+
+def test_check_claude_cli_reports_fail_when_missing(monkeypatch: pytest.MonkeyPatch):
+    """Doctor reports fail when the claude CLI is not available."""
+    monkeypatch.setattr("shutil.which", lambda name, **kw: None)
+    check = _check_claude_cli()
+    assert check.name == "claude_cli"
+    assert check.status == "error"
+    assert "not found" in check.message.lower()
+
+
+def test_run_doctor_includes_claude_cli_check(tmp_path: Path):
+    """Doctor includes the claude_cli check in results."""
+    checks = run_doctor(
+        cache_dir=tmp_path / "missing-cache",
+        codex_home=tmp_path / "codex",
+        launchagents_dir=tmp_path / "LaunchAgents",
+        python_version=(3, 11, 9),
+        python_executable=tmp_path / "python3",
+        path_env="",
+    )
+    check_names = {c.name for c in checks}
+    assert "claude_cli" in check_names
