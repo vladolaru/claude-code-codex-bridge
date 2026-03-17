@@ -25,12 +25,25 @@ class GlobalSkillEntry:
 
 
 @dataclass(frozen=True)
+class GlobalAgentEntry:
+    """One generated-agent ownership record."""
+
+    content_hash: str
+    owners: tuple[Path, ...]
+
+
+@dataclass(frozen=True)
 class GlobalSkillRegistry:
-    """Validated global generated-skill ownership registry."""
+    """Validated global generated-skill and agent ownership registry."""
 
     skills: dict[str, GlobalSkillEntry]
     projects: tuple[Path, ...] = ()
+    agents: dict[str, GlobalAgentEntry] = None  # type: ignore[assignment]
     version: int = GLOBAL_REGISTRY_VERSION
+
+    def __post_init__(self) -> None:
+        if self.agents is None:
+            object.__setattr__(self, "agents", {})
 
     @classmethod
     def from_path(cls, path: Path) -> "GlobalSkillRegistry | None":
@@ -84,9 +97,31 @@ class GlobalSkillRegistry:
                 raise ReconcileError(f"Invalid global skill registry file: {path}")
             projects.append(project_path.resolve())
 
+        raw_agents = data.get("agents", {})
+        if not isinstance(raw_agents, dict):
+            raise ReconcileError(f"Invalid global skill registry file: {path}")
+
+        agents: dict[str, GlobalAgentEntry] = {}
+        for agent_filename, raw_agent_entry in raw_agents.items():
+            normalized_agent_filename = _require_agent_filename(agent_filename, path)
+            if not isinstance(raw_agent_entry, dict):
+                raise ReconcileError(f"Invalid global skill registry file: {path}")
+            agent_content_hash = _require_content_hash(raw_agent_entry, path)
+            agent_owners = tuple(
+                sorted(
+                    _read_owner_path_list(raw_agent_entry, "owners", path),
+                    key=str,
+                )
+            )
+            agents[normalized_agent_filename] = GlobalAgentEntry(
+                content_hash=agent_content_hash,
+                owners=agent_owners,
+            )
+
         return cls(
             skills=skills,
             projects=tuple(sorted(projects, key=str)),
+            agents=agents,
             version=GLOBAL_REGISTRY_VERSION,
         )
 
@@ -94,6 +129,13 @@ class GlobalSkillRegistry:
         """Serialize the registry deterministically."""
         payload: dict[str, object] = {
             "version": self.version,
+            "agents": {
+                agent_filename: {
+                    "content_hash": entry.content_hash,
+                    "owners": [str(owner) for owner in sorted(entry.owners, key=str)],
+                }
+                for agent_filename, entry in sorted(self.agents.items())
+            },
             "projects": sorted(str(p) for p in self.projects),
             "skills": {
                 skill_name: {
@@ -104,6 +146,15 @@ class GlobalSkillRegistry:
             },
         }
         return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+
+def hash_agent_file(content: str) -> str:
+    """Return the deterministic content hash for one generated agent .toml file."""
+    digest = hashlib.sha256()
+    encoded = content.encode("utf-8")
+    digest.update(len(encoded).to_bytes(8, "big"))
+    digest.update(encoded)
+    return f"sha256:{digest.hexdigest()}"
 
 
 def hash_generated_skill(skill: GeneratedSkill) -> str:
@@ -162,6 +213,22 @@ def _require_skill_dir_name(value: str, path: Path) -> str:
 
     normalized = Path(candidate)
     if normalized.is_absolute() or candidate != normalized.name or candidate in {".", ".."}:
+        raise ReconcileError(f"Invalid global skill registry file: {path}")
+
+    return candidate
+
+
+def _require_agent_filename(value: str, path: Path) -> str:
+    """Validate one generated agent .toml filename."""
+    candidate = value.strip()
+    if not candidate:
+        raise ReconcileError(f"Invalid global skill registry file: {path}")
+
+    normalized = Path(candidate)
+    if normalized.is_absolute() or candidate != normalized.name or candidate in {".", ".."}:
+        raise ReconcileError(f"Invalid global skill registry file: {path}")
+
+    if not candidate.endswith(".toml"):
         raise ReconcileError(f"Invalid global skill registry file: {path}")
 
     return candidate
