@@ -180,7 +180,7 @@ class AgentTranslationDiagnostic:
 class AgentTranslationResult:
     """Agent translation result plus any hard diagnostics."""
 
-    roles: tuple[GeneratedAgentRole, ...]
+    agents: tuple[GeneratedAgentFile, ...]
     diagnostics: tuple[AgentTranslationDiagnostic, ...]
 
 

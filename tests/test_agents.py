@@ -12,23 +12,19 @@ from cc_codex_bridge.frontmatter import (
     parse_frontmatter_lines,
     parse_markdown_with_frontmatter,
 )
-from cc_codex_bridge.model import GeneratedAgentFile, GeneratedAgentRole, InstalledPlugin, SemVer, TranslationError
+from cc_codex_bridge.model import GeneratedAgentFile, InstalledPlugin, SemVer, TranslationError
 from cc_codex_bridge.render_agent_toml import derive_sandbox_mode, render_agent_toml
-from cc_codex_bridge.render_codex_config import (
-    render_inline_codex_config,
-    render_prompt_files,
-)
 from cc_codex_bridge.translate_agents import (
     format_agent_translation_diagnostics,
     translate_standalone_agents,
     translate_tools,
     translate_installed_agents,
     translate_installed_agents_with_diagnostics,
-    validate_merged_roles,
+    validate_merged_agents,
 )
 
-def test_translate_installed_agents_generates_deterministic_roles(make_plugin_version):
-    """Claude agents translate to deterministic Codex role objects."""
+def test_translate_installed_agents_produces_agent_files(make_plugin_version):
+    """Plugin agents translate to GeneratedAgentFile with global scope."""
     cache_root, version_dir = make_plugin_version(
         "market",
         "pirategoat-tools",
@@ -50,130 +46,83 @@ def test_translate_installed_agents_generates_deterministic_roles(make_plugin_ve
     )
 
     plugins = discover_latest_plugins(cache_root)
-    roles = translate_installed_agents(plugins)
+    agents = translate_installed_agents(plugins)
 
-    assert len(roles) == 1
-    role = roles[0]
-    assert role.role_name == "market_pirategoat-tools_architecture_reviewer"
-    assert role.description == "Software architecture review"
-    assert role.original_model_hint == "sonnet"
-    assert role.model == "gpt-5.3-codex"
-    assert role.tools == ("bash", "read", "web_search")
-    assert role.prompt_relpath.as_posix() == "prompts/agents/market-pirategoat-tools-architecture-reviewer.md"
-    assert role.prompt_body == "You are an architecture reviewer.\n"
+    assert len(agents) == 1
+    agent = agents[0]
+    assert isinstance(agent, GeneratedAgentFile)
+    assert agent.agent_name == "market_pirategoat-tools_architecture_reviewer"
+    assert agent.description == "Software architecture review"
+    assert agent.original_model_hint == "sonnet"
+    assert agent.scope == "global"
+    assert agent.sandbox_mode == "workspace-write"
+    assert agent.install_filename == "market-pirategoat-tools-architecture-reviewer.toml"
+    assert agent.developer_instructions == "You are an architecture reviewer.\n"
 
 
-def test_render_prompt_files_uses_dot_codex_relative_paths(make_plugin_version):
-    """Rendered prompt files land under `.codex/prompts/agents/`."""
+def test_translate_standalone_agents_produces_agent_files_user_scope(tmp_path: Path):
+    """User agents translate to GeneratedAgentFile with global scope."""
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
+    (agents_dir / "my-helper.md").write_text(
+        "---\nname: my-helper\ndescription: Helps with tasks\ntools:\n  - Read\n  - Bash\n---\n\nYou help.\n"
+    )
+
+    result = translate_standalone_agents((agents_dir / "my-helper.md",), scope="user")
+
+    assert len(result.agents) == 1
+    agent = result.agents[0]
+    assert agent.agent_name == "user_my_helper"
+    assert agent.scope == "global"
+    assert agent.sandbox_mode == "workspace-write"
+    assert agent.install_filename == "user-my-helper.toml"
+    assert agent.developer_instructions == "You help.\n"
+
+
+def test_translate_standalone_agents_produces_agent_files_project_scope(tmp_path: Path):
+    """Project agents translate to GeneratedAgentFile with project scope."""
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
+    (agents_dir / "code-reviewer.md").write_text(
+        "---\nname: code-reviewer\ndescription: Reviews code\ntools:\n  - Read\n  - Grep\n---\n\nYou review code.\n"
+    )
+
+    result = translate_standalone_agents((agents_dir / "code-reviewer.md",), scope="project")
+
+    assert len(result.agents) == 1
+    agent = result.agents[0]
+    assert agent.agent_name == "project_code_reviewer"
+    assert agent.scope == "project"
+    assert agent.sandbox_mode == "read-only"
+    assert agent.install_filename == "project-code-reviewer.toml"
+    assert agent.developer_instructions == "You review code.\n"
+
+
+def test_agent_file_sandbox_mode_derived_from_tools(make_plugin_version):
+    """sandbox_mode is derived from the Claude tool list."""
     cache_root, version_dir = make_plugin_version(
-        "market", "test-plugin", "1.0.0", agent_names=("reviewer",)
+        "market", "test-plugin", "1.0.0", agent_names=("writer", "reader", "minimal"),
     )
-    (version_dir / "agents" / "reviewer.md").write_text(
-        "---\nname: reviewer\ndescription: Review\n---\n\nPrompt body.\n"
+    (version_dir / "agents" / "writer.md").write_text(
+        "---\nname: writer\ndescription: Writes\ntools:\n  - Read\n  - Write\n  - Bash\n---\n\nWrite.\n"
     )
-
-    roles = translate_installed_agents(discover_latest_plugins(cache_root))
-    prompt_files = render_prompt_files(roles)
-
-    assert prompt_files == {
-        Path(".codex/prompts/agents/market-test-plugin-reviewer.md"): "Prompt body.\n"
-    }
-
-
-def test_render_inline_codex_config_is_deterministic(make_plugin_version):
-    """Inline config rendering is stable and references generated prompt files."""
-    cache_root, first = make_plugin_version(
-        "market", "alpha", "1.0.0", agent_names=("b-reviewer",)
+    (version_dir / "agents" / "reader.md").write_text(
+        "---\nname: reader\ndescription: Reads\ntools:\n  - Read\n  - Grep\n---\n\nRead.\n"
     )
-    _, second = make_plugin_version(
-        "market", "beta", "2.0.0", agent_names=("a-reviewer",)
-    )
-    (first / "agents" / "b-reviewer.md").write_text(
-        "---\nname: b-reviewer\ndescription: B role\nmodel: sonnet\n---\n\nB prompt.\n"
-    )
-    (second / "agents" / "a-reviewer.md").write_text(
-        "---\nname: a-reviewer\ndescription: A role\ntools:\n  - Read\n  - Write\n---\n\nA prompt.\n"
+    (version_dir / "agents" / "minimal.md").write_text(
+        "---\nname: minimal\ndescription: Minimal\n---\n\nMinimal.\n"
     )
 
-    roles = translate_installed_agents(discover_latest_plugins(cache_root))
-    rendered = render_inline_codex_config(roles)
+    agents = translate_installed_agents(discover_latest_plugins(cache_root))
+    by_name = {a.agent_name: a for a in agents}
 
-    assert '[agents.market_alpha_b_reviewer]' in rendered
-    assert '[agents.market_beta_a_reviewer]' in rendered
-    assert 'prompt = ".codex/prompts/agents/market-alpha-b-reviewer.md"' in rendered
-    assert 'prompt = ".codex/prompts/agents/market-beta-a-reviewer.md"' in rendered
-    assert '# original_claude_model_hint = "sonnet"' in rendered
-    assert 'tools = ["read", "write"]' in rendered
-
-
-def test_render_inline_codex_config_escapes_multiline_strings(make_plugin_version):
-    """Multiline frontmatter values still produce valid TOML config output."""
-    cache_root, version_dir = make_plugin_version(
-        "market", "test-plugin", "1.0.0", agent_names=("reviewer",)
-    )
-    (version_dir / "agents" / "reviewer.md").write_text(
-        "---\n"
-        "name: reviewer\n"
-        "description: |\n"
-        "  line one\n"
-        "  line two\n"
-        "---\n\n"
-        "Prompt body.\n"
-    )
-
-    roles = translate_installed_agents(discover_latest_plugins(cache_root))
-    rendered = render_inline_codex_config(roles)
-    parsed = tomllib.loads(rendered)
-
-    assert parsed["agents"]["market_test-plugin_reviewer"]["description"] == "line one\nline two"
-
-
-def test_translate_tools_and_rendered_config_ignore_source_tool_order(make_plugin_version):
-    """Equivalent tool sets produce the same translated order and config output."""
-    cache_root, version_dir = make_plugin_version(
-        "market",
-        "test-plugin",
-        "1.0.0",
-        agent_names=("reviewer",),
-    )
-    agent_path = version_dir / "agents" / "reviewer.md"
-    agent_path.write_text(
-        "---\n"
-        "name: reviewer\n"
-        "description: Review\n"
-        "tools:\n"
-        "  - Write\n"
-        "  - Read\n"
-        "  - Bash\n"
-        "---\n\n"
-        "Prompt body.\n"
-    )
-
-    first_roles = translate_installed_agents(discover_latest_plugins(cache_root))
-    first_render = render_inline_codex_config(first_roles)
-
-    agent_path.write_text(
-        "---\n"
-        "name: reviewer\n"
-        "description: Review\n"
-        "tools:\n"
-        "  - Bash\n"
-        "  - Write\n"
-        "  - Read\n"
-        "---\n\n"
-        "Prompt body.\n"
-    )
-
-    second_roles = translate_installed_agents(discover_latest_plugins(cache_root))
-    second_render = render_inline_codex_config(second_roles)
-
-    assert first_roles[0].tools == ("bash", "read", "write")
-    assert second_roles[0].tools == ("bash", "read", "write")
-    assert first_render == second_render
+    assert by_name["market_test-plugin_writer"].sandbox_mode == "workspace-write"
+    assert by_name["market_test-plugin_reader"].sandbox_mode == "read-only"
+    assert by_name["market_test-plugin_minimal"].sandbox_mode is None
 
 
 def test_translate_installed_agents_sanitizes_generated_names_and_paths(make_plugin_version):
-    """Unsafe agent names are normalized before role and prompt paths are generated."""
+    """Unsafe agent names are normalized before agent names and install filenames are generated."""
     cache_root, version_dir = make_plugin_version(
         "market",
         "test-plugin",
@@ -188,10 +137,10 @@ def test_translate_installed_agents_sanitizes_generated_names_and_paths(make_plu
         "Prompt body.\n"
     )
 
-    roles = translate_installed_agents(discover_latest_plugins(cache_root))
+    agents = translate_installed_agents(discover_latest_plugins(cache_root))
 
-    assert roles[0].role_name == "market_test-plugin_tmp_pwn"
-    assert roles[0].prompt_relpath.as_posix() == "prompts/agents/market-test-plugin-tmp-pwn.md"
+    assert agents[0].agent_name == "market_test-plugin_tmp_pwn"
+    assert agents[0].install_filename == "market-test-plugin-tmp-pwn.toml"
 
 
 def test_translate_installed_agents_always_includes_marketplace_prefix(
@@ -213,15 +162,15 @@ def test_translate_installed_agents_always_includes_marketplace_prefix(
     for agent_path in (alpha_dir / "agents" / "reviewer.md", beta_dir / "agents" / "reviewer.md"):
         agent_path.write_text("---\nname: reviewer\ndescription: Review\n---\n\nPrompt.\n")
 
-    roles = translate_installed_agents(discover_latest_plugins(cache_root))
+    agents = translate_installed_agents(discover_latest_plugins(cache_root))
 
-    assert [role.role_name for role in roles] == [
+    assert [a.agent_name for a in agents] == [
         "alpha_shared-plugin_reviewer",
         "beta_shared-plugin_reviewer",
     ]
-    assert [role.prompt_relpath.as_posix() for role in roles] == [
-        "prompts/agents/alpha-shared-plugin-reviewer.md",
-        "prompts/agents/beta-shared-plugin-reviewer.md",
+    assert [a.install_filename for a in agents] == [
+        "alpha-shared-plugin-reviewer.toml",
+        "beta-shared-plugin-reviewer.toml",
     ]
 
 
@@ -300,7 +249,7 @@ def test_translate_installed_agents_reports_unsupported_tools(make_plugin_versio
 
     result = translate_installed_agents_with_diagnostics(discover_latest_plugins(cache_root))
 
-    assert result.roles == ()
+    assert result.agents == ()
     assert len(result.diagnostics) == 1
     assert result.diagnostics[0].source_path == version_dir / "agents" / "broken.md"
     assert result.diagnostics[0].agent_name == "broken"
@@ -313,8 +262,8 @@ def test_translate_installed_agents_reports_unsupported_tools(make_plugin_versio
         translate_installed_agents(discover_latest_plugins(cache_root))
 
 
-def test_translate_installed_agents_detects_duplicate_role_names(make_plugin_version):
-    """Role-name collisions across plugins are rejected."""
+def test_translate_installed_agents_detects_duplicate_agent_names(make_plugin_version):
+    """Agent-name collisions across plugins are rejected."""
     cache_root, version_dir = make_plugin_version("market", "alpha", "1.0.0", agent_names=("same",))
     first_agent = version_dir / "agents" / "same.md"
     first_agent.write_text("---\nname: same-role\ndescription: First\n---\n\nPrompt.\n")
@@ -332,7 +281,7 @@ def test_translate_installed_agents_detects_duplicate_role_names(make_plugin_ver
         agents=(first_agent, second_agent),
     )
 
-    with pytest.raises(TranslationError, match="duplicate role name"):
+    with pytest.raises(TranslationError, match="duplicate agent name"):
         translate_installed_agents((plugin,))
 
 
@@ -420,8 +369,8 @@ def test_translate_installed_agents_accepts_edit_tool(make_plugin_version):
     result = translate_installed_agents_with_diagnostics(discover_latest_plugins(cache_root))
 
     assert result.diagnostics == ()
-    assert len(result.roles) == 1
-    assert "edit" in result.roles[0].tools
+    assert len(result.agents) == 1
+    assert result.agents[0].sandbox_mode == "workspace-write"
 
 
 def test_translate_installed_agents_accepts_quoted_fields_and_inline_tool_lists(
@@ -443,12 +392,12 @@ def test_translate_installed_agents_accepts_quoted_fields_and_inline_tool_lists(
         "Prompt body.\n"
     )
 
-    roles = translate_installed_agents(discover_latest_plugins(cache_root))
+    agents = translate_installed_agents(discover_latest_plugins(cache_root))
 
-    assert len(roles) == 1
-    assert roles[0].role_name == "market_test-plugin_reviewer"
-    assert roles[0].description == "Review: carefully"
-    assert roles[0].tools == ("read", "write")
+    assert len(agents) == 1
+    assert agents[0].agent_name == "market_test-plugin_reviewer"
+    assert agents[0].description == "Review: carefully"
+    assert agents[0].sandbox_mode == "workspace-write"
 
 
 def test_parse_frontmatter_lines_accepts_quoted_strings_and_inline_lists():
@@ -503,42 +452,6 @@ def test_parse_frontmatter_lines_rejects_unsupported_yaml_runtime_shapes():
         parse_frontmatter_lines(["options: !!set {Read: null}"])
 
 
-def test_translate_user_agent(tmp_path: Path):
-    """User-level agents are translated with a user_ role prefix."""
-    agents_dir = tmp_path / "agents"
-    agents_dir.mkdir()
-    (agents_dir / "my-helper.md").write_text(
-        "---\nname: my-helper\ndescription: Helps with tasks\ntools:\n  - Read\n  - Bash\n---\n\nYou help.\n"
-    )
-
-    result = translate_standalone_agents((agents_dir / "my-helper.md",), scope="user")
-
-    assert len(result.roles) == 1
-    role = result.roles[0]
-    assert role.role_name == "user_my_helper"
-    assert role.prompt_body == "You help.\n"
-    assert "bash" in role.tools
-    assert "read" in role.tools
-    assert role.prompt_relpath.as_posix() == "prompts/agents/user-my-helper.md"
-
-
-def test_translate_project_agent(tmp_path: Path):
-    """Project-level agents are translated with a project_ role prefix."""
-    agents_dir = tmp_path / "agents"
-    agents_dir.mkdir()
-    (agents_dir / "code-reviewer.md").write_text(
-        "---\nname: code-reviewer\ndescription: Reviews code\ntools:\n  - Read\n  - Grep\n---\n\nYou review code.\n"
-    )
-
-    result = translate_standalone_agents((agents_dir / "code-reviewer.md",), scope="project")
-
-    assert len(result.roles) == 1
-    role = result.roles[0]
-    assert role.role_name == "project_code_reviewer"
-    assert role.prompt_relpath.as_posix() == "prompts/agents/project-code-reviewer.md"
-    assert role.tools == ("grep", "read")
-
-
 def test_translate_standalone_agent_with_unsupported_tools(tmp_path: Path):
     """Standalone agents with unsupported tools produce diagnostics."""
     agents_dir = tmp_path / "agents"
@@ -549,13 +462,13 @@ def test_translate_standalone_agent_with_unsupported_tools(tmp_path: Path):
 
     result = translate_standalone_agents((agents_dir / "broken.md",), scope="user")
 
-    assert result.roles == ()
+    assert result.agents == ()
     assert len(result.diagnostics) == 1
     assert result.diagnostics[0].unsupported_tools == ("NotebookEdit",)
 
 
-def test_translate_standalone_agents_rejects_duplicate_normalized_role_names(tmp_path: Path):
-    """Standalone agents with names that normalize to the same role name are rejected."""
+def test_translate_standalone_agents_rejects_duplicate_normalized_agent_names(tmp_path: Path):
+    """Standalone agents with names that normalize to the same agent name are rejected."""
     a = tmp_path / "same-role.md"
     b = tmp_path / "same role.md"
     a.write_text(
@@ -565,17 +478,17 @@ def test_translate_standalone_agents_rejects_duplicate_normalized_role_names(tmp
         "---\nname: same role\ndescription: Second agent\n---\n\nPrompt B\n"
     )
 
-    with pytest.raises(TranslationError, match="duplicate role name"):
+    with pytest.raises(TranslationError, match="duplicate agent name"):
         translate_standalone_agents((a, b), scope="user")
 
 
-def test_translate_installed_agents_detects_duplicate_prompt_paths(make_plugin_version):
-    """Prompt-path collisions across plugins are rejected even when role names differ.
+def test_translate_installed_agents_detects_duplicate_install_filenames(make_plugin_version):
+    """Install-filename collisions across plugins are rejected even when agent names differ.
 
     Plugin "a-b" with agent "c" and plugin "a" with agent "b-c" produce
-    distinct role names (market_a-b_c vs market_a_b_c) but identical
-    prompt path components (market-a-b-c.md), which would silently
-    overwrite one prompt file.
+    distinct agent names (market_a-b_c vs market_a_b_c) but identical
+    install filenames (market-a-b-c.toml), which would silently
+    overwrite one agent file.
     """
     cache_root, first_dir = make_plugin_version(
         "market", "a-b", "1.0.0", agent_names=("c",)
@@ -614,103 +527,96 @@ def test_translate_installed_agents_detects_duplicate_prompt_paths(make_plugin_v
         agents=(second_agent,),
     )
 
-    with pytest.raises(TranslationError, match="duplicate prompt path"):
+    with pytest.raises(TranslationError, match="duplicate install filename"):
         translate_installed_agents((first_plugin, second_plugin))
 
 
 def test_translate_standalone_agent_empty_input():
     """Empty agent paths produce empty result."""
     result = translate_standalone_agents((), scope="user")
-    assert result.roles == ()
+    assert result.agents == ()
     assert result.diagnostics == ()
 
 
-def test_validate_merged_roles_detects_cross_scope_role_name_collision():
-    """Cross-scope role name collisions are rejected after merging."""
-    role_a = GeneratedAgentRole(
-        plugin_name="plugin-a",
+def test_validate_merged_agents_detects_name_collision():
+    """Duplicate agent_name across scopes is rejected."""
+    agent_a = GeneratedAgentFile(
         source_path=Path("/plugins/a/agents/agent.md"),
-        role_name="user_plugin_agent",
+        scope="global",
+        agent_name="user_plugin_agent",
+        install_filename="plugin-a-agent.toml",
         description="From plugin scope",
+        developer_instructions="Prompt A.\n",
+        sandbox_mode=None,
         original_model_hint=None,
-        model="gpt-5.3-codex",
-        tools=(),
-        prompt_relpath=Path("prompts/agents/plugin-a-agent.md"),
-        prompt_body="Prompt A.\n",
     )
-    role_b = GeneratedAgentRole(
-        plugin_name="_user",
+    agent_b = GeneratedAgentFile(
         source_path=Path("/home/.claude/agents/plugin-agent.md"),
-        role_name="user_plugin_agent",
+        scope="global",
+        agent_name="user_plugin_agent",
+        install_filename="user-plugin-agent.toml",
         description="From user scope",
+        developer_instructions="Prompt B.\n",
+        sandbox_mode=None,
         original_model_hint=None,
-        model="gpt-5.3-codex",
-        tools=(),
-        prompt_relpath=Path("prompts/agents/user-plugin-agent.md"),
-        prompt_body="Prompt B.\n",
     )
 
-    with pytest.raises(TranslationError, match="Duplicate role name"):
-        validate_merged_roles((role_a, role_b))
+    with pytest.raises(TranslationError, match="Duplicate agent name"):
+        validate_merged_agents((agent_a, agent_b))
 
 
-def test_validate_merged_roles_detects_cross_scope_prompt_path_collision():
-    """Cross-scope prompt path collisions are rejected after merging."""
-    shared_path = Path("prompts/agents/shared-prompt.md")
-    role_a = GeneratedAgentRole(
-        plugin_name="plugin-a",
+def test_validate_merged_agents_detects_filename_collision():
+    """Duplicate install_filename across scopes is rejected."""
+    agent_a = GeneratedAgentFile(
         source_path=Path("/plugins/a/agents/agent.md"),
-        role_name="role_alpha",
-        description="First role",
+        scope="global",
+        agent_name="agent_alpha",
+        install_filename="shared-agent.toml",
+        description="First agent",
+        developer_instructions="Prompt A.\n",
+        sandbox_mode=None,
         original_model_hint=None,
-        model="gpt-5.3-codex",
-        tools=(),
-        prompt_relpath=shared_path,
-        prompt_body="Prompt A.\n",
     )
-    role_b = GeneratedAgentRole(
-        plugin_name="_user",
+    agent_b = GeneratedAgentFile(
         source_path=Path("/home/.claude/agents/agent.md"),
-        role_name="role_beta",
-        description="Second role",
+        scope="global",
+        agent_name="agent_beta",
+        install_filename="shared-agent.toml",
+        description="Second agent",
+        developer_instructions="Prompt B.\n",
+        sandbox_mode=None,
         original_model_hint=None,
-        model="gpt-5.3-codex",
-        tools=(),
-        prompt_relpath=shared_path,
-        prompt_body="Prompt B.\n",
     )
 
-    with pytest.raises(TranslationError, match="Duplicate prompt path"):
-        validate_merged_roles((role_a, role_b))
+    with pytest.raises(TranslationError, match="Duplicate install filename"):
+        validate_merged_agents((agent_a, agent_b))
 
 
-def test_validate_merged_roles_accepts_unique_roles():
-    """Unique role names and prompt paths pass validation."""
-    role_a = GeneratedAgentRole(
-        plugin_name="plugin-a",
+def test_validate_merged_agents_accepts_unique_agents():
+    """Unique agent names and install filenames pass validation."""
+    agent_a = GeneratedAgentFile(
         source_path=Path("/plugins/a/agents/agent.md"),
-        role_name="plugin_agent_alpha",
-        description="First role",
+        scope="global",
+        agent_name="plugin_agent_alpha",
+        install_filename="plugin-a-alpha.toml",
+        description="First agent",
+        developer_instructions="Prompt A.\n",
+        sandbox_mode=None,
         original_model_hint=None,
-        model="gpt-5.3-codex",
-        tools=(),
-        prompt_relpath=Path("prompts/agents/plugin-a-alpha.md"),
-        prompt_body="Prompt A.\n",
     )
-    role_b = GeneratedAgentRole(
-        plugin_name="_user",
+    agent_b = GeneratedAgentFile(
         source_path=Path("/home/.claude/agents/beta.md"),
-        role_name="user_agent_beta",
-        description="Second role",
+        scope="global",
+        agent_name="user_agent_beta",
+        install_filename="user-beta.toml",
+        description="Second agent",
+        developer_instructions="Prompt B.\n",
+        sandbox_mode=None,
         original_model_hint=None,
-        model="gpt-5.3-codex",
-        tools=(),
-        prompt_relpath=Path("prompts/agents/user-beta.md"),
-        prompt_body="Prompt B.\n",
     )
 
     # Should not raise
-    validate_merged_roles((role_a, role_b))
+    validate_merged_agents((agent_a, agent_b))
 
 
 # --- render_agent_toml and derive_sandbox_mode tests ---
@@ -730,7 +636,6 @@ def test_render_agent_toml_produces_valid_toml():
     assert result.startswith("# GENERATED FILE")
 
     # Verify it parses as valid TOML
-    import tomllib
     parsed = tomllib.loads(result)
     assert parsed["name"] == "my-agent"
     assert parsed["description"] == "A helpful agent"
@@ -747,7 +652,6 @@ def test_render_agent_toml_includes_sandbox_mode_when_present():
     )
     assert 'sandbox_mode = "workspace-write"' in result
 
-    import tomllib
     parsed = tomllib.loads(result)
     assert parsed["sandbox_mode"] == "workspace-write"
 
@@ -773,7 +677,6 @@ def test_render_agent_toml_escapes_multiline_instructions():
     # Description quotes should be escaped in the basic string
     assert 'description = "Multi-line desc with \\"quotes\\""' in result
 
-    import tomllib
     parsed = tomllib.loads(result)
     assert parsed["description"] == 'Multi-line desc with "quotes"'
     assert parsed["developer_instructions"] == "Line one.\nLine two.\nLine three.\n"
