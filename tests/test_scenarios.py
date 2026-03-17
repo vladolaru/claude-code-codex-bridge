@@ -470,20 +470,22 @@ def test_rich_plugin_ecosystem(make_project, tmp_path: Path):
         arch_dir / "SKILL.md"
     ).read_text()
 
-    # -- All agents in config.toml with correct tools --
-    config = (project_root / ".codex" / "config.toml").read_text()
-    assert "vlad-plugins_review-tools_security_reviewer" in config
-    assert "vlad-plugins_review-tools_a11y_reviewer" in config
-    assert "vlad-plugins_review-tools_performance_reviewer" in config
+    # -- config.toml is no longer generated --
+    assert not (project_root / ".codex" / "config.toml").exists()
 
-    # -- Prompt files exist for all agents --
-    prompts = project_root / ".codex" / "prompts" / "agents"
-    prompt_files = sorted(p.name for p in prompts.glob("*.md"))
-    assert len(prompt_files) == 3
+    # -- All agents have .toml files in global agents dir --
+    agents_dir = codex_home / "agents"
+    agent_files = sorted(p.name for p in agents_dir.glob("*.toml"))
+    assert len(agent_files) == 3
 
-    # -- Security reviewer prompt has full content --
-    sec_prompt = [p for p in prompts.glob("*security*")][0]
-    sec_content = sec_prompt.read_text()
+    # Verify agent names appear in .toml filenames
+    assert any("security-reviewer" in f for f in agent_files)
+    assert any("a11y-reviewer" in f for f in agent_files)
+    assert any("performance-reviewer" in f for f in agent_files)
+
+    # -- Security reviewer agent .toml has full content --
+    sec_agent = [p for p in agents_dir.glob("*security*")][0]
+    sec_content = sec_agent.read_text()
     assert "SQL injection" in sec_content
     assert "nonces" in sec_content
 
@@ -543,15 +545,23 @@ def test_power_user_full_stack(make_project, tmp_path: Path):
     assert not (codex_home / "skills" / "run-tests").exists()
     assert not (codex_home / "skills" / "project-run-tests").exists()
 
-    # -- All agents in config.toml --
-    config = (project_root / ".codex" / "config.toml").read_text()
-    # Plugin agents (marketplace-prefixed)
-    assert "vlad-plugins_review-tools_security_reviewer" in config
-    # User agent (scope-prefixed)
-    assert "user_thinking_partner" in config
-    # Project agents (scope-prefixed)
-    assert "project_code_reviewer" in config
-    assert "project_test_writer" in config
+    # -- config.toml is no longer generated --
+    assert not (project_root / ".codex" / "config.toml").exists()
+
+    # -- Plugin and user agents → global agents dir (.toml files) --
+    global_agents_dir = codex_home / "agents"
+    global_agent_files = sorted(p.name for p in global_agents_dir.glob("*.toml"))
+    # Plugin agents (3) + user agent (1) = 4 global agents
+    assert len(global_agent_files) == 4
+    assert any("security-reviewer" in f for f in global_agent_files)
+    assert any("thinking-partner" in f for f in global_agent_files)
+
+    # -- Project agents → project-local .codex/agents/ (.toml files) --
+    project_agents_dir = project_root / ".codex" / "agents"
+    project_agent_files = sorted(p.name for p in project_agents_dir.glob("*.toml"))
+    assert len(project_agent_files) == 2
+    assert any("code-reviewer" in f for f in project_agent_files)
+    assert any("test-writer" in f for f in project_agent_files)
 
     # -- User CLAUDE.md → ~/.codex/AGENTS.md --
     global_agents = codex_home / "AGENTS.md"
@@ -585,8 +595,8 @@ def test_setup_evolves_over_time(make_project, tmp_path: Path):
     assert reconcile(project_root, claude_home, codex_home) == 0
 
     assert (codex_home / "skills" / "code-review" / "SKILL.md").exists()
-    config_v1 = (project_root / ".codex" / "config.toml").read_text()
-    assert "vlad-plugins_review-tools_security_reviewer" in config_v1
+    # Plugin agents land in global agents dir
+    assert any("security-reviewer" in p.name for p in (codex_home / "agents").glob("*.toml"))
     assert not (codex_home / "AGENTS.md").exists()  # no user CLAUDE.md yet
 
     # --- Phase 2: Add user skill + CLAUDE.md ---
@@ -614,9 +624,11 @@ def test_setup_evolves_over_time(make_project, tmp_path: Path):
     build_project_agent(project_root, "reviewer", tools=("Read", "Grep"))
     assert reconcile(project_root, claude_home, codex_home) == 0
 
-    config_v4 = (project_root / ".codex" / "config.toml").read_text()
-    assert "project_reviewer" in config_v4
-    assert "vlad-plugins_review-tools_security_reviewer" in config_v4  # plugin still there
+    # Project agent lands in project-local .codex/agents/
+    project_agents_dir = project_root / ".codex" / "agents"
+    assert any("reviewer" in p.name for p in project_agents_dir.glob("*.toml"))
+    # Plugin agents still in global agents dir
+    assert any("security-reviewer" in p.name for p in (codex_home / "agents").glob("*.toml"))
 
     # --- Phase 5: Plugin version bumps (old version removed, new installed) ---
     import shutil
@@ -626,9 +638,8 @@ def test_setup_evolves_over_time(make_project, tmp_path: Path):
 
     # Skills still present (same content, new version path)
     assert (codex_home / "skills" / "code-review" / "SKILL.md").exists()
-    # Config regenerated
-    config_v5 = (project_root / ".codex" / "config.toml").read_text()
-    assert "project_reviewer" in config_v5  # project agent survived plugin change
+    # Project agent survived plugin change
+    assert any("reviewer" in p.name for p in (project_root / ".codex" / "agents").glob("*.toml"))
 
 
 def test_two_projects_share_user_setup(make_project, tmp_path: Path):
@@ -669,18 +680,18 @@ def test_two_projects_share_user_setup(make_project, tmp_path: Path):
     assert (codex_home / "AGENTS.md").exists()
 
     # -- Project A has its agent, not project B's skill --
-    config_a = (project_a / ".codex" / "config.toml").read_text()
-    assert "project_deployer" in config_a
+    project_a_agents = project_a / ".codex" / "agents"
+    assert any("deployer" in p.name for p in project_a_agents.glob("*.toml"))
     assert not (project_a / ".codex" / "skills" / "lint-check").exists()
 
     # -- Project B has its skill, not project A's agent --
-    config_b = (project_b / ".codex" / "config.toml").read_text()
-    assert "project_deployer" not in config_b
+    project_b_agents = project_b / ".codex" / "agents"
+    assert not project_b_agents.exists() or not any("deployer" in p.name for p in project_b_agents.glob("*.toml"))
     assert (project_b / ".codex" / "skills" / "lint-check" / "SKILL.md").exists()
 
-    # -- Both projects have the plugin agents --
-    assert "vlad-plugins_review-tools_security_reviewer" in config_a
-    assert "vlad-plugins_review-tools_security_reviewer" in config_b
+    # -- Plugin agents are in the global agents dir (shared) --
+    global_agents_dir = codex_home / "agents"
+    assert any("security-reviewer" in p.name for p in global_agents_dir.glob("*.toml"))
 
     # -- Re-reconcile project A without the plugin → shared skill survives --
     import shutil
@@ -729,19 +740,23 @@ def test_selective_exclusion_via_config_and_cli(make_project, tmp_path: Path):
     assert (codex_home / "skills" / "code-review" / "SKILL.md").exists()
     assert (codex_home / "skills" / "url-shorthand" / "SKILL.md").exists()
 
-    # -- Excluded agent NOT in config or prompts --
-    config = (project_root / ".codex" / "config.toml").read_text()
-    assert "performance_reviewer" not in config
+    # -- Excluded agent NOT in global or project agent dirs --
+    global_agents_dir = codex_home / "agents"
+    global_agent_names = [p.name for p in global_agents_dir.glob("*.toml")]
+    assert not any("performance" in n for n in global_agent_names)
 
-    # -- Other agents still present --
-    assert "vlad-plugins_review-tools_security_reviewer" in config
-    assert "vlad-plugins_review-tools_a11y_reviewer" in config
-    assert "project_reviewer" in config
+    # -- Other plugin/user agents still present in global agents dir --
+    assert any("security-reviewer" in n for n in global_agent_names)
+    assert any("a11y-reviewer" in n for n in global_agent_names)
 
-    prompts = project_root / ".codex" / "prompts" / "agents"
-    prompt_names = sorted(p.name for p in prompts.glob("*.md"))
-    assert not any("performance" in n for n in prompt_names)
-    assert len(prompt_names) == 3  # security + a11y + project reviewer
+    # -- Project agent still present in project-local agents dir --
+    project_agents_dir = project_root / ".codex" / "agents"
+    project_agent_names = [p.name for p in project_agents_dir.glob("*.toml")]
+    assert any("reviewer" in n for n in project_agent_names)
+
+    # Total non-excluded agents: security + a11y (global) + project reviewer (local)
+    assert len(global_agent_names) == 2
+    assert len(project_agent_names) == 1
 
     # --- Now test CLI --exclude-plugin overrides ---
     exit_code = cli.main([
@@ -759,10 +774,11 @@ def test_selective_exclusion_via_config_and_cli(make_project, tmp_path: Path):
 
     # -- User skill and project agent still present --
     assert (codex_home / "skills" / "url-shorthand" / "SKILL.md").exists()
-    config_after = (project_root / ".codex" / "config.toml").read_text()
-    assert "project_reviewer" in config_after
-    # Plugin agents removed
-    assert "security_reviewer" not in config_after
+    project_agents_after = [p.name for p in (project_root / ".codex" / "agents").glob("*.toml")]
+    assert any("reviewer" in n for n in project_agents_after)
+    # Plugin agents removed from global agents dir
+    global_agents_after = list((codex_home / "agents").glob("*.toml")) if (codex_home / "agents").exists() else []
+    assert not any("security" in p.name for p in global_agents_after)
 
 
 # ===========================================================================
@@ -797,14 +813,16 @@ def test_clean_undoes_reconcile(make_project, tmp_path: Path):
 
     # Verify artifacts exist
     assert (project_root / "CLAUDE.md").exists()
-    assert (project_root / ".codex" / "config.toml").exists()
     assert (project_root / ".codex" / "claude-code-bridge-state.json").exists()
     assert (project_root / ".codex" / "skills" / "run-tests" / "SKILL.md").exists()
     assert (codex_home / "skills" / "code-review" / "SKILL.md").exists()
     assert (codex_home / "skills" / "url-shorthand" / "SKILL.md").exists()
     assert (codex_home / "AGENTS.md").exists()
-    prompts = list((project_root / ".codex" / "prompts" / "agents").glob("*.md"))
-    assert len(prompts) > 0
+    # Project agent .toml file exists
+    project_agents_dir = project_root / ".codex" / "agents"
+    assert len(list(project_agents_dir.glob("*.toml"))) > 0
+    # Global agent .toml files exist (plugin agents)
+    assert len(list((codex_home / "agents").glob("*.toml"))) > 0
 
     # Clean
     exit_code = cli.main([
@@ -816,11 +834,10 @@ def test_clean_undoes_reconcile(make_project, tmp_path: Path):
 
     # All managed project files gone
     assert not (project_root / "CLAUDE.md").exists()
-    assert not (project_root / ".codex" / "config.toml").exists()
     assert not (project_root / ".codex" / "claude-code-bridge-state.json").exists()
     assert not (project_root / ".codex" / "skills" / "run-tests").exists()
-    prompts_dir = project_root / ".codex" / "prompts" / "agents"
-    assert not prompts_dir.exists() or len(list(prompts_dir.glob("*.md"))) == 0
+    # Project agent .toml files removed
+    assert not project_agents_dir.exists() or len(list(project_agents_dir.glob("*.toml"))) == 0
 
     # Global skills removed (this project was the only owner)
     assert not (codex_home / "skills" / "code-review").exists()
@@ -864,7 +881,6 @@ def test_clean_dry_run_previews_without_side_effects(make_project, tmp_path: Pat
 
     # Everything still exists
     assert (project_root / "CLAUDE.md").exists()
-    assert (project_root / ".codex" / "config.toml").exists()
     assert (project_root / ".codex" / "claude-code-bridge-state.json").exists()
     assert (codex_home / "skills" / "code-review" / "SKILL.md").exists()
     assert (codex_home / "skills" / "url-shorthand" / "SKILL.md").exists()
@@ -896,8 +912,8 @@ def test_uninstall_cleans_entire_machine(make_project, tmp_path: Path):
     (la_dir / "com.openai.codex-bridge.project-a.abc123.plist").write_bytes(b"<plist/>")
 
     # Verify everything exists
-    assert (project_a / ".codex" / "config.toml").exists()
-    assert (project_b / ".codex" / "config.toml").exists()
+    assert (project_a / ".codex" / "claude-code-bridge-state.json").exists()
+    assert (project_b / ".codex" / "claude-code-bridge-state.json").exists()
     assert (codex_home / "skills" / "code-review" / "SKILL.md").exists()
     assert (codex_home / "skills" / "url-shorthand" / "SKILL.md").exists()
     assert (codex_home / "AGENTS.md").exists()
@@ -911,9 +927,9 @@ def test_uninstall_cleans_entire_machine(make_project, tmp_path: Path):
     assert exit_code == 0
 
     # Both projects cleaned
-    assert not (project_a / ".codex" / "config.toml").exists()
+    assert not (project_a / ".codex" / "claude-code-bridge-state.json").exists()
     assert not (project_a / "CLAUDE.md").exists()
-    assert not (project_b / ".codex" / "config.toml").exists()
+    assert not (project_b / ".codex" / "claude-code-bridge-state.json").exists()
     assert not (project_b / "CLAUDE.md").exists()
 
     # Global artifacts removed
@@ -1010,7 +1026,7 @@ def test_uninstall_skips_vanished_project_cleans_rest(make_project, tmp_path: Pa
     assert exit_code == 0
 
     # Project B was cleaned
-    assert not (project_b / ".codex" / "config.toml").exists()
+    assert not (project_b / ".codex" / "claude-code-bridge-state.json").exists()
     assert not (project_b / "CLAUDE.md").exists()
 
     # Global skills fully removed (even skills owned by the vanished project)
@@ -1053,9 +1069,9 @@ def test_reconcile_all_reconciles_registered_projects(make_project, tmp_path: Pa
     exit_code = cli.main(["reconcile-all", "--codex-home", str(codex_home)])
     assert exit_code == 0
 
-    # Both projects have artifacts
-    assert (project_a / ".codex" / "config.toml").exists()
-    assert (project_b / ".codex" / "config.toml").exists()
+    # Both projects have artifacts (state file confirms reconcile ran)
+    assert (project_a / ".codex" / "claude-code-bridge-state.json").exists()
+    assert (project_b / ".codex" / "claude-code-bridge-state.json").exists()
 
 
 def test_reconcile_all_handles_missing_project(make_project, tmp_path: Path):
@@ -1081,4 +1097,4 @@ def test_reconcile_all_handles_missing_project(make_project, tmp_path: Path):
     assert exit_code == 1
 
     # Project B was still reconciled successfully
-    assert (project_b / ".codex" / "config.toml").exists()
+    assert (project_b / ".codex" / "claude-code-bridge-state.json").exists()

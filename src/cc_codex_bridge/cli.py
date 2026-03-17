@@ -328,10 +328,8 @@ def main(argv: list[str] | None = None) -> int:
             _print_summary(
                 build.discovery,
                 build.shim_decision.action,
-                build.role_count,
-                build.prompt_count,
+                build.agent_count,
                 build.skill_count,
-                build.rendered_config,
                 build.exclusion_report,
             )
             return 0
@@ -344,10 +342,8 @@ def main(argv: list[str] | None = None) -> int:
             _print_summary(
                 build.discovery,
                 build.shim_decision.action,
-                build.role_count,
-                build.prompt_count,
+                build.agent_count,
                 build.skill_count,
-                build.rendered_config,
                 build.exclusion_report,
             )
             if args.diff:
@@ -646,10 +642,8 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
 def _print_summary(
     result,
     shim_action: str,
-    role_count: int,
-    prompt_count: int,
+    agent_count: int,
     skill_count: int,
-    rendered_config: str,
     exclusion_report: ExclusionReport,
 ) -> None:
     """Print a human-readable discovery summary."""
@@ -657,10 +651,8 @@ def _print_summary(
     print(f"AGENTS_MD: {result.project.agents_md_path}")
     print(f"CLAUDE_MD_ACTION: {shim_action}")
     print(f"PLUGINS_FOUND: {len(result.plugins)}")
-    print(f"GENERATED_ROLES: {role_count}")
-    print(f"GENERATED_PROMPTS: {prompt_count}")
+    print(f"GENERATED_AGENTS: {agent_count}")
     print(f"GENERATED_SKILLS: {skill_count}")
-    print(f"CONFIG_LINES: {len(rendered_config.splitlines())}")
     for plugin in result.plugins:
         print(
             "PLUGIN: "

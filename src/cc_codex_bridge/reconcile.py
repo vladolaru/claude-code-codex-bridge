@@ -12,13 +12,16 @@ from uuid import uuid4
 from cc_codex_bridge.model import (
     ClaudeShimDecision,
     DiscoveryResult,
+    GeneratedAgentFile,
     GeneratedSkill,
     ReconcileError,
 )
 from cc_codex_bridge.registry import (
     GLOBAL_REGISTRY_FILENAME,
+    GlobalAgentEntry,
     GlobalSkillEntry,
     GlobalSkillRegistry,
+    hash_agent_file,
     hash_generated_skill,
 )
 from cc_codex_bridge.state import BridgeState
@@ -27,8 +30,7 @@ from cc_codex_bridge.text import read_utf8_text
 
 DEFAULT_CODEX_HOME = Path.home() / ".codex"
 STATE_RELATIVE_PATH = Path(".codex") / "claude-code-bridge-state.json"
-CONFIG_RELATIVE_PATH = Path(".codex") / "config.toml"
-PROMPTS_RELATIVE_ROOT = Path(".codex") / "prompts" / "agents"
+AGENTS_RELATIVE_ROOT = Path(".codex") / "agents"
 
 GLOBAL_INSTRUCTIONS_SENTINEL = "\n<!-- managed by cc-codex-bridge -->\n"
 
@@ -50,6 +52,7 @@ class DesiredState:
     state_path: Path
     global_instructions: bytes | None = None
     project_skills: tuple[GeneratedSkill, ...] = ()
+    global_agents: tuple[GeneratedAgentFile, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -141,13 +144,13 @@ class _MutationPlan:
 def build_desired_state(
     discovery: DiscoveryResult,
     shim_decision: ClaudeShimDecision,
-    prompt_files: dict[Path, str],
-    rendered_config: str,
     skills: Iterable[GeneratedSkill],
     *,
     codex_home: str | Path | None = None,
     extra_project_files: Iterable[tuple[Path, bytes]] | None = None,
     project_skills: Iterable[GeneratedSkill] | None = None,
+    global_agents: Iterable[GeneratedAgentFile] | None = None,
+    project_agent_files: Iterable[tuple[Path, bytes]] | None = None,
 ) -> DesiredState:
     """Build the desired generated outputs for a project."""
     if shim_decision.action == "fail":
@@ -171,19 +174,15 @@ def build_desired_state(
             _resolve_managed_project_path(project_root, Path("CLAUDE.md"))
         )
 
-    project_files.append(
-        (
-            _resolve_managed_project_path(project_root, CONFIG_RELATIVE_PATH),
-            rendered_config.encode(),
-        )
-    )
-    for relpath, content in sorted(prompt_files.items(), key=lambda item: item[0].as_posix()):
-        project_files.append(
-            (
-                _resolve_managed_project_path(project_root, relpath),
-                content.encode(),
+    # Add project-local agent .toml files
+    if project_agent_files:
+        for relpath, content in sorted(project_agent_files, key=lambda item: item[0].as_posix()):
+            project_files.append(
+                (
+                    _resolve_managed_project_path(project_root, relpath),
+                    content,
+                )
             )
-        )
 
     if extra_project_files:
         for relpath, content in sorted(extra_project_files, key=lambda item: item[0].as_posix()):
@@ -209,6 +208,7 @@ def build_desired_state(
         state_path=project_root / STATE_RELATIVE_PATH,
         global_instructions=global_instructions,
         project_skills=tuple(project_skills or ()),
+        global_agents=tuple(global_agents or ()),
     )
 
 
@@ -219,11 +219,9 @@ class ProjectBuildResult:
     desired_state: DesiredState | None
     discovery: DiscoveryResult
     shim_decision: ClaudeShimDecision
-    role_count: int
-    prompt_count: int
+    agent_count: int
     skill_count: int
     exclusion_report: object  # ExclusionReport from exclusions module
-    rendered_config: str
     diagnostics: tuple  # AgentTranslationDiagnostic tuple
 
 
@@ -249,11 +247,11 @@ def build_project_desired_state(
         load_project_exclusions,
         resolve_effective_exclusions,
     )
-    from cc_codex_bridge.render_codex_config import render_inline_codex_config, render_prompt_files
+    from cc_codex_bridge.render_agent_toml import render_agent_toml
     from cc_codex_bridge.translate_agents import (
         translate_installed_agents_with_diagnostics,
         translate_standalone_agents,
-        validate_merged_roles,
+        validate_merged_agents,
     )
     from cc_codex_bridge.translate_skills import (
         assign_skill_names,
@@ -284,11 +282,9 @@ def build_project_desired_state(
             desired_state=None,
             discovery=result,
             shim_decision=shim_decision,
-            role_count=0,
-            prompt_count=0,
+            agent_count=0,
             skill_count=0,
             exclusion_report=exclusion_report,
-            rendered_config="",
             diagnostics=(),
         )
 
@@ -310,39 +306,52 @@ def build_project_desired_state(
             desired_state=None,
             discovery=result,
             shim_decision=shim_decision,
-            role_count=0,
-            prompt_count=0,
+            agent_count=0,
             skill_count=0,
             exclusion_report=exclusion_report,
-            rendered_config="",
             diagnostics=tuple(all_diagnostics),
         )
 
-    all_roles = (*agent_result.roles, *user_agent_result.roles, *project_agent_result.roles)
-    validate_merged_roles(all_roles)
+    all_agents = (*agent_result.agents, *user_agent_result.agents, *project_agent_result.agents)
+    validate_merged_agents(all_agents)
+
+    # Separate agents by scope
+    global_agents = tuple(a for a in all_agents if a.scope == "global")
+    project_agents = tuple(a for a in all_agents if a.scope == "project")
+
+    # Render project-local agent .toml files
+    project_agent_files: list[tuple[Path, bytes]] = []
+    for agent in project_agents:
+        relpath = AGENTS_RELATIVE_ROOT / agent.install_filename
+        content = render_agent_toml(
+            agent.agent_name,
+            agent.description,
+            agent.developer_instructions,
+            sandbox_mode=agent.sandbox_mode,
+        )
+        project_agent_files.append((relpath, content.encode()))
+
     plugin_skills = translate_installed_skills(result.plugins)
     user_skills = translate_standalone_skills(result.user_skills, scope="user")
     all_global_skills = assign_skill_names((*plugin_skills, *user_skills))
     project_skills = translate_standalone_skills(result.project_skills, scope="project")
 
-    prompt_files = render_prompt_files(all_roles)
-    rendered_config = render_inline_codex_config(all_roles)
     total_skill_count = len(all_global_skills) + len(project_skills)
     desired_state = build_desired_state(
-        result, shim_decision, prompt_files, rendered_config,
+        result, shim_decision,
         all_global_skills, codex_home=codex_home,
         project_skills=project_skills,
+        global_agents=global_agents,
+        project_agent_files=project_agent_files,
     )
 
     return ProjectBuildResult(
         desired_state=desired_state,
         discovery=result,
         shim_decision=shim_decision,
-        role_count=len(all_roles),
-        prompt_count=len(prompt_files),
+        agent_count=len(all_agents),
         skill_count=total_skill_count,
         exclusion_report=exclusion_report,
-        rendered_config=rendered_config,
         diagnostics=tuple(all_diagnostics),
     )
 
@@ -483,6 +492,27 @@ def clean_project(
                     changes.append(Change("remove", skill_path, resource_kind="skill"))
             registry_changed = True
 
+        # Release agent ownership claims
+        updated_agents = dict(registry.agents)
+        for agent_filename in sorted(registry.agents):
+            entry = registry.agents[agent_filename]
+            if project_root_path not in entry.owners:
+                continue
+            remaining_owners = tuple(
+                owner for owner in entry.owners if owner != project_root_path
+            )
+            if remaining_owners:
+                updated_agents[agent_filename] = GlobalAgentEntry(
+                    content_hash=entry.content_hash,
+                    owners=remaining_owners,
+                )
+            else:
+                del updated_agents[agent_filename]
+                agent_path = codex_home_path / "agents" / agent_filename
+                if agent_path.exists():
+                    changes.append(Change("remove", agent_path, resource_kind="agent"))
+            registry_changed = True
+
         # Remove project from the projects list
         updated_projects = tuple(
             p for p in registry.projects if p != project_root_path
@@ -494,6 +524,7 @@ def clean_project(
             updated_registry = GlobalSkillRegistry(
                 skills=updated_skills,
                 projects=updated_projects,
+                agents=updated_agents,
             )
     else:
         updated_registry = None
@@ -502,8 +533,8 @@ def clean_project(
     for change in changes:
         if change.path == state_path:
             continue
-        if change.resource_kind == "skill":
-            # Global skills live under codex_home, not project_root
+        if change.resource_kind in ("skill", "agent"):
+            # Global skills and agents live under codex_home, not project_root
             _assert_path_contained(change.path, codex_home_path, label="Clean target")
         else:
             _assert_path_contained(change.path, project_root_path, label="Clean target")
@@ -520,6 +551,8 @@ def clean_project(
                 shutil.rmtree(change.path)
             elif change.path.exists() or change.path.is_symlink():
                 change.path.unlink()
+        elif change.resource_kind == "agent":
+            change.path.unlink(missing_ok=True)
         else:
             change.path.unlink(missing_ok=True)
             _cleanup_empty_parents(change.path.parent, project_root_path / ".codex")
@@ -694,8 +727,8 @@ def uninstall_all(
     # Step 3: Remove remaining global artifacts
     global_removals: list[Change] = []
 
-    # Force-remove any remaining skill directories still in the registry
-    # (handles skills owned by skipped projects)
+    # Force-remove any remaining skill/agent entries still in the registry
+    # (handles skills/agents owned by skipped projects)
     if registry_path.exists():
         post_clean_snapshot = _load_registry_snapshot(registry_path)
         if post_clean_snapshot.existed:
@@ -704,6 +737,12 @@ def uninstall_all(
                 if skill_path.exists():
                     global_removals.append(
                         Change("remove", skill_path, resource_kind="skill")
+                    )
+            for agent_filename in sorted(post_clean_snapshot.registry.agents):
+                agent_path = codex_home_path / "agents" / agent_filename
+                if agent_path.exists():
+                    global_removals.append(
+                        Change("remove", agent_path, resource_kind="agent")
                     )
 
     # Remove global AGENTS.md only if bridge-generated (sentinel present)
@@ -760,9 +799,12 @@ def _apply_changes(
     previously_managed: frozenset[str] = frozenset(),
 ) -> None:
     """Write all planned changes to disk."""
+    from cc_codex_bridge.render_agent_toml import render_agent_toml
+
     desired_map = dict(desired.project_files)
     skills_by_name = {skill.install_dir_name: skill for skill in desired.skills}
     project_skills_by_name = {skill.install_dir_name: skill for skill in desired.project_skills}
+    agents_by_filename = {agent.install_filename: agent for agent in desired.global_agents}
 
     for change in plan.changes:
         if change.resource_kind == "global_instructions":
@@ -790,6 +832,19 @@ def _apply_changes(
             elif change.kind == "remove":
                 if change.path.exists():
                     shutil.rmtree(change.path)
+            continue
+        if change.resource_kind == "agent":
+            if change.kind in ("create", "update"):
+                agent = agents_by_filename[change.path.name]
+                content = render_agent_toml(
+                    agent.agent_name,
+                    agent.description,
+                    agent.developer_instructions,
+                    sandbox_mode=agent.sandbox_mode,
+                )
+                _atomic_write_file(change.path, content.encode(), container=desired.codex_home)
+            elif change.kind == "remove":
+                change.path.unlink(missing_ok=True)
             continue
         else:
             if change.kind in ("create", "update"):
@@ -881,7 +936,7 @@ def format_diff_report(desired: DesiredState, report: ReconcileReport) -> str:
     for change in report.changes:
         if change.kind not in {"create", "update"}:
             continue
-        if change.resource_kind == "skill":
+        if change.resource_kind in ("skill", "project_skill"):
             continue
         if change.path.suffix not in {".md", ".toml", ".json"}:
             continue
@@ -892,6 +947,19 @@ def format_diff_report(desired: DesiredState, report: ReconcileReport) -> str:
         )
         if change.resource_kind == "global_instructions":
             desired_content = desired.global_instructions
+        elif change.resource_kind == "agent":
+            from cc_codex_bridge.render_agent_toml import render_agent_toml
+            agents_by_filename = {a.install_filename: a for a in desired.global_agents}
+            agent = agents_by_filename.get(change.path.name)
+            if agent is not None:
+                desired_content = render_agent_toml(
+                    agent.agent_name,
+                    agent.description,
+                    agent.developer_instructions,
+                    sandbox_mode=agent.sandbox_mode,
+                ).encode()
+            else:
+                desired_content = None
         else:
             desired_content = desired_map.get(change.path)
         if desired_content is None:
@@ -915,14 +983,50 @@ def _plan_mutations(
     desired: DesiredState,
     previous_state: BridgeState | None,
 ) -> _MutationPlan:
-    """Plan file, skill, and registry mutations for one reconcile run."""
+    """Plan file, skill, agent, and registry mutations for one reconcile run.
+
+    Skills and agents share the same global registry file.  To prevent
+    independent planners from clobbering each other's updates, we load the
+    registry snapshot once, let the skill planner mutate it, then pass the
+    updated registry to the agent planner.  A single registry write is
+    generated at the end.
+    """
     project_changes = _compute_project_file_changes(desired, previous_state)
     project_skill_changes = _plan_project_skill_mutations(desired, previous_state)
-    skill_changes, registry_writes = _plan_skill_mutations(desired, previous_state)
+
+    # Load registry snapshots once and share between skill and agent planners.
+    current_snapshot = _load_registry_snapshot(desired.codex_home / GLOBAL_REGISTRY_FILENAME)
+    previous_snapshot = current_snapshot
+    if previous_state is not None and previous_state.codex_home != desired.codex_home:
+        previous_snapshot = _load_registry_snapshot(
+            previous_state.codex_home / GLOBAL_REGISTRY_FILENAME
+        )
+
+    skill_changes, updated_current, updated_previous = _plan_skill_mutations(
+        desired, previous_state, current_snapshot, previous_snapshot,
+    )
+    agent_changes, updated_current, updated_previous = _plan_global_agent_mutations(
+        desired, previous_state, current_snapshot, previous_snapshot,
+        updated_current, updated_previous,
+    )
+
+    # Build registry writes from the final accumulated state.
+    registry_writes: list[_RegistryWrite] = []
+    current_write = _build_registry_write(current_snapshot, updated_current)
+    if current_write is not None:
+        registry_writes.append(current_write)
+    if previous_snapshot.path != current_snapshot.path:
+        previous_write = _build_registry_write(previous_snapshot, updated_previous)
+        if previous_write is not None:
+            registry_writes.append(previous_write)
+
     global_changes = _plan_global_instructions_changes(desired)
     return _MutationPlan(
-        changes=tuple((*project_changes, *project_skill_changes, *skill_changes, *global_changes)),
-        registry_writes=registry_writes,
+        changes=tuple((
+            *project_changes, *project_skill_changes,
+            *skill_changes, *agent_changes, *global_changes,
+        )),
+        registry_writes=tuple(registry_writes),
     )
 
 
@@ -1032,15 +1136,14 @@ def _compute_project_file_changes(
 def _plan_skill_mutations(
     desired: DesiredState,
     previous_state: BridgeState | None,
-) -> tuple[tuple[Change, ...], tuple[_RegistryWrite, ...]]:
-    """Plan global-skill ownership and directory mutations."""
-    current_snapshot = _load_registry_snapshot(desired.codex_home / GLOBAL_REGISTRY_FILENAME)
-    previous_snapshot = current_snapshot
-    if previous_state is not None and previous_state.codex_home != desired.codex_home:
-        previous_snapshot = _load_registry_snapshot(
-            previous_state.codex_home / GLOBAL_REGISTRY_FILENAME
-        )
+    current_snapshot: _RegistrySnapshot,
+    previous_snapshot: _RegistrySnapshot,
+) -> tuple[tuple[Change, ...], GlobalSkillRegistry, GlobalSkillRegistry]:
+    """Plan global-skill ownership and directory mutations.
 
+    Returns the change list plus the updated current and previous
+    registries for the caller to pass into the agent planner.
+    """
     desired_skills = {skill.install_dir_name: skill for skill in desired.skills}
     desired_hashes = {
         install_dir_name: hash_generated_skill(skill)
@@ -1053,6 +1156,7 @@ def _plan_skill_mutations(
         projects=_ensure_project_in_list(
             current_snapshot.registry.projects, desired.project_root
         ),
+        agents=dict(current_snapshot.registry.agents),
     )
     for install_dir_name in sorted(desired_skills):
         skill = desired_skills[install_dir_name]
@@ -1116,19 +1220,16 @@ def _plan_skill_mutations(
         if stale_path.exists():
             changes.append(Change("remove", stale_path, resource_kind="skill"))
 
-    registry_writes: list[_RegistryWrite] = []
-    current_write = _build_registry_write(current_snapshot, updated_current)
-    if current_write is not None:
-        registry_writes.append(current_write)
-
+    # Build updated previous registry for skill ownership release
+    updated_previous = GlobalSkillRegistry(
+        skills=dict(previous_snapshot.registry.skills),
+        projects=tuple(
+            p for p in previous_snapshot.registry.projects
+            if p != desired.project_root
+        ),
+        agents=dict(previous_snapshot.registry.agents),
+    )
     if previous_snapshot.path != current_snapshot.path:
-        updated_previous = GlobalSkillRegistry(
-            skills=dict(previous_snapshot.registry.skills),
-            projects=tuple(
-                p for p in previous_snapshot.registry.projects
-                if p != desired.project_root
-            ),
-        )
         for install_dir_name in sorted(_owned_skill_names(previous_snapshot.registry, desired.project_root)):
             entry = updated_previous.skills[install_dir_name]
             remaining_owners = tuple(
@@ -1146,11 +1247,7 @@ def _plan_skill_mutations(
             if stale_path.exists():
                 changes.append(Change("remove", stale_path, resource_kind="skill"))
 
-        previous_write = _build_registry_write(previous_snapshot, updated_previous)
-        if previous_write is not None:
-            registry_writes.append(previous_write)
-
-    return tuple(changes), tuple(registry_writes)
+    return tuple(changes), updated_current, updated_previous
 
 
 def _plan_global_instructions_changes(desired: DesiredState) -> tuple[Change, ...]:
@@ -1175,6 +1272,133 @@ def _plan_global_instructions_changes(desired: DesiredState) -> tuple[Change, ..
             f"Refusing to overwrite hand-authored global instructions: {path}"
         )
     return (Change("update", path, resource_kind="global_instructions"),)
+
+
+def _plan_global_agent_mutations(
+    desired: DesiredState,
+    previous_state: BridgeState | None,
+    current_snapshot: _RegistrySnapshot,
+    previous_snapshot: _RegistrySnapshot,
+    updated_current: GlobalSkillRegistry,
+    updated_previous: GlobalSkillRegistry,
+) -> tuple[tuple[Change, ...], GlobalSkillRegistry, GlobalSkillRegistry]:
+    """Plan global agent file and registry mutations.
+
+    Receives the updated registries from the skill planner and continues
+    accumulating changes.  Returns the final updated registries.
+    """
+    from cc_codex_bridge.render_agent_toml import render_agent_toml
+
+    desired_agents = {agent.install_filename: agent for agent in desired.global_agents}
+    desired_contents: dict[str, str] = {}
+    desired_hashes: dict[str, str] = {}
+    for filename, agent in desired_agents.items():
+        content = render_agent_toml(
+            agent.agent_name,
+            agent.description,
+            agent.developer_instructions,
+            sandbox_mode=agent.sandbox_mode,
+        )
+        desired_contents[filename] = content
+        desired_hashes[filename] = hash_agent_file(content)
+
+    changes: list[Change] = []
+
+    for filename in sorted(desired_agents):
+        destination = desired.codex_home / "agents" / filename
+        existing_entry = updated_current.agents.get(filename)
+        desired_hash = desired_hashes[filename]
+        registry_owned = existing_entry is not None
+
+        if existing_entry is not None and existing_entry.content_hash != desired_hash:
+            if set(existing_entry.owners) != {desired.project_root}:
+                raise ReconcileError(
+                    f"Generated agent registry conflict for "
+                    f"{destination}: existing content hash {existing_entry.content_hash} "
+                    f"does not match desired {desired_hash}"
+                )
+            registry_owned = True
+
+        if not registry_owned:
+            if destination.exists() and not destination.is_symlink():
+                existing_content = read_utf8_text(
+                    destination, label="existing agent file", error_type=ReconcileError
+                )
+                if hash_agent_file(existing_content) != desired_hash:
+                    raise ReconcileError(
+                        f"Refusing to adopt conflicting existing agent file: {destination}"
+                    )
+            existing_owners: tuple[Path, ...] = ()
+        else:
+            existing_owners = existing_entry.owners if existing_entry is not None else ()
+
+        updated_current.agents[filename] = GlobalAgentEntry(
+            content_hash=desired_hash,
+            owners=_sorted_owner_set((*existing_owners, desired.project_root)),
+        )
+
+        if not destination.exists():
+            changes.append(Change("create", destination, resource_kind="agent"))
+            continue
+        if destination.is_symlink():
+            raise ReconcileError(f"Refusing to overwrite symlinked agent file: {destination}")
+        existing_content = read_utf8_text(
+            destination, label="existing agent file", error_type=ReconcileError
+        )
+        if hash_agent_file(existing_content) == desired_hash:
+            continue
+        changes.append(Change("update", destination, resource_kind="agent"))
+
+    # Detect stale agent files owned by this project
+    previously_owned_agents = _owned_agent_filenames(
+        current_snapshot.registry, desired.project_root
+    )
+    for filename in sorted(previously_owned_agents - set(desired_agents)):
+        entry = updated_current.agents[filename]
+        remaining_owners = tuple(
+            owner for owner in entry.owners if owner != desired.project_root
+        )
+        if remaining_owners:
+            updated_current.agents[filename] = GlobalAgentEntry(
+                content_hash=entry.content_hash,
+                owners=remaining_owners,
+            )
+            continue
+
+        del updated_current.agents[filename]
+        stale_path = desired.codex_home / "agents" / filename
+        if stale_path.exists():
+            changes.append(Change("remove", stale_path, resource_kind="agent"))
+
+    # Handle codex home migration for agents
+    if previous_snapshot.path != current_snapshot.path:
+        for filename in sorted(_owned_agent_filenames(previous_snapshot.registry, desired.project_root)):
+            entry = updated_previous.agents[filename]
+            remaining_owners = tuple(
+                owner for owner in entry.owners if owner != desired.project_root
+            )
+            if remaining_owners:
+                updated_previous.agents[filename] = GlobalAgentEntry(
+                    content_hash=entry.content_hash,
+                    owners=remaining_owners,
+                )
+                continue
+
+            del updated_previous.agents[filename]
+            stale_path = previous_snapshot.path.parent / "agents" / filename
+            if stale_path.exists():
+                changes.append(Change("remove", stale_path, resource_kind="agent"))
+
+    return tuple(changes), updated_current, updated_previous
+
+
+def _owned_agent_filenames(registry: GlobalSkillRegistry, project_root: Path) -> set[str]:
+    """Return the agent filenames currently claimed by one project."""
+    return {
+        filename
+        for filename, entry in registry.agents.items()
+        if project_root in entry.owners
+    }
 
 
 def _build_registry_write(
@@ -1266,7 +1490,7 @@ def _validate_mutation_targets(
         allowed_global_roots.append(previous_state.codex_home)
 
     for change in plan.changes:
-        if change.resource_kind in {"skill", "global_instructions"}:
+        if change.resource_kind in {"skill", "agent", "global_instructions"}:
             _assert_path_contained_in_roots(
                 change.path,
                 allowed_global_roots,
@@ -1391,14 +1615,22 @@ def _is_allowed_managed_project_relative(relative: str) -> bool:
 
     allowed_exact = {
         "CLAUDE.md",
-        CONFIG_RELATIVE_PATH.as_posix(),
         STATE_RELATIVE_PATH.as_posix(),
     }
     normalized_text = normalized.as_posix()
     if normalized_text in allowed_exact:
         return True
 
-    if normalized.parent == PROMPTS_RELATIVE_ROOT and normalized.suffix == ".md":
+    # Agent .toml files under .codex/agents/
+    if normalized.parent == AGENTS_RELATIVE_ROOT and normalized.suffix == ".toml":
+        return True
+
+    # Legacy paths still recognized for migration cleanup
+    legacy_config = Path(".codex") / "config.toml"
+    legacy_prompts_root = Path(".codex") / "prompts" / "agents"
+    if normalized_text == legacy_config.as_posix():
+        return True
+    if normalized.parent == legacy_prompts_root and normalized.suffix == ".md":
         return True
 
     return False

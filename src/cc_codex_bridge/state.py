@@ -10,7 +10,7 @@ from cc_codex_bridge.model import ReconcileError
 from cc_codex_bridge.text import read_utf8_text
 
 
-STATE_VERSION = 4
+STATE_VERSION = 5
 
 
 @dataclass(frozen=True)

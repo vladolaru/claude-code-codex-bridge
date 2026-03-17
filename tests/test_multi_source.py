@@ -124,17 +124,35 @@ def test_reconcile_combines_all_source_types(make_project, tmp_path: Path, capsy
     assert not (codex_home / "skills" / "run-tests" / "SKILL.md").exists()
     assert not (codex_home / "skills" / "project-run-tests" / "SKILL.md").exists()
 
-    # All agents appear in config.toml
-    config_content = (project_root / ".codex" / "config.toml").read_text()
-    assert "market_test-plugin_test_agent" in config_content  # plugin agent
-    assert "user_thinking_partner" in config_content  # user agent (normalized)
-    assert "project_code_reviewer" in config_content  # project agent (normalized)
+    # Global agents (plugin + user) → ~/.codex/agents/*.toml
+    global_agents_dir = codex_home / "agents"
+    assert global_agents_dir.exists()
+    global_agent_files = sorted(f.name for f in global_agents_dir.glob("*.toml"))
+    assert "market-test-plugin-test-agent.toml" in global_agent_files  # plugin agent
+    assert "user-thinking-partner.toml" in global_agent_files  # user agent
 
-    # Agent prompt files exist
-    prompts_dir = project_root / ".codex" / "prompts" / "agents"
-    assert prompts_dir.exists()
-    prompt_files = list(prompts_dir.glob("*.md"))
-    assert len(prompt_files) >= 3  # at least plugin + user + project
+    # Plugin agent .toml content
+    plugin_agent_toml = (global_agents_dir / "market-test-plugin-test-agent.toml").read_text()
+    assert "market_test-plugin_test_agent" in plugin_agent_toml
+
+    # User agent .toml content
+    user_agent_toml = (global_agents_dir / "user-thinking-partner.toml").read_text()
+    assert "user_thinking_partner" in user_agent_toml
+
+    # Project agent → .codex/agents/*.toml
+    project_agents_dir = project_root / ".codex" / "agents"
+    assert project_agents_dir.exists()
+    project_agent_files = sorted(f.name for f in project_agents_dir.glob("*.toml"))
+    assert "project-code-reviewer.toml" in project_agent_files
+
+    project_agent_toml = (project_agents_dir / "project-code-reviewer.toml").read_text()
+    assert "project_code_reviewer" in project_agent_toml
+
+    # config.toml no longer generated
+    assert not (project_root / ".codex" / "config.toml").exists()
+
+    # prompts/agents/ no longer generated
+    assert not (project_root / ".codex" / "prompts" / "agents").exists()
 
     # User CLAUDE.md bridged to Codex global instructions
     codex_agents_md = codex_home / "AGENTS.md"
@@ -167,8 +185,14 @@ def test_reconcile_works_with_no_plugins(make_project, tmp_path: Path, capsys):
 
     assert exit_code == 0
     assert (codex_home / "skills" / "my-tool" / "SKILL.md").exists()
-    config = (project_root / ".codex" / "config.toml").read_text()
-    assert "project_reviewer" in config
+
+    # Project agent → .codex/agents/*.toml
+    project_agent_toml = project_root / ".codex" / "agents" / "project-reviewer.toml"
+    assert project_agent_toml.exists()
+    assert "project_reviewer" in project_agent_toml.read_text()
+
+    # config.toml no longer generated
+    assert not (project_root / ".codex" / "config.toml").exists()
 
 
 def test_reconcile_resolves_user_plugin_skill_name_collision(make_project, tmp_path: Path, capsys):
@@ -235,12 +259,14 @@ def test_reconcile_is_idempotent_with_all_sources(make_project, tmp_path: Path, 
     assert cli.main(args) == 0
 
     # Capture state after first run
-    config_v1 = (project_root / ".codex" / "config.toml").read_text()
-    global_agents_v1 = (codex_home / "AGENTS.md").read_text()
+    global_agents_md_v1 = (codex_home / "AGENTS.md").read_text()
+    plugin_agent_v1 = (codex_home / "agents" / "market-test-plugin-test-agent.toml").read_text()
+    project_agent_v1 = (project_root / ".codex" / "agents" / "project-reviewer.toml").read_text()
 
     # Second run
     assert cli.main(args) == 0
 
     # State unchanged
-    assert (project_root / ".codex" / "config.toml").read_text() == config_v1
-    assert (codex_home / "AGENTS.md").read_text() == global_agents_v1
+    assert (codex_home / "AGENTS.md").read_text() == global_agents_md_v1
+    assert (codex_home / "agents" / "market-test-plugin-test-agent.toml").read_text() == plugin_agent_v1
+    assert (project_root / ".codex" / "agents" / "project-reviewer.toml").read_text() == project_agent_v1

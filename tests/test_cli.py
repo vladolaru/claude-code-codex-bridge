@@ -90,7 +90,7 @@ def test_reconcile_and_dry_run_respect_fake_codex_home(
 
     assert reconcile_exit == 0
     assert dry_run_exit == 0
-    assert (project_root / ".codex" / "config.toml").exists()
+    assert (codex_home / "agents" / "market-prompt-engineer-reviewer.toml").exists()
     assert (codex_home / "skills" / "prompt-engineer").exists()
 
 
@@ -220,8 +220,8 @@ def test_reconcile_diff_surfaces_non_utf8_managed_text_as_user_facing_error(
     ) == 0
     capsys.readouterr()
 
-    prompt_path = project_root / ".codex" / "prompts" / "agents" / "market-prompt-engineer-reviewer.md"
-    prompt_path.write_bytes(b"\xff\xfebroken")
+    agent_toml_path = codex_home / "agents" / "market-prompt-engineer-reviewer.toml"
+    agent_toml_path.write_bytes(b"\xff\xfebroken")
 
     exit_code = cli.main(
         [
@@ -239,7 +239,7 @@ def test_reconcile_diff_surfaces_non_utf8_managed_text_as_user_facing_error(
 
     captured = capsys.readouterr()
     assert exit_code == 1
-    assert "Unable to decode managed text file as UTF-8" in captured.err
+    assert "Unable to decode" in captured.err and "UTF-8" in captured.err
 
 
 def test_reconcile_diff_requires_dry_run(make_project, make_plugin_version, tmp_path: Path, capsys):
@@ -511,7 +511,7 @@ def test_validate_succeeds_when_unsupported_agent_is_excluded(
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert "GENERATED_ROLES: 1" in captured.out
+    assert "GENERATED_AGENTS: 1" in captured.out
 
 
 def test_status_cli_reports_pending_and_json(make_project, make_plugin_version, tmp_path: Path, capsys):
@@ -608,7 +608,7 @@ def test_validate_honors_project_exclusion_config(make_project, make_plugin_vers
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert "GENERATED_ROLES: 1" in captured.out
+    assert "GENERATED_AGENTS: 1" in captured.out
     assert "GENERATED_SKILLS: 1" in captured.out
     assert "EXCLUDED_SKILL: market/prompt-engineer/cc-only" in captured.out
     assert "EXCLUDED_AGENT: market/prompt-engineer/cc-reviewer.md" in captured.out
@@ -883,9 +883,10 @@ def test_reconcile_includes_standalone_agents(make_project, tmp_path: Path, caps
     ])
 
     assert exit_code == 0
-    config_content = (project_root / ".codex" / "config.toml").read_text()
-    assert "user_helper" in config_content
-    assert "project_reviewer" in config_content
+    # User-level agent installed globally in codex_home/agents/
+    assert (codex_home / "agents" / "user-helper.toml").exists()
+    # Project-level agent installed locally in .codex/agents/
+    assert (project_root / ".codex" / "agents" / "project-reviewer.toml").exists()
 
 
 def test_module_entrypoint_invokes_cli_main(monkeypatch: pytest.MonkeyPatch):
@@ -922,7 +923,7 @@ def test_clean_command_succeeds(make_project, make_plugin_version, tmp_path: Pat
         "--codex-home", str(codex_home),
     ])
     assert exit_code == 0
-    assert (project_root / ".codex" / "config.toml").exists()
+    assert (project_root / ".codex" / "claude-code-bridge-state.json").exists()
 
     # Now clean
     exit_code = cli.main([
@@ -931,7 +932,7 @@ def test_clean_command_succeeds(make_project, make_plugin_version, tmp_path: Pat
         "--codex-home", str(codex_home),
     ])
     assert exit_code == 0
-    assert not (project_root / ".codex" / "config.toml").exists()
+    assert not (project_root / ".codex" / "claude-code-bridge-state.json").exists()
     assert not (project_root / "CLAUDE.md").exists()
 
 
@@ -959,7 +960,7 @@ def test_clean_dry_run_command(make_project, make_plugin_version, tmp_path: Path
     ])
     assert exit_code == 0
     # Artifacts still exist after dry-run
-    assert (project_root / ".codex" / "config.toml").exists()
+    assert (project_root / ".codex" / "claude-code-bridge-state.json").exists()
     assert (project_root / "CLAUDE.md").exists()
 
 
@@ -993,7 +994,7 @@ def test_clean_succeeds_when_agents_md_missing(make_project, make_plugin_version
         "--codex-home", str(codex_home),
     ])
     assert exit_code == 0
-    assert (project_root / ".codex" / "config.toml").exists()
+    assert (project_root / ".codex" / "claude-code-bridge-state.json").exists()
 
     # Remove AGENTS.md to simulate a partially broken project
     agents_md.unlink()
@@ -1005,7 +1006,7 @@ def test_clean_succeeds_when_agents_md_missing(make_project, make_plugin_version
         "--codex-home", str(codex_home),
     ])
     assert exit_code == 0
-    assert not (project_root / ".codex" / "config.toml").exists()
+    assert not (project_root / ".codex" / "claude-code-bridge-state.json").exists()
 
 
 def test_uninstall_command_succeeds(make_project, make_plugin_version, tmp_path: Path):
@@ -1036,7 +1037,7 @@ def test_uninstall_command_succeeds(make_project, make_plugin_version, tmp_path:
 
     # Project artifacts gone
     for project in (project_a, project_b):
-        assert not (project / ".codex" / "config.toml").exists()
+        assert not (project / ".codex" / "claude-code-bridge-state.json").exists()
         assert not (project / "CLAUDE.md").exists()
 
     # Global artifacts gone
@@ -1073,7 +1074,7 @@ def test_uninstall_skips_missing_project(make_project, make_plugin_version, tmp_
     assert exit_code == 0
 
     # Project B was cleaned
-    assert not (project_b / ".codex" / "config.toml").exists()
+    assert not (project_b / ".codex" / "claude-code-bridge-state.json").exists()
     # Global skills removed (force-cleaned even though project A was skipped)
     assert not (codex_home / "skills" / "review").exists()
 

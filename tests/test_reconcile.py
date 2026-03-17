@@ -22,9 +22,15 @@ from cc_codex_bridge.reconcile import (
     format_diff_report,
     reconcile_desired_state,
 )
-from cc_codex_bridge.render_codex_config import render_inline_codex_config, render_prompt_files
 from cc_codex_bridge.discover import discover_project_skills
-from cc_codex_bridge.translate_agents import translate_installed_agents
+from cc_codex_bridge.reconcile import AGENTS_RELATIVE_ROOT
+from cc_codex_bridge.render_agent_toml import render_agent_toml
+from cc_codex_bridge.translate_agents import (
+    translate_installed_agents,
+    translate_installed_agents_with_diagnostics,
+    translate_standalone_agents,
+    validate_merged_agents,
+)
 from cc_codex_bridge.translate_skills import (
     assign_skill_names,
     translate_installed_skills,
@@ -69,10 +75,11 @@ def test_reconcile_writes_project_and_codex_outputs(
 
     assert report.applied is True
     assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
-    assert (project_root / ".codex" / "config.toml").exists()
-    assert (
-        project_root / ".codex" / "prompts" / "agents" / "market-pirategoat-tools-architecture-reviewer.md"
-    ).read_text() == "You are an architecture reviewer.\n"
+    # Global agent .toml installed to codex_home
+    global_agent_toml = codex_home / "agents" / "market-pirategoat-tools-architecture-reviewer.toml"
+    assert global_agent_toml.exists()
+    agent_content = global_agent_toml.read_text()
+    assert "architecture_reviewer" in agent_content
     assert (project_root / STATE_RELATIVE_PATH).exists()
     assert (
         codex_home / "skills" / "decision-critic" / "SKILL.md"
@@ -156,31 +163,6 @@ def test_diff_does_not_write_outputs(make_project, make_plugin_version, tmp_path
     assert not (project_root / "CLAUDE.md").exists()
     assert not (project_root / ".codex").exists()
     assert not codex_home.exists()
-
-
-def test_reconcile_fails_for_non_owned_project_config(
-    make_project,
-    make_plugin_version,
-    tmp_path: Path,
-):
-    """Existing hand-authored `.codex/config.toml` is not overwritten."""
-    project_root, _agents_md = make_project()
-    (project_root / ".codex").mkdir()
-    (project_root / ".codex" / "config.toml").write_text("# hand-authored\n")
-    cache_root, version_dir = make_plugin_version(
-        "market",
-        "prompt-engineer",
-        "1.0.0",
-        skill_names=("prompt-engineer",),
-    )
-    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
-        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
-    )
-
-    desired = _build_desired(project_root, cache_root, tmp_path / "codex-home")
-
-    with pytest.raises(ReconcileError, match="Refusing to overwrite non-generated project file"):
-        reconcile_desired_state(desired)
 
 
 def test_reconcile_removes_stale_managed_skill(make_project, make_plugin_version, tmp_path: Path):
@@ -372,23 +354,24 @@ def test_reconcile_moves_managed_skills_when_codex_home_changes(
 
 def test_diff_report_includes_unified_diff_for_updated_text_files(
     make_project,
-    make_plugin_version,
     tmp_path: Path,
 ):
     """Diff output includes a unified diff when a managed text file changes."""
     project_root, _agents_md = make_project()
-    cache_root, version_dir = make_plugin_version(
-        "market",
-        "prompt-engineer",
-        "1.0.0",
-        agent_names=("reviewer",),
+    # Use project-local agents so the .toml files are project files with diff support.
+    project_agent_dir = project_root / ".claude" / "agents"
+    project_agent_dir.mkdir(parents=True)
+    (project_agent_dir / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nOld body.\n"
     )
-    agent_path = version_dir / "agents" / "reviewer.md"
-    agent_path.write_text("---\nname: reviewer\ndescription: Review\n---\n\nOld body.\n")
+    cache_root = tmp_path / "claude-cache"
+    cache_root.mkdir(parents=True)
     desired = _build_desired(project_root, cache_root, tmp_path / "codex-home")
     reconcile_desired_state(desired)
 
-    agent_path.write_text("---\nname: reviewer\ndescription: Review\n---\n\nNew body.\n")
+    (project_agent_dir / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nNew body.\n"
+    )
     updated = _build_desired(project_root, cache_root, tmp_path / "codex-home")
     report = diff_desired_state(updated)
     rendered = format_diff_report(updated, report)
@@ -399,12 +382,12 @@ def test_diff_report_includes_unified_diff_for_updated_text_files(
     assert "+New body." in rendered
 
 
-def test_reconcile_removes_stale_managed_prompt_file(
+def test_reconcile_removes_stale_managed_agent_file(
     make_project,
     make_plugin_version,
     tmp_path: Path,
 ):
-    """Previously managed prompt files are removed when no longer desired."""
+    """Previously managed global agent .toml files are removed when no longer desired."""
     project_root, _agents_md = make_project()
     cache_root, version_dir = make_plugin_version(
         "market",
@@ -419,32 +402,37 @@ def test_reconcile_removes_stale_managed_prompt_file(
 
     first = _build_desired(project_root, cache_root, codex_home)
     reconcile_desired_state(first)
-    prompt_path = project_root / ".codex" / "prompts" / "agents" / "market-prompt-engineer-reviewer.md"
-    assert prompt_path.exists()
+    agent_toml_path = codex_home / "agents" / "market-prompt-engineer-reviewer.toml"
+    assert agent_toml_path.exists()
 
     updated_agent = version_dir / "agents" / "reviewer.md"
     updated_agent.unlink()
     second = _build_desired(project_root, cache_root, codex_home)
     reconcile_desired_state(second)
 
-    assert not prompt_path.exists()
+    assert not agent_toml_path.exists()
 
 
-def test_reconcile_rejects_symlinked_project_file(make_project, make_plugin_version, tmp_path: Path):
+def test_reconcile_rejects_symlinked_project_file(make_project, tmp_path: Path):
     """Managed project targets may not be symlinks."""
     project_root, _agents_md = make_project()
-    cache_root, version_dir = make_plugin_version(
-        "market", "prompt-engineer", "1.0.0", agent_names=("reviewer",)
-    )
-    (version_dir / "agents" / "reviewer.md").write_text(
+
+    # Set up a project-local agent that will generate a .codex/agents/*.toml file
+    project_agent_dir = project_root / ".claude" / "agents"
+    project_agent_dir.mkdir(parents=True)
+    (project_agent_dir / "reviewer.md").write_text(
         "---\nname: reviewer\ndescription: Review\n---\n\nPrompt body.\n"
     )
-    config_dir = project_root / ".codex"
-    config_dir.mkdir()
-    real_config = project_root / "real-config.toml"
-    real_config.write_text("real\n")
-    (config_dir / "config.toml").symlink_to(real_config)
 
+    # Pre-create the target as a symlink
+    codex_agents_dir = project_root / ".codex" / "agents"
+    codex_agents_dir.mkdir(parents=True)
+    real_file = project_root / "real-agent.toml"
+    real_file.write_text("real\n")
+    (codex_agents_dir / "project-reviewer.toml").symlink_to(real_file)
+
+    cache_root = tmp_path / "claude-cache"
+    cache_root.mkdir(parents=True)
     desired = _build_desired(project_root, cache_root, tmp_path / "codex-home")
 
     with pytest.raises(ReconcileError, match="symlinked project file"):
@@ -563,19 +551,32 @@ def test_reconcile_keeps_user_level_claude_tree_untouched(
 
     discovery = discover(project_path=project_root)
     shim_decision = plan_claude_shim(discovery.project)
-    roles = translate_installed_agents(discovery.plugins)
+
+    agent_result = translate_installed_agents_with_diagnostics(discovery.plugins)
+    user_agent_result = translate_standalone_agents(discovery.user_agents, scope="user")
+    project_agent_result = translate_standalone_agents(discovery.project_agents, scope="project")
+    all_agents = (*agent_result.agents, *user_agent_result.agents, *project_agent_result.agents)
+    validate_merged_agents(all_agents)
+
+    global_agents = tuple(a for a in all_agents if a.scope == "global")
+    project_agents = tuple(a for a in all_agents if a.scope == "project")
+
+    project_agent_files = []
+    for agent in project_agents:
+        relpath = AGENTS_RELATIVE_ROOT / agent.install_filename
+        content = render_agent_toml(agent.agent_name, agent.description, agent.developer_instructions, sandbox_mode=agent.sandbox_mode)
+        project_agent_files.append((relpath, content.encode()))
+
     plugin_skills = translate_installed_skills(discovery.plugins)
     user_skills = translate_standalone_skills(discovery.user_skills, scope="user")
     skills = assign_skill_names((*plugin_skills, *user_skills))
-    prompt_files = render_prompt_files(roles)
-    rendered_config = render_inline_codex_config(roles)
     desired = build_desired_state(
         discovery,
         shim_decision,
-        prompt_files,
-        rendered_config,
         skills,
         codex_home=tmp_path / "codex-home",
+        global_agents=global_agents,
+        project_agent_files=project_agent_files,
     )
 
     reconcile_desired_state(desired)
@@ -604,7 +605,7 @@ def test_reconcile_rejects_unexpected_managed_project_files_in_state(
     state_path.write_text(
         json.dumps(
             {
-                "version": 4,
+                "version": 5,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
                 "managed_project_files": ["AGENTS.md", ".claude/settings.local.json"],
@@ -635,7 +636,7 @@ def test_reconcile_rejects_unexpected_managed_project_skill_dirs_in_state(
     state_path.write_text(
         json.dumps(
             {
-                "version": 4,
+                "version": 5,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
                 "managed_project_files": [STATE_RELATIVE_PATH.as_posix()],
@@ -674,7 +675,7 @@ def test_reconcile_rejects_foreign_project_state(
     state_path.write_text(
         json.dumps(
             {
-                "version": 4,
+                "version": 5,
                 "project_root": str(tmp_path / "different-project"),
                 "codex_home": str(tmp_path / "codex-home"),
                 "managed_project_files": [STATE_RELATIVE_PATH.as_posix()],
@@ -719,12 +720,12 @@ def test_reconcile_rejects_symlinked_state_file(
         diff_desired_state(desired)
 
 
-def test_build_desired_state_rejects_prompt_paths_outside_project(
+def test_build_desired_state_rejects_agent_paths_outside_project(
     make_project,
     make_plugin_version,
     tmp_path: Path,
 ):
-    """Desired-state planning rejects prompt paths that attempt project traversal."""
+    """Desired-state planning rejects project agent file paths that attempt project traversal."""
     project_root, _agents_md = make_project()
     cache_root, _version_dir = make_plugin_version("market", "prompt-engineer", "1.0.0")
     discovery = discover(project_path=project_root, cache_dir=cache_root)
@@ -733,12 +734,11 @@ def test_build_desired_state_rejects_prompt_paths_outside_project(
         build_desired_state(
             discovery,
             plan_claude_shim(discovery.project),
-            {
-                Path(".codex/prompts/agents/../../../../evil.md"): "malicious\n",
-            },
-            render_inline_codex_config(()),
             (),
             codex_home=tmp_path / "codex-home",
+            project_agent_files=[
+                (Path(".codex/agents/../../../../evil.toml"), b"malicious\n"),
+            ],
         )
 
 
@@ -896,12 +896,12 @@ def test_atomic_write_cleans_up_temp_file_on_failure(
     assert bridge_temps == []
 
 
-def test_reconcile_cleans_empty_prompt_parents_but_stops_at_non_empty(
+def test_reconcile_removes_stale_global_agent_toml_file(
     make_project,
     make_plugin_version,
     tmp_path: Path,
 ):
-    """Stale prompt removal cleans empty parent dirs but stops at .codex."""
+    """Stale global agent .toml files are removed when the agent source disappears."""
     project_root, _agents_md = make_project()
     cache_root, version_dir = make_plugin_version(
         "market",
@@ -915,16 +915,13 @@ def test_reconcile_cleans_empty_prompt_parents_but_stops_at_non_empty(
     codex_home = tmp_path / "codex-home"
 
     reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
-    prompts_dir = project_root / ".codex" / "prompts"
-    agents_dir = prompts_dir / "agents"
-    assert agents_dir.exists()
+    agent_toml = codex_home / "agents" / "market-prompt-engineer-reviewer.toml"
+    assert agent_toml.exists()
 
     (version_dir / "agents" / "reviewer.md").unlink()
     reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
 
-    assert not agents_dir.exists()
-    assert not prompts_dir.exists()
-    assert (project_root / ".codex").exists()
+    assert not agent_toml.exists()
 
 
 def test_build_desired_state_fails_for_hand_authored_claude_md(
@@ -945,8 +942,6 @@ def test_build_desired_state_fails_for_hand_authored_claude_md(
         build_desired_state(
             discovery,
             shim_decision,
-            {},
-            "",
             (),
             codex_home=tmp_path / "codex-home",
         )
@@ -957,7 +952,7 @@ def test_diff_report_skips_remove_and_skill_changes_in_diff_output(
     make_plugin_version,
     tmp_path: Path,
 ):
-    """Diff output omits unified diffs for remove changes and non-text skill changes."""
+    """Diff output omits unified diffs for remove changes and non-text skill/agent changes."""
     project_root, _agents_md = make_project()
     cache_root, version_dir = make_plugin_version(
         "market",
@@ -981,10 +976,10 @@ def test_diff_report_skips_remove_and_skill_changes_in_diff_output(
     rendered = format_diff_report(updated, report)
 
     assert "REMOVE:" in rendered
-    prompt_path = str(
-        project_root / ".codex" / "prompts" / "agents" / "market-prompt-engineer-reviewer.md"
+    agent_toml_path = str(
+        codex_home / "agents" / "market-prompt-engineer-reviewer.toml"
     )
-    assert f"--- {prompt_path}" not in rendered
+    assert f"--- {agent_toml_path}" not in rendered
 
 
 def test_reconcile_detects_skill_directory_with_extra_files(
@@ -1077,12 +1072,12 @@ def test_reconcile_rejects_symlinked_global_registry(
         diff_desired_state(desired)
 
 
-def test_cleanup_empty_parents_stops_when_sibling_prompt_exists(
+def test_removing_one_global_agent_keeps_sibling(
     make_project,
     make_plugin_version,
     tmp_path: Path,
 ):
-    """Removing one prompt keeps the agents/ dir when another prompt still exists."""
+    """Removing one global agent .toml keeps the agents/ dir and sibling agents."""
     project_root, _agents_md = make_project()
     cache_root, version_dir = make_plugin_version(
         "market",
@@ -1099,14 +1094,14 @@ def test_cleanup_empty_parents_stops_when_sibling_prompt_exists(
     codex_home = tmp_path / "codex-home"
 
     reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
-    agents_dir = project_root / ".codex" / "prompts" / "agents"
-    assert len(list(agents_dir.glob("*.md"))) == 2
+    agents_dir = codex_home / "agents"
+    assert len(list(agents_dir.glob("*.toml"))) == 2
 
     (version_dir / "agents" / "reviewer.md").unlink()
     reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
 
     assert agents_dir.exists()
-    remaining = list(agents_dir.glob("*.md"))
+    remaining = list(agents_dir.glob("*.toml"))
     assert len(remaining) == 1
     assert "helper" in remaining[0].name
 
@@ -1207,7 +1202,7 @@ def test_reconcile_rejects_traversal_paths_in_corrupted_state(
     state_path.write_text(
         json.dumps(
             {
-                "version": 4,
+                "version": 5,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
                 "managed_project_files": ["..", STATE_RELATIVE_PATH.as_posix()],
@@ -1265,7 +1260,7 @@ def test_reconcile_rejects_absolute_paths_in_corrupted_state(
     state_path.write_text(
         json.dumps(
             {
-                "version": 4,
+                "version": 5,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
                 "managed_project_files": ["/etc/passwd", STATE_RELATIVE_PATH.as_posix()],
@@ -1295,7 +1290,7 @@ def test_reconcile_rejects_empty_paths_in_corrupted_state(
     state_path.write_text(
         json.dumps(
             {
-                "version": 4,
+                "version": 5,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
                 "managed_project_files": [".", STATE_RELATIVE_PATH.as_posix()],
@@ -1523,7 +1518,7 @@ def test_build_project_rejects_cross_scope_agent_role_name_collision(
         "---\nname: plugin agent\ndescription: User agent\n---\n\nUser prompt.\n"
     )
 
-    with pytest.raises(TranslationError, match="Duplicate role name"):
+    with pytest.raises(TranslationError, match="Duplicate agent name"):
         build_project_desired_state(
             project_root,
             cache_dir=cache_root,
@@ -1805,7 +1800,6 @@ def test_clean_removes_all_managed_project_files(
     reconcile_desired_state(desired)
 
     # Verify artifacts exist before clean
-    assert (project_root / ".codex" / "config.toml").exists()
     assert (project_root / "CLAUDE.md").exists()
     state_path = project_root / ".codex" / "claude-code-bridge-state.json"
     assert state_path.exists()
@@ -1815,12 +1809,8 @@ def test_clean_removes_all_managed_project_files(
     assert len(report.changes) > 0
 
     # All managed project files gone
-    assert not (project_root / ".codex" / "config.toml").exists()
     assert not (project_root / "CLAUDE.md").exists()
     assert not state_path.exists()
-    # Prompt files gone
-    prompts_dir = project_root / ".codex" / "prompts" / "agents"
-    assert not prompts_dir.exists() or len(list(prompts_dir.glob("*.md"))) == 0
     # AGENTS.md untouched
     assert (project_root / "AGENTS.md").exists()
 
@@ -1924,7 +1914,6 @@ def test_clean_dry_run_no_side_effects(
     assert len(report.changes) > 0
 
     # Everything still exists
-    assert (project_root / ".codex" / "config.toml").exists()
     assert (project_root / "CLAUDE.md").exists()
     assert (codex_home / "skills" / "review").exists()
 
@@ -2087,13 +2076,13 @@ def test_reconcile_all_dry_run_no_side_effects(
     desired = _build_desired(project_root, cache_root, codex_home)
     reconcile_desired_state(desired)
 
-    # Modify a managed file to create a pending change
-    config = project_root / ".codex" / "config.toml"
-    config.write_text("# tampered\n")
+    # Modify a managed file (CLAUDE.md shim) to create a pending change
+    claude_md = project_root / "CLAUDE.md"
+    claude_md.write_text("# tampered\n")
 
     report = reconcile_all(codex_home=codex_home, dry_run=True)
     # File was not restored
-    assert config.read_text() == "# tampered\n"
+    assert claude_md.read_text() == "# tampered\n"
 
 
 def test_reconcile_all_rejects_symlinked_registry(tmp_path: Path):
@@ -2351,7 +2340,7 @@ def test_clean_rejects_symlinked_codex_ancestor(make_project, tmp_path):
     state = BridgeState(
         project_root=project_root,
         codex_home=codex_home,
-        managed_project_files=(".codex/config.toml", ".codex/claude-code-bridge-state.json"),
+        managed_project_files=("CLAUDE.md", ".codex/claude-code-bridge-state.json"),
     )
     state_path.write_text(state.to_json())
 
@@ -2533,20 +2522,37 @@ def _reconcile_once(project_root, cache_root, codex_home):
     """Run a full discover+translate+reconcile and return the desired state."""
     from cc_codex_bridge.discover import discover
     from cc_codex_bridge.claude_shim import plan_claude_shim
-    from cc_codex_bridge.translate_agents import translate_installed_agents_with_diagnostics
-    from cc_codex_bridge.translate_skills import translate_installed_skills
-    from cc_codex_bridge.render_codex_config import render_inline_codex_config, render_prompt_files
-    from cc_codex_bridge.reconcile import build_desired_state
+    from cc_codex_bridge.translate_agents import translate_installed_agents_with_diagnostics, translate_standalone_agents, validate_merged_agents
+    from cc_codex_bridge.translate_skills import translate_installed_skills, translate_standalone_skills, assign_skill_names
+    from cc_codex_bridge.render_agent_toml import render_agent_toml
+    from cc_codex_bridge.reconcile import build_desired_state, AGENTS_RELATIVE_ROOT
 
     result = discover(project_path=project_root, cache_dir=cache_root)
     shim_decision = plan_claude_shim(result.project)
+
     agent_result = translate_installed_agents_with_diagnostics(result.plugins)
-    skills = translate_installed_skills(result.plugins)
-    prompt_files = render_prompt_files(agent_result.roles)
-    rendered_config = render_inline_codex_config(agent_result.roles)
+    user_agent_result = translate_standalone_agents(result.user_agents, scope="user")
+    project_agent_result = translate_standalone_agents(result.project_agents, scope="project")
+    all_agents = (*agent_result.agents, *user_agent_result.agents, *project_agent_result.agents)
+    validate_merged_agents(all_agents)
+
+    global_agents = tuple(a for a in all_agents if a.scope == "global")
+    project_agents = tuple(a for a in all_agents if a.scope == "project")
+
+    project_agent_files = []
+    for agent in project_agents:
+        relpath = AGENTS_RELATIVE_ROOT / agent.install_filename
+        content = render_agent_toml(agent.agent_name, agent.description, agent.developer_instructions, sandbox_mode=agent.sandbox_mode)
+        project_agent_files.append((relpath, content.encode()))
+
+    plugin_skills = translate_installed_skills(result.plugins)
+    user_skills = translate_standalone_skills(result.user_skills, scope="user")
+    skills = assign_skill_names((*plugin_skills, *user_skills))
     return build_desired_state(
-        result, shim_decision, prompt_files, rendered_config, skills,
+        result, shim_decision, skills,
         codex_home=codex_home,
+        global_agents=global_agents,
+        project_agent_files=project_agent_files,
     )
 
 
@@ -2564,19 +2570,32 @@ def _build_desired(
         claude_home=claude_home,
     )
     shim_decision = plan_claude_shim(discovery.project)
-    roles = translate_installed_agents(discovery.plugins)
+
+    agent_result = translate_installed_agents_with_diagnostics(discovery.plugins)
+    user_agent_result = translate_standalone_agents(discovery.user_agents, scope="user")
+    project_agent_result = translate_standalone_agents(discovery.project_agents, scope="project")
+    all_agents = (*agent_result.agents, *user_agent_result.agents, *project_agent_result.agents)
+    validate_merged_agents(all_agents)
+
+    global_agents = tuple(a for a in all_agents if a.scope == "global")
+    project_agents = tuple(a for a in all_agents if a.scope == "project")
+
+    project_agent_files = []
+    for agent in project_agents:
+        relpath = AGENTS_RELATIVE_ROOT / agent.install_filename
+        content = render_agent_toml(agent.agent_name, agent.description, agent.developer_instructions, sandbox_mode=agent.sandbox_mode)
+        project_agent_files.append((relpath, content.encode()))
+
     plugin_skills = translate_installed_skills(discovery.plugins)
     user_skills = translate_standalone_skills(discovery.user_skills, scope="user")
     skills = assign_skill_names((*plugin_skills, *user_skills))
-    prompt_files = render_prompt_files(roles)
-    rendered_config = render_inline_codex_config(roles)
     return build_desired_state(
         discovery,
         shim_decision,
-        prompt_files,
-        rendered_config,
         skills,
         codex_home=codex_home,
+        global_agents=global_agents,
+        project_agent_files=project_agent_files,
     )
 
 
@@ -2594,23 +2613,36 @@ def _build_desired_with_project_skills(
         claude_home=claude_home,
     )
     shim_decision = plan_claude_shim(discovery.project)
-    roles = translate_installed_agents(discovery.plugins)
+
+    agent_result = translate_installed_agents_with_diagnostics(discovery.plugins)
+    user_agent_result = translate_standalone_agents(discovery.user_agents, scope="user")
+    project_agent_result = translate_standalone_agents(discovery.project_agents, scope="project")
+    all_agents = (*agent_result.agents, *user_agent_result.agents, *project_agent_result.agents)
+    validate_merged_agents(all_agents)
+
+    global_agents = tuple(a for a in all_agents if a.scope == "global")
+    project_agents = tuple(a for a in all_agents if a.scope == "project")
+
+    project_agent_files = []
+    for agent in project_agents:
+        relpath = AGENTS_RELATIVE_ROOT / agent.install_filename
+        content = render_agent_toml(agent.agent_name, agent.description, agent.developer_instructions, sandbox_mode=agent.sandbox_mode)
+        project_agent_files.append((relpath, content.encode()))
+
     plugin_skills = translate_installed_skills(discovery.plugins)
     user_skills = translate_standalone_skills(discovery.user_skills, scope="user")
     skills = assign_skill_names((*plugin_skills, *user_skills))
-    prompt_files = render_prompt_files(roles)
-    rendered_config = render_inline_codex_config(roles)
 
     project_skills = translate_standalone_skills(discovery.project_skills, scope="project")
 
     return build_desired_state(
         discovery,
         shim_decision,
-        prompt_files,
-        rendered_config,
         skills,
         codex_home=codex_home,
         project_skills=project_skills,
+        global_agents=global_agents,
+        project_agent_files=project_agent_files,
     )
 
 
