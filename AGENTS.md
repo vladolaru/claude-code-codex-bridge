@@ -60,8 +60,8 @@ The `claude` CLI must be available on PATH. The bridge shells out to `claude plu
 The bridge reads local Claude Code state and produces Codex-compatible outputs such as:
 
 - `CLAUDE.md` as the `@AGENTS.md` shim
-- `.codex/config.toml`
-- `.codex/prompts/agents/*.md`
+- `~/.codex/agents/*.toml` (global agent files, tracked in global registry)
+- `.codex/agents/*.toml` (project-local agent files)
 - `.codex/claude-code-bridge-state.json`
 - `~/.codex/skills/*`
 
@@ -117,7 +117,7 @@ No agent carries context between sessions — every agent reads the code cold. T
 The bridge translates between two ecosystems. Authoritative reference documents live in `docs/`:
 
 - `docs/agent-skills-standard.md` — the open Agent Skills standard (from [agentskills.io](https://agentskills.io/)): skill directory structure, `SKILL.md` format, frontmatter fields, progressive disclosure, client implementation contract, and script conventions.
-- `docs/codex-cli-reference.md` — Codex CLI specifics (from [developers.openai.com/codex](https://developers.openai.com/codex/) and the [Codex source](https://github.com/openai/codex)): instructions discovery (`AGENTS.md`), skill discovery hierarchy, agent role configuration, `config.toml` format, and Claude Code vs Codex comparison.
+- `docs/codex-cli-reference.md` — Codex CLI specifics (from [developers.openai.com/codex](https://developers.openai.com/codex/) and the [Codex source](https://github.com/openai/codex)): instructions discovery (`AGENTS.md`), skill discovery hierarchy, agent role configuration, agent file auto-discovery, and Claude Code vs Codex comparison.
 
 Consult these before making design decisions that depend on how Codex discovers skills, loads instructions, or defines agent roles.
 

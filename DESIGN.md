@@ -47,9 +47,9 @@ These are authoritative inputs:
 These are derived artifacts and must not become hand-maintained sources:
 
 - `CLAUDE.md`
-- `.codex/config.toml`
-- `.codex/prompts/agents/*.md`
+- `.codex/agents/*.toml`
 - `.codex/claude-code-bridge-state.json`
+- `~/.codex/agents/*.toml`
 - `~/.codex/claude-code-bridge-global-state.json`
 - `~/.codex/skills/*`
 
@@ -72,7 +72,7 @@ If a behavior is described differently in multiple docs:
 - project-level skill and agent discovery from `.claude/skills/` and `.claude/agents/`
 - user-level global instructions discovery from `~/.claude/CLAUDE.md`
 - selection of the latest installed plugin version by semantic version
-- translation of Claude agents into Codex role prompts and config entries
+- translation of Claude agents into self-contained Codex agent `.toml` files
 - translation of Claude skills into self-contained Codex skills
 - safe reconcile of generated project files and generated Codex skill directories
 - state tracking for generator-owned outputs
@@ -101,11 +101,11 @@ The runtime is a deterministic pipeline:
 6. discover project-level skills and agents from `.claude/`
 7. load optional `.codex/bridge.toml` exclusions and merge any CLI exclusion flags
 8. filter discovered plugins/skills/agents by the effective exclusion set
-9. translate plugin agents into `GeneratedAgentRole` objects
-10. translate standalone user and project agents into `GeneratedAgentRole` objects
+9. translate plugin agents into `GeneratedAgentFile` objects
+10. translate standalone user and project agents into `GeneratedAgentFile` objects
 11. translate plugin and user skills into `GeneratedSkill` trees (global registry)
 12. translate project skills into project-local `GeneratedSkill` trees
-13. merge all agent roles and render project-local Codex prompt files and `.codex/config.toml`
+13. merge all agents, render project-local agent `.toml` files to `.codex/agents/`, and collect global agents for `~/.codex/agents/`
 14. decide whether `CLAUDE.md` can be created or preserved as an `@AGENTS.md` shim
 15. build a full desired state for project files, Codex skill directories, and global instructions
 16. inspect/preview or reconcile that desired state with ownership and rollback protections
@@ -120,24 +120,27 @@ Utility commands such as `doctor` and the LaunchAgent commands are intentionally
 
 - `CLAUDE.md`
   - only valid generated content is exactly `@AGENTS.md` plus a trailing newline
-- `.codex/config.toml`
-  - rendered inline multi-agent config
-- `.codex/prompts/agents/*.md`
-  - prompt bodies derived from Claude agent markdown bodies
+- `.codex/agents/*.toml`
+  - self-contained Codex agent files derived from project-scope Claude agents
+  - each `.toml` contains `name`, `description`, `developer_instructions`, and optional `sandbox_mode`
+  - Codex discovers these automatically (no `config.toml` needed)
 - `.codex/claude-code-bridge-state.json`
   - project-local ownership state for reconcile safety
   - tracks managed project files, managed project skill directory names, and version
+- `.codex/skills/<skill-name>/`
+  - project-local Codex skill directories derived from Claude project skills
 
 ### User-global outputs
 
+- `~/.codex/agents/*.toml`
+  - self-contained Codex agent files derived from plugin and user-scope Claude agents
+  - tracked in the global registry alongside skills
 - `~/.codex/claude-code-bridge-global-state.json`
-  - global generated-skill ownership registry keyed by install directory name
+  - global generated-skill and agent ownership registry keyed by install directory name (skills) and filename (agents)
 - `~/.codex/skills/<generated-skill-name>/`
   - self-contained Codex skill directories derived from Claude plugin and user skills
 - `~/.codex/AGENTS.md`
   - user-global Codex instructions bridged from `~/.claude/CLAUDE.md`
-- `.codex/skills/<skill-name>/`
-  - project-local Codex skill directories derived from Claude project skills
 
 ### Local-only rule
 
@@ -152,8 +155,8 @@ The reconcile engine is conservative by design.
 - project `AGENTS.md`
 - hand-authored project `.codex/bridge.toml` exclusion config
 - hand-authored `CLAUDE.md`
-- hand-authored `.codex/config.toml`
-- hand-authored `.codex/prompts/agents/*.md`
+- hand-authored `.codex/agents/*.toml`
+- non-generated files under `~/.codex/agents/`
 - non-generated directories under `~/.codex/skills/`
 
 ### Generator-owned artifacts
@@ -164,21 +167,20 @@ The project-local state file records:
 
 - project root
 - Codex home path
-- managed project-relative file paths
+- managed project-relative file paths (including agent `.toml` files under `.codex/agents/`)
 - managed project skill directory names (tracked separately for directory-snapshot comparison)
-- state version (currently 4)
+- state version (currently 5)
 
 The global registry records:
 
-- generated skill install directory names
-- deterministic content hashes for generated skill trees
-- owning project roots for each generated skill directory
+- generated skill install directory names with content hashes and owning project roots
+- generated agent `.toml` filenames with content hashes and owning project roots
 - a sorted list of all reconciled project roots (the `projects` list)
 
 ### Safety rules
 
 - project files are never overwritten unless they were previously recorded as managed
-- the state file may only authorize generator-owned project paths: `CLAUDE.md`, `.codex/config.toml`, `.codex/claude-code-bridge-state.json`, and `.codex/prompts/agents/*` (project skill directories are tracked separately via `managed_project_skill_dirs`)
+- the state file may only authorize generator-owned project paths: `CLAUDE.md`, `.codex/agents/*.toml`, and `.codex/claude-code-bridge-state.json` (project skill directories are tracked separately via `managed_project_skill_dirs`; legacy paths are still recognized for migration cleanup)
 - state-tracked project skill directories must be plain generated directory names; traversal, absolute paths, and nested paths are rejected as corrupted state
 - generated project-relative paths are normalized and may not use absolute paths or `..` traversal
 - corrupted or unexpected managed project paths in state are treated as a hard error — this applies to both reconcile and cleanup paths
@@ -193,6 +195,9 @@ The global registry records:
 - existing skill directories are adopted only when their content matches the desired generated tree exactly
 - conflicting content for an existing generated skill directory is a hard error
 - generated skill directories are removed only when the global registry shows no remaining owners
+- existing global agent `.toml` files are adopted only when their content hash matches the desired generated content exactly
+- conflicting content for an existing generated agent file is a hard error
+- generated agent files are removed only when the global registry shows no remaining owners
 - all write targets must resolve within their expected root (`project_root` for project files, `codex_home` for global files) after symlink resolution — this catches symlinked ancestor directories that would redirect operations outside the expected tree
 - skill translation rejects symlinked resource directories, symlinked files (including SKILL.md), and symlinked subdirectories within resource directories
 - project skills are tracked as managed directory names and compared using exact directory-snapshot matching, consistent with global skills
@@ -285,7 +290,7 @@ Anything else is treated as hand-authored and causes failure.
 
 ### 8.2 Agent translation
 
-`src/cc_codex_bridge/translate_agents.py` converts Claude agent markdown files into `GeneratedAgentRole`.
+`src/cc_codex_bridge/translate_agents.py` converts Claude agent markdown files into `GeneratedAgentFile`.
 
 Required Claude frontmatter:
 
@@ -294,34 +299,26 @@ Required Claude frontmatter:
 
 Optional handled fields:
 
-- `model`
-- `tools`
+- `model` (preserved as metadata only)
+- `tools` (mapped to `sandbox_mode`)
 
 Current mapping rules:
 
-- plugin agents: role name = `<marketplace>_<plugin>_<normalized_agent>`, prompt path = `.codex/prompts/agents/<marketplace>-<plugin>-<agent>.md`
-- user agents: role name = `user_<normalized_agent>`, prompt path = `.codex/prompts/agents/user-<agent>.md`
-- project agents: role name = `project_<normalized_agent>`, prompt path = `.codex/prompts/agents/project-<agent>.md`
+- plugin agents: agent name = `<marketplace>_<plugin>_<normalized_agent>`, install filename = `<marketplace>-<plugin>-<agent>.toml`, scope = `global`
+- user agents: agent name = `user_<normalized_agent>`, install filename = `user-<agent>.toml`, scope = `global`
+- project agents: agent name = `project_<normalized_agent>`, install filename = `project-<agent>.toml`, scope = `project`
 - normalized generated names reject absolute paths, `..` traversal, and values that collapse to an empty identifier
-- prompt body = markdown body after frontmatter, normalized to end with a trailing newline when non-empty
-- model = fixed default `gpt-5.3-codex`
-- original Claude `model` is preserved only as metadata in the generated config comment
-
-Current tool translation table:
-
-- `Read` -> `read`
-- `Edit` -> `edit`
-- `Glob` -> `glob`
-- `Grep` -> `grep`
-- `Write` -> `write`
-- `Bash` -> `bash`
-- `WebSearch` -> `web_search`
+- developer_instructions = markdown body after frontmatter, normalized to end with a trailing newline when non-empty
+- sandbox_mode derived from Claude tool list via `derive_sandbox_mode()`:
+  - write tools (`Bash`, `Write`, `Edit`) → `workspace-write`
+  - read-only tools (`Read`, `Grep`, `Glob`, `WebSearch`) → `read-only`
+  - no tools → omit (inherit from parent session)
 
 Unsupported Claude tools are hard diagnostics. They invalidate agent generation for that run instead of being silently dropped.
 
-Installed-agent translation checks for duplicate `prompt_relpath` values as well as duplicate `role_name` values, consistent with standalone agent translation.
+Installed-agent translation checks for duplicate `install_filename` values as well as duplicate `agent_name` values, consistent with standalone agent translation.
 
-After merging all scopes (plugin, user, project), `validate_merged_roles()` checks uniqueness of both `role_name` and `prompt_relpath` across the full merged set. Per-scope checks provide early detection with better error messages; the post-merge check is the global invariant that prevents cross-scope collisions from producing silently corrupt output.
+After merging all scopes (plugin, user, project), `validate_merged_agents()` checks uniqueness of both `agent_name` and `install_filename` across the full merged set. Per-scope checks provide early detection with better error messages; the post-merge check is the global invariant that prevents cross-scope collisions from producing silently corrupt output.
 
 Frontmatter parsing is shared through `src/cc_codex_bridge/frontmatter.py`.
 
@@ -336,20 +333,18 @@ Post-parse validation keeps the runtime contract narrow:
   allowed value shapes
 - malformed YAML and unsupported runtime shapes are hard translation errors
 
-### 8.3 Codex config rendering
+### 8.3 Agent TOML rendering
 
-`src/cc_codex_bridge/render_codex_config.py` renders:
+`src/cc_codex_bridge/render_agent_toml.py` renders self-contained Codex agent `.toml` files.
 
-- prompt file content map
-- inline `.codex/config.toml`
+Each file contains:
 
-The config is deterministic:
+- `name` — the agent identifier
+- `description` — human-facing guidance for when to use the agent
+- `developer_instructions` — the prompt body from the Claude agent markdown
+- `sandbox_mode` — optional, derived from Claude tool lists
 
-- roles are sorted
-- tools are sorted
-- output contains a generated-file header
-- prompt references are project-local `.codex/...` paths
-- string values use TOML-compatible escaping, including multiline content
+Output is deterministic: fields appear in a fixed order, strings use TOML-compatible escaping, and each file includes a generated-file header.
 
 ### 8.4 Skill translation
 
@@ -419,9 +414,10 @@ Reconcile lives in `src/cc_codex_bridge/reconcile.py`.
 
 - project root
 - Codex home
-- project files with desired bytes
+- project files with desired bytes (includes `CLAUDE.md` shim and project-local agent `.toml` files under `.codex/agents/`)
 - project skills (directory-snapshot comparison, installed to `.codex/skills/`)
 - generated skills (global registry, installed to `~/.codex/skills/`)
+- global agents (global registry, installed as `.toml` files to `~/.codex/agents/`)
 - global instructions content (for `~/.codex/AGENTS.md`)
 - path to the state file
 
@@ -442,23 +438,24 @@ Supported kinds in current reporting:
 ### Reconcile flow
 
 1. load previous state if present
-2. load the current global skill registry under the resolved Codex home
-3. compute desired project file changes (config, prompts)
+2. load the current global registry (skills and agents) under the resolved Codex home
+3. compute desired project file changes (shim, project-local agent `.toml` files)
 4. compute desired project skill directory mutations using directory-snapshot comparison
 5. compute desired generated-skill claims and reconcile changes from registry ownership plus on-disk content hashes
-6. compute desired global instructions changes for `~/.codex/AGENTS.md`
-7. validate ownership constraints
-8. write project file and skill directory changes directly
-9. write global instructions file if needed
-10. write updated global registry files
-11. write the project-local state file
-12. remove stale managed outputs whose last owner released them
+6. compute desired global agent file mutations and reconcile changes from registry ownership plus content hashes
+7. compute desired global instructions changes for `~/.codex/AGENTS.md`
+8. validate ownership constraints
+9. write project file and skill directory changes directly
+10. write global agent files and instructions file if needed
+11. write updated global registry file (a single file tracks both skills and agents)
+12. write the project-local state file
+13. remove stale managed outputs whose last owner released them
 
 `diff_desired_state()` additionally reports state file create/update changes that `reconcile_desired_state()` would perform, ensuring `status` and `reconcile --dry-run` show the same pending changes as a real reconcile.
 
 ### Write model
 
-Project files and registry files are written atomically using temp-file-then-rename in the same directory.
+Project files, global agent files, and registry files are written atomically using temp-file-then-rename in the same directory.
 
 Skill directories are written directly. On update, the old directory is removed before the new one is written.
 
@@ -596,7 +593,7 @@ Current runtime module responsibilities:
   - shared UTF-8 text loading helpers for runtime-managed text files
 - `translate_agents.py`
   - Claude agent translation and unsupported-tool diagnostics
-- `render_codex_config.py`
+- `render_agent_toml.py`
   - prompt-file and inline config rendering
 - `registry.py`
   - global generated-skill registry serialization and deterministic skill hashing

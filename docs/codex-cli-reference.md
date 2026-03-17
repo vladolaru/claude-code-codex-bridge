@@ -280,7 +280,7 @@ Note: core tools (file read, file write, file edit, shell execution, glob, grep)
 2. `~/.codex/AGENTS.md` is loaded automatically — the bridge just writes the file
 3. Project-level `.codex/skills/` provides natural scope isolation — no prefix needed
 4. User-level `~/.codex/skills/` is a shared global namespace — collisions resolved with `-alt` / `-alt-N` suffixes
-5. Codex agent roles use `.toml` config files with `developer_instructions`, not `.md` prompt files with `model`/`tools` arrays — the bridge's current agent translation format diverges from native Codex conventions (see section 3)
+5. Codex agent roles use `.toml` config files with `developer_instructions`, not `.md` prompt files with `model`/`tools` arrays — agent translation now produces native `.toml` files placed in `.codex/agents/` (project-local) or `~/.codex/agents/` (global), matching Codex's auto-discovery format (see section 3.4). This eliminates the need for `config.toml` agent entries; Codex discovers these files automatically.
 6. Codex tools are controlled by sandbox policy at the session level, not per-agent tool grants — a role file can override `sandbox_mode` but doesn't list individual tools
 
 ## Sources

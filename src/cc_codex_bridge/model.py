@@ -153,21 +153,6 @@ class ClaudeShimDecision:
 
 
 @dataclass(frozen=True)
-class GeneratedAgentRole:
-    """Generated Codex role metadata derived from a Claude agent."""
-
-    plugin_name: str
-    source_path: Path
-    role_name: str
-    description: str
-    original_model_hint: str | None
-    model: str
-    tools: tuple[str, ...]
-    prompt_relpath: Path
-    prompt_body: str
-
-
-@dataclass(frozen=True)
 class AgentTranslationDiagnostic:
     """One agent translation diagnostic that invalidates generation."""
 

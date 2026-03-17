@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Agent translation now produces native Codex `.toml` files instead of `.md` prompt files and `config.toml` entries. Global agents (plugin + user) install to `~/.codex/agents/` with registry tracking. Project agents install to `.codex/agents/`.
+- Claude tool lists now map to `sandbox_mode` (`workspace-write`, `read-only`, or omitted) instead of per-agent Codex tool arrays.
+- State version bumped to 5 to trigger re-reconciliation for migration.
+
+### Added
+
+- `render_agent_toml.py` module for rendering self-contained Codex agent `.toml` files.
+- `derive_sandbox_mode()` for mapping Claude tools to Codex sandbox modes.
+- `GlobalAgentEntry` and `hash_agent_file()` for agent ownership tracking in the global registry.
+
+### Removed
+
+- `render_codex_config.py` module — `config.toml` and `.codex/prompts/agents/*.md` are no longer generated.
+- `GeneratedAgentRole` dataclass — replaced by `GeneratedAgentFile`.
+- `validate_merged_roles()` — replaced by `validate_merged_agents()`.
+
 ## [0.9.0] - 2026-03-17
 
 ### Changed
