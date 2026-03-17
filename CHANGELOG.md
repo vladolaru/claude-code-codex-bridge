@@ -13,6 +13,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Bootstrap support: when a project has `CLAUDE.md` but no `AGENTS.md`, `reconcile` copies `CLAUDE.md` to `AGENTS.md` and replaces `CLAUDE.md` with the `@AGENTS.md` shim. Read-only commands (`status`, `validate`, `reconcile --dry-run`) report that bootstrap is needed without mutating files.
 - Project discovery now accepts `CLAUDE.md` as a fallback project marker when `AGENTS.md` is absent.
 
+### Fixed
+
+- Bootstrap now rejects `CLAUDE.md` that is the `@AGENTS.md` shim (prevents creating a self-referencing AGENTS.md when the original is lost)
+- Bootstrap now refuses to write through a symlinked AGENTS.md target (prevents writing outside the project tree)
+- `reconcile-all` now allows projects with `CLAUDE.md` but no `AGENTS.md` to reach the bootstrap path
+- Reverted malformed plugin cache tolerance — a plugin directory with no valid semantic versions is again a hard discovery failure, preventing silent artifact removal when the cache is temporarily corrupted
+
 ## [0.7.1] - 2026-03-16
 
 ### Fixed
@@ -21,7 +28,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Installed agent translation now checks for duplicate prompt paths, consistent with standalone agent translation
 - Skill translation rejects symlinked files, symlinked subdirectories, and symlinked SKILL.md — not just symlinked resource directories
 - `reconcile-all` and `uninstall` now use the same strict registry loader as normal reconcile, failing on symlinked registries instead of silently skipping them
-- Malformed plugin cache entries (no valid semantic versions) are skipped instead of aborting all plugin discovery
 
 ## [0.7.0] - 2026-03-16
 

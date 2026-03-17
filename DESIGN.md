@@ -219,7 +219,7 @@ Discovery lives in `src/cc_codex_bridge/discover.py`.
 - structure is expected as `<cache>/<marketplace>/<plugin>/<version>/`
 - only directories with valid semantic-version names are considered plugin versions
 - malformed version directories are ignored
-- malformed plugin directories with no valid semantic-version subdirectories are skipped during discovery; the `doctor` command reports these
+- if a plugin has no valid semantic-version subdirectories, discovery fails
 - an empty or missing plugin cache returns an empty tuple (non-fatal) when other sources exist
 
 ### User-level discovery

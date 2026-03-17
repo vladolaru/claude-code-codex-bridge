@@ -170,31 +170,13 @@ def test_discover_latest_plugins_ignores_invalid_version_dirs(make_plugin_versio
     assert plugins[0].version_text == "1.5.3"
 
 
-def test_discover_latest_plugins_skips_if_no_valid_versions(tmp_path: Path):
-    """A plugin with no valid semantic versions is skipped, not fatal."""
+def test_discover_latest_plugins_fails_if_no_valid_versions(tmp_path: Path):
+    """A plugin with no valid semantic versions is a hard failure."""
     cache_root = tmp_path / "claude-cache"
     (cache_root / "market" / "broken-plugin" / "latest").mkdir(parents=True)
 
-    plugins = discover_latest_plugins(cache_root)
-    assert plugins == ()
-
-
-def test_discover_latest_plugins_skips_malformed_plugin_dir(tmp_path: Path):
-    """A plugin directory with no valid versions is skipped, not fatal."""
-    cache_root = tmp_path / "cache"
-
-    # Valid plugin
-    good_dir = cache_root / "market" / "good" / "1.0.0"
-    good_dir.mkdir(parents=True)
-
-    # Malformed plugin — no valid semver subdirectory
-    bad_dir = cache_root / "market" / "broken"
-    bad_dir.mkdir(parents=True)
-    (bad_dir / "not-a-version").mkdir()
-
-    plugins = discover_latest_plugins(cache_dir=cache_root)
-    assert len(plugins) == 1
-    assert plugins[0].plugin_name == "good"
+    with pytest.raises(DiscoveryError, match="No valid semantic versions"):
+        discover_latest_plugins(cache_root)
 
 
 def test_discover_latest_plugins_returns_empty_for_missing_cache(tmp_path: Path):

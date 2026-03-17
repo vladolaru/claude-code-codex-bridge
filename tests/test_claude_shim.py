@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from cc_codex_bridge.claude_shim import SHIM_CONTENT, plan_claude_shim
-from cc_codex_bridge.model import ProjectContext
+from cc_codex_bridge.model import ProjectContext, ReconcileError
 
 
 def test_plan_claude_shim_creates_when_missing(tmp_path: Path):
@@ -107,6 +109,48 @@ def test_plan_claude_shim_bootstrap_not_triggered_for_symlink_claude_md(tmp_path
 
     # Should not be bootstrap — symlinks are handled separately
     assert decision.action != "bootstrap"
+
+
+def test_plan_claude_shim_rejects_bootstrap_when_claude_md_is_shim(tmp_path: Path):
+    """Bootstrap is rejected when CLAUDE.md is the @AGENTS.md shim — would create self-reference."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "CLAUDE.md").write_text("@AGENTS.md\n")
+
+    project = ProjectContext(root=project_root, agents_md_path=project_root / "AGENTS.md")
+    decision = plan_claude_shim(project)
+
+    assert decision.action == "fail"
+    assert "shim" in decision.reason.lower()
+
+
+def test_plan_claude_shim_rejects_symlinked_agents_md_target(tmp_path: Path):
+    """Bootstrap fails when AGENTS.md is a (broken) symlink."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "CLAUDE.md").write_text("# Real instructions\n")
+    (project_root / "AGENTS.md").symlink_to("/nonexistent/target")
+
+    project = ProjectContext(root=project_root, agents_md_path=project_root / "AGENTS.md")
+    decision = plan_claude_shim(project)
+
+    assert decision.action == "fail"
+    assert "symlink" in decision.reason.lower()
+
+
+def test_execute_bootstrap_rejects_symlinked_agents_md(tmp_path: Path):
+    """execute_bootstrap refuses to write through a symlinked AGENTS.md."""
+    from cc_codex_bridge.claude_shim import execute_bootstrap
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "CLAUDE.md").write_text("# Real instructions\n")
+    (project_root / "AGENTS.md").symlink_to(tmp_path / "external.md")
+
+    project = ProjectContext(root=project_root, agents_md_path=project_root / "AGENTS.md")
+
+    with pytest.raises(ReconcileError, match="symlinked AGENTS.md"):
+        execute_bootstrap(project)
 
 
 def test_plan_claude_shim_fails_for_non_agents_symlink(tmp_path: Path):

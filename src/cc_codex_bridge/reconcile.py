@@ -547,7 +547,10 @@ def reconcile_all(
         if not project_root.is_dir():
             errors.append(ReconcileAllError(project_root=project_root, error="directory not found"))
             continue
-        if not (project_root / "AGENTS.md").is_file():
+        if (
+            not (project_root / "AGENTS.md").is_file()
+            and not (project_root / "CLAUDE.md").is_file()
+        ):
             errors.append(ReconcileAllError(project_root=project_root, error="AGENTS.md not found"))
             continue
 

@@ -98,7 +98,10 @@ def discover_latest_plugins(
         for plugin_dir in sorted(_iter_dirs(marketplace_dir)):
             versions = list(_collect_plugin_versions(marketplace_dir.name, plugin_dir))
             if not versions:
-                continue  # Skip malformed plugin; doctor reports these
+                raise DiscoveryError(
+                    "No valid semantic versions found for installed Claude plugin "
+                    f"{marketplace_dir.name}/{plugin_dir.name}"
+                )
             grouped_versions[(marketplace_dir.name, plugin_dir.name)].extend(versions)
 
     if not grouped_versions:

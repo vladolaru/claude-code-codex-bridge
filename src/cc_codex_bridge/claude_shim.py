@@ -18,14 +18,41 @@ def plan_claude_shim(project: ProjectContext) -> ClaudeShimDecision:
     # Bootstrap: CLAUDE.md exists but AGENTS.md does not
     if (
         not project.agents_md_path.exists()
+        and not project.agents_md_path.is_symlink()
         and claude_md_path.is_file()
         and not claude_md_path.is_symlink()
     ):
+        content = read_utf8_text(
+            claude_md_path,
+            label="CLAUDE.md bootstrap candidate",
+            error_type=ReconcileError,
+        )
+        if content == SHIM_CONTENT:
+            # CLAUDE.md is the generator-owned shim with AGENTS.md missing —
+            # bootstrapping would create a self-referencing AGENTS.md.
+            return ClaudeShimDecision(
+                action="fail",
+                path=claude_md_path,
+                reason="CLAUDE.md is the @AGENTS.md shim but AGENTS.md is missing; "
+                "restore AGENTS.md manually",
+            )
         return ClaudeShimDecision(
             action="bootstrap",
             path=claude_md_path,
             content=SHIM_CONTENT,
             reason="CLAUDE.md exists without AGENTS.md; will copy to AGENTS.md and replace with shim",
+        )
+
+    # AGENTS.md target is a symlink (possibly broken) — refuse to bootstrap through it
+    if (
+        not project.agents_md_path.exists()
+        and project.agents_md_path.is_symlink()
+    ):
+        return ClaudeShimDecision(
+            action="fail",
+            path=claude_md_path,
+            reason=f"AGENTS.md is a symlink; refusing to write through it: "
+            f"{project.agents_md_path}",
         )
 
     if not claude_md_path.exists() and not claude_md_path.is_symlink():
@@ -81,5 +108,9 @@ def execute_bootstrap(project: ProjectContext) -> None:
     with AGENTS.md from the start, and the normal pipeline can proceed.
     """
     claude_md_path = project.root / "CLAUDE.md"
+    if project.agents_md_path.is_symlink():
+        raise ReconcileError(
+            f"Refusing to write through symlinked AGENTS.md: {project.agents_md_path}"
+        )
     shutil.copy2(str(claude_md_path), str(project.agents_md_path))
     claude_md_path.write_text(SHIM_CONTENT)
