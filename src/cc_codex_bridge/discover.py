@@ -154,6 +154,8 @@ def discover(
 def discover_latest_plugins(
     cache_dir: str | Path | None = None,
     claude_home: str | Path | None = None,
+    *,
+    enabled_ids: frozenset[str] | None = None,
 ) -> tuple[InstalledPlugin, ...]:
     """Discover the latest installed version of each Claude plugin."""
     root = _resolve_cache_dir(cache_dir, claude_home)
@@ -190,6 +192,12 @@ def discover_latest_plugins(
                 agents=tuple(_discover_agents(latest.resolved_path)),
             )
         )
+
+    if enabled_ids is not None:
+        latest_plugins = [
+            p for p in latest_plugins
+            if f"{p.marketplace}/{p.plugin_name}" in enabled_ids
+        ]
 
     return tuple(latest_plugins)
 

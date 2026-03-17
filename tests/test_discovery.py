@@ -513,3 +513,36 @@ def test_query_enabled_plugin_ids_returns_enabled_from_cli(
     )
     result = query_enabled_plugin_ids(tmp_path)
     assert result == frozenset({"market/alpha"})
+
+
+# ---------------------------------------------------------------------------
+# Enablement filtering in discover_latest_plugins
+# ---------------------------------------------------------------------------
+
+
+def test_discover_latest_plugins_filters_by_enabled_ids(make_plugin_version):
+    """Only plugins in the enabled set are returned."""
+    cache_root, _ = make_plugin_version(
+        "market", "alpha", "1.0.0", skill_names=("skill-a",)
+    )
+    make_plugin_version("market", "beta", "1.0.0", skill_names=("skill-b",))
+    make_plugin_version("market", "gamma", "1.0.0", skill_names=("skill-c",))
+
+    enabled = frozenset({"market/alpha", "market/gamma"})
+    plugins = discover_latest_plugins(cache_root, enabled_ids=enabled)
+
+    names = {p.plugin_name for p in plugins}
+    assert names == {"alpha", "gamma"}
+
+
+def test_discover_latest_plugins_returns_all_when_no_filter(make_plugin_version):
+    """Without an enabled filter, all plugins are returned (backward compat)."""
+    cache_root, _ = make_plugin_version(
+        "market", "alpha", "1.0.0", skill_names=("skill-a",)
+    )
+    make_plugin_version("market", "beta", "1.0.0", skill_names=("skill-b",))
+
+    plugins = discover_latest_plugins(cache_root, enabled_ids=None)
+
+    names = {p.plugin_name for p in plugins}
+    assert names == {"alpha", "beta"}
