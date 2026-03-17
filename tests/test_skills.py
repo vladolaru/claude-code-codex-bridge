@@ -721,6 +721,34 @@ def test_assign_skill_names_rewrites_skill_md_frontmatter():
     assert b"name: review-alt\n" in plugin_md.content
 
 
+def test_assign_skill_names_allows_exactly_64_chars():
+    """A name of exactly 64 characters passes validation."""
+    name_64 = "a" * 64
+    skill = _make_skill(name_64)
+    result = assign_skill_names((skill,))
+
+    assert len(result) == 1
+    assert result[0].install_dir_name == name_64
+
+
+def test_assign_skill_names_rejects_65_char_bare_name():
+    """A skill directory name of 65 characters is rejected even without collision."""
+    name_65 = "a" * 65
+    skill = _make_skill(name_65)
+    with pytest.raises(TranslationError, match="exceeds 64 characters"):
+        assign_skill_names((skill,))
+
+
+def test_assign_skill_names_rejects_when_alt_suffix_exceeds_64():
+    """A collision suffix that pushes the name over 64 chars is rejected."""
+    # 61 chars + "-alt" = 65 chars → should fail for the second skill
+    name_61 = "a" * 61
+    skill_a = _make_skill(name_61, marketplace="_user", plugin_name="personal")
+    skill_b = _make_skill(name_61, marketplace="alpha", plugin_name="tools")
+    with pytest.raises(TranslationError, match="exceeds 64 characters"):
+        assign_skill_names((skill_a, skill_b))
+
+
 def _write_skill_directory(destination: Path, skill: GeneratedSkill) -> Path:
     """Materialize one generated skill tree for test assertions."""
     destination.mkdir(parents=True, exist_ok=True)
