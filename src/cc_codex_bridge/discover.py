@@ -139,7 +139,12 @@ def discover(
 ) -> DiscoveryResult:
     """Resolve the target project and latest installed Claude plugins."""
     project = resolve_project_root(project_path)
-    plugins = discover_latest_plugins(cache_dir=cache_dir, claude_home=claude_home)
+    enabled_ids = query_enabled_plugin_ids(project.root)
+    plugins = discover_latest_plugins(
+        cache_dir=cache_dir,
+        claude_home=claude_home,
+        enabled_ids=enabled_ids,
+    )
     return DiscoveryResult(
         project=project,
         plugins=plugins,

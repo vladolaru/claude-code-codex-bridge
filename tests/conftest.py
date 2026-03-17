@@ -96,3 +96,13 @@ def isolate_home_scoped_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         "DEFAULT_LOGS_DIR",
         sandbox_home / "Library" / "Logs" / "codex-bridge",
     )
+
+
+@pytest.fixture(autouse=True)
+def bypass_claude_cli_for_tests(monkeypatch: pytest.MonkeyPatch):
+    """Bypass claude CLI calls in tests — return None to accept all plugins."""
+    monkeypatch.setattr(
+        discover_module,
+        "query_enabled_plugin_ids",
+        lambda root: None,
+    )
