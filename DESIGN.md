@@ -208,8 +208,9 @@ Discovery lives in `src/cc_codex_bridge/discover.py`.
 ### Project discovery
 
 - the project root is the nearest ancestor containing `AGENTS.md`
+- if `AGENTS.md` is not found, discovery falls back to the nearest ancestor containing `CLAUDE.md` as a project marker for bootstrap
 - if `--project` points to a file, discovery starts from its parent
-- missing `AGENTS.md` is a hard failure
+- missing both `AGENTS.md` and `CLAUDE.md` is a hard failure
 
 ### Claude plugin discovery
 
@@ -255,6 +256,7 @@ Allowed outcomes:
 
 - `create`
 - `preserve`
+- `bootstrap`
 - `fail`
 
 `CLAUDE.md` is only generator-safe when:
@@ -262,6 +264,8 @@ Allowed outcomes:
 - it does not exist
 - it exactly matches `@AGENTS.md` plus a trailing newline
 - it is a symlink to `AGENTS.md`
+
+When `AGENTS.md` does not exist but `CLAUDE.md` is a regular file, the outcome is `bootstrap`. Only `reconcile` (non-dry-run) and `reconcile-all` execute the bootstrap, which copies `CLAUDE.md` to `AGENTS.md` and replaces `CLAUDE.md` with the shim. Read-only commands report that bootstrap is required and exit without mutating files.
 
 Anything else is treated as hand-authored and causes failure.
 

@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-03-17
+
+### Added
+
+- Bootstrap support: when a project has `CLAUDE.md` but no `AGENTS.md`, `reconcile` copies `CLAUDE.md` to `AGENTS.md` and replaces `CLAUDE.md` with the `@AGENTS.md` shim. Read-only commands (`status`, `validate`, `reconcile --dry-run`) report that bootstrap is needed without mutating files.
+- Project discovery now accepts `CLAUDE.md` as a fallback project marker when `AGENTS.md` is absent.
+
 ## [0.7.1] - 2026-03-16
 
 ### Fixed
