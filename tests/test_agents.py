@@ -12,7 +12,8 @@ from cc_codex_bridge.frontmatter import (
     parse_frontmatter_lines,
     parse_markdown_with_frontmatter,
 )
-from cc_codex_bridge.model import GeneratedAgentRole, InstalledPlugin, SemVer, TranslationError
+from cc_codex_bridge.model import GeneratedAgentFile, GeneratedAgentRole, InstalledPlugin, SemVer, TranslationError
+from cc_codex_bridge.render_agent_toml import derive_sandbox_mode, render_agent_toml
 from cc_codex_bridge.render_codex_config import (
     render_inline_codex_config,
     render_prompt_files,
@@ -710,3 +711,90 @@ def test_validate_merged_roles_accepts_unique_roles():
 
     # Should not raise
     validate_merged_roles((role_a, role_b))
+
+
+# --- render_agent_toml and derive_sandbox_mode tests ---
+
+
+def test_render_agent_toml_produces_valid_toml():
+    """Agent .toml rendering includes all required fields."""
+    result = render_agent_toml(
+        "my-agent",
+        "A helpful agent",
+        "You are a helpful agent.\n",
+    )
+    assert 'name = "my-agent"' in result
+    assert 'description = "A helpful agent"' in result
+    assert 'developer_instructions = """\nYou are a helpful agent.\n"""' in result
+    assert "sandbox_mode" not in result
+    assert result.startswith("# GENERATED FILE")
+
+    # Verify it parses as valid TOML
+    import tomllib
+    parsed = tomllib.loads(result)
+    assert parsed["name"] == "my-agent"
+    assert parsed["description"] == "A helpful agent"
+    assert parsed["developer_instructions"] == "You are a helpful agent.\n"
+
+
+def test_render_agent_toml_includes_sandbox_mode_when_present():
+    """sandbox_mode is rendered when set."""
+    result = render_agent_toml(
+        "writer-agent",
+        "Writes code",
+        "You write code.\n",
+        sandbox_mode="workspace-write",
+    )
+    assert 'sandbox_mode = "workspace-write"' in result
+
+    import tomllib
+    parsed = tomllib.loads(result)
+    assert parsed["sandbox_mode"] == "workspace-write"
+
+
+def test_render_agent_toml_omits_sandbox_mode_when_none():
+    """sandbox_mode is omitted when not set (inherit from parent)."""
+    result = render_agent_toml(
+        "reader-agent",
+        "Reads code",
+        "You read code.\n",
+        sandbox_mode=None,
+    )
+    assert "sandbox_mode" not in result
+
+
+def test_render_agent_toml_escapes_multiline_instructions():
+    """Multiline developer_instructions are rendered as TOML multiline strings."""
+    result = render_agent_toml(
+        "multi-agent",
+        "Multi-line desc with \"quotes\"",
+        "Line one.\nLine two.\nLine three.\n",
+    )
+    # Description quotes should be escaped in the basic string
+    assert 'description = "Multi-line desc with \\"quotes\\""' in result
+
+    import tomllib
+    parsed = tomllib.loads(result)
+    assert parsed["description"] == 'Multi-line desc with "quotes"'
+    assert parsed["developer_instructions"] == "Line one.\nLine two.\nLine three.\n"
+
+
+def test_derive_sandbox_mode_write_tools():
+    """Write-capable tools produce workspace-write."""
+    assert derive_sandbox_mode(("Read", "Bash", "Write")) == "workspace-write"
+    assert derive_sandbox_mode(("Edit",)) == "workspace-write"
+    assert derive_sandbox_mode(("Bash",)) == "workspace-write"
+    assert derive_sandbox_mode(("Write",)) == "workspace-write"
+
+
+def test_derive_sandbox_mode_read_only_tools():
+    """Read-only tools produce read-only."""
+    assert derive_sandbox_mode(("Read", "Grep", "Glob")) == "read-only"
+    assert derive_sandbox_mode(("Read",)) == "read-only"
+    assert derive_sandbox_mode(("WebSearch",)) == "read-only"
+
+
+def test_derive_sandbox_mode_no_tools():
+    """No tools returns None (inherit from parent)."""
+    assert derive_sandbox_mode(None) is None
+    assert derive_sandbox_mode(()) is None

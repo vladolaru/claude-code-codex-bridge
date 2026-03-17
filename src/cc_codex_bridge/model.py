@@ -185,6 +185,20 @@ class AgentTranslationResult:
 
 
 @dataclass(frozen=True)
+class GeneratedAgentFile:
+    """Generated Codex agent .toml file derived from a Claude agent."""
+
+    source_path: Path
+    scope: str  # "global" or "project"
+    agent_name: str  # Codex name field (role identifier)
+    install_filename: str  # filename for the .toml file
+    description: str
+    developer_instructions: str
+    sandbox_mode: str | None  # "read-only", "workspace-write", or None
+    original_model_hint: str | None
+
+
+@dataclass(frozen=True)
 class GeneratedSkillFile:
     """One file that will be materialized inside a generated Codex skill."""
 
