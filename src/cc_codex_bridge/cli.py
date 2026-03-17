@@ -433,7 +433,7 @@ def _handle_uninstall_command(args: argparse.Namespace) -> int:
     else:
         print(_format_uninstall_report(report, dry_run=args.dry_run))
 
-    return 0
+    return 1 if report.has_errors else 0
 
 
 def _handle_reconcile_all_command(args: argparse.Namespace) -> int:
@@ -584,6 +584,18 @@ def _format_uninstall_report(report, *, dry_run: bool = False) -> str:
 
     if not report.projects and not report.global_removals and not report.launchagent_removals:
         lines.append("Nothing to uninstall.")
+
+    # Add trailing summary when there are projects to report on
+    if report.projects:
+        cleaned = sum(1 for r in report.projects if r.status == "cleaned")
+        skipped = sum(1 for r in report.projects if r.status == "skipped")
+        no_state = sum(1 for r in report.projects if r.status == "no_state")
+        parts = [f"{cleaned} cleaned"]
+        if skipped:
+            parts.append(f"{skipped} skipped")
+        if no_state:
+            parts.append(f"{no_state} no state")
+        lines.append(f"Summary: {', '.join(parts)}.")
 
     return "\n".join(lines).rstrip()
 

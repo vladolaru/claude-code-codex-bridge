@@ -1078,6 +1078,66 @@ def test_uninstall_skips_missing_project(make_project, make_plugin_version, tmp_
     assert not (codex_home / "skills" / "market-tools-review").exists()
 
 
+def test_uninstall_exits_nonzero_on_cleanup_error(make_project, tmp_path: Path, capsys):
+    """uninstall returns exit code 1 when a project cleanup fails."""
+    from cc_codex_bridge.state import BridgeState
+    from cc_codex_bridge.reconcile import STATE_RELATIVE_PATH
+    from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME, GlobalSkillRegistry
+
+    project_root, _ = make_project()
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+
+    # Set up state with a corrupted managed path
+    state_path = project_root / STATE_RELATIVE_PATH
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state = BridgeState(
+        project_root=project_root.resolve(),
+        codex_home=codex_home.resolve(),
+        managed_project_files=("AGENTS.md",),  # invalid
+    )
+    state_path.write_text(state.to_json())
+
+    # Register the project
+    registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
+    (codex_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
+
+    exit_code = cli.main([
+        "uninstall",
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 1
+
+    captured = capsys.readouterr()
+    assert "SKIPPED" in captured.out
+    assert "Summary:" in captured.out
+
+
+def test_uninstall_report_includes_summary_line(make_project, make_plugin_version, tmp_path: Path, capsys):
+    """uninstall text output ends with a summary line."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("review",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    assert cli.main([
+        "reconcile",
+        "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(codex_home),
+    ]) == 0
+
+    exit_code = cli.main([
+        "uninstall",
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    assert "Summary: 1 cleaned." in captured.out
+
+
 def test_uninstall_removes_launchagent_plists(make_project, make_plugin_version, tmp_path: Path):
     """uninstall removes bridge LaunchAgent plists."""
     project_root, _ = make_project()
