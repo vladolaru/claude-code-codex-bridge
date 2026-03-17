@@ -6,8 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-03-17
+
+### Changed
+
+- Skill naming redesign: all generated skill install names now use bare skill directory names instead of `marketplace-plugin-skill` or `user-skill` prefixes. This complies with the Agent Skills standard's 64-character name limit and eliminates Codex silently skipping skills with long names.
+- Collision resolution: when multiple skills share a directory name, user skills win the bare name over plugin skills; among plugins, `(marketplace, plugin_name)` sort order determines priority. Collisions get `-alt`, `-alt-2`, etc. suffixes.
+- Name validation: generated skill names exceeding 64 characters after suffixing are now a hard error.
+
 ### Added
 
+- `assign_skill_names()` function for deterministic, collision-free skill name assignment across all global skill candidates.
 - `Edit` tool translation: Claude agents using the `Edit` tool now translate to Codex `edit` instead of producing hard diagnostic errors.
 - Authoritative reference docs in `docs/`: `agent-skills-standard.md` (open Agent Skills spec) and `codex-cli-reference.md` (Codex CLI behaviors).
 
