@@ -11,7 +11,11 @@ from cc_codex_bridge.discover import discover_latest_plugins
 from cc_codex_bridge.model import GeneratedSkill, GeneratedSkillFile, TranslationError
 from cc_codex_bridge.registry import hash_generated_skill
 from cc_codex_bridge.translate_agents import translate_installed_agents
-from cc_codex_bridge.translate_skills import translate_installed_skills, translate_standalone_skills
+from cc_codex_bridge.translate_skills import (
+    assign_skill_names,
+    translate_installed_skills,
+    translate_standalone_skills,
+)
 
 
 def test_generated_skills_copy_bundled_resources(make_plugin_version, tmp_path: Path):
@@ -613,6 +617,106 @@ def test_translate_standalone_skill_empty_input():
     """Empty skill paths produce empty result."""
     result = translate_standalone_skills((), scope="user")
     assert result == ()
+
+
+# -- assign_skill_names tests --
+
+
+def _make_skill(
+    bare_name: str,
+    marketplace: str = "market",
+    plugin_name: str = "plugin",
+) -> GeneratedSkill:
+    """Build a minimal GeneratedSkill for assign_skill_names tests."""
+    return GeneratedSkill(
+        marketplace=marketplace,
+        plugin_name=plugin_name,
+        source_path=Path(f"/tmp/skills/{bare_name}"),
+        install_dir_name=bare_name,
+        original_skill_name=bare_name,
+        codex_skill_name=bare_name,
+        files=(
+            GeneratedSkillFile(
+                relative_path=Path("SKILL.md"),
+                content=f"---\nname: {bare_name}\ndescription: test\n---\n\nBody.\n".encode(),
+                mode=0o644,
+            ),
+        ),
+    )
+
+
+def test_assign_skill_names_no_collisions():
+    """Without collisions, skills use their bare directory name."""
+    skills = (
+        _make_skill("brainstorming"),
+        _make_skill("debugging", marketplace="beta", plugin_name="tools"),
+    )
+    result = assign_skill_names(skills)
+
+    assert [s.install_dir_name for s in result] == ["brainstorming", "debugging"]
+    assert [s.codex_skill_name for s in result] == ["brainstorming", "debugging"]
+
+
+def test_assign_skill_names_user_wins_collision():
+    """User skills get the bare name; plugin skills get -alt suffix."""
+    user_skill = _make_skill("review", marketplace="_user", plugin_name="personal")
+    plugin_skill = _make_skill("review", marketplace="alpha", plugin_name="tools")
+    result = assign_skill_names((plugin_skill, user_skill))
+
+    assert [s.install_dir_name for s in result] == ["review", "review-alt"]
+    assert result[0].marketplace == "_user"
+    assert result[1].marketplace == "alpha"
+
+
+def test_assign_skill_names_plugin_collision_sorted_by_marketplace_plugin():
+    """Among plugins, first in (marketplace, plugin_name) sort wins bare name."""
+    beta_skill = _make_skill("review", marketplace="beta", plugin_name="tools")
+    alpha_skill = _make_skill("review", marketplace="alpha", plugin_name="tools")
+    result = assign_skill_names((beta_skill, alpha_skill))
+
+    assert [s.install_dir_name for s in result] == ["review", "review-alt"]
+    assert result[0].marketplace == "alpha"
+    assert result[1].marketplace == "beta"
+
+
+def test_assign_skill_names_three_way_collision():
+    """Third collision gets -alt-2 suffix."""
+    user_skill = _make_skill("review", marketplace="_user", plugin_name="personal")
+    alpha_skill = _make_skill("review", marketplace="alpha", plugin_name="tools")
+    beta_skill = _make_skill("review", marketplace="beta", plugin_name="tools")
+    result = assign_skill_names((beta_skill, alpha_skill, user_skill))
+
+    assert [s.install_dir_name for s in result] == [
+        "review", "review-alt", "review-alt-2",
+    ]
+    assert result[0].marketplace == "_user"
+    assert result[1].marketplace == "alpha"
+    assert result[2].marketplace == "beta"
+
+
+def test_assign_skill_names_rejects_name_over_64_chars():
+    """Names exceeding 64 characters after suffixing are a hard error."""
+    long_name = "a" * 65
+    skill = _make_skill(long_name)
+    with pytest.raises(TranslationError, match="exceeds 64 characters"):
+        assign_skill_names((skill,))
+
+
+def test_assign_skill_names_rewrites_skill_md_frontmatter():
+    """The name: field in SKILL.md is rewritten to match the assigned name."""
+    user_skill = _make_skill("review", marketplace="_user", plugin_name="personal")
+    plugin_skill = _make_skill("review", marketplace="alpha", plugin_name="tools")
+    result = assign_skill_names((plugin_skill, user_skill))
+
+    user_md = next(
+        f for f in result[0].files if f.relative_path == Path("SKILL.md")
+    )
+    assert b"name: review\n" in user_md.content
+
+    plugin_md = next(
+        f for f in result[1].files if f.relative_path == Path("SKILL.md")
+    )
+    assert b"name: review-alt\n" in plugin_md.content
 
 
 def _write_skill_directory(destination: Path, skill: GeneratedSkill) -> Path:

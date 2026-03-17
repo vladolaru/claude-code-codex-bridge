@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 import re
 from typing import Iterable
@@ -19,6 +20,77 @@ from cc_codex_bridge.text import read_utf8_text
 SIBLING_SKILL_REF_RE = re.compile(r"(?<!\.)\.\./(?P<skill>[A-Za-z0-9._-]+)/")
 IGNORED_NAMES = {".DS_Store", "__pycache__"}
 OPTIONAL_SKILL_DIRS = {"scripts", "references", "assets", "agents"}
+
+MAX_SKILL_NAME_LENGTH = 64
+
+
+def assign_skill_names(
+    skills: tuple[GeneratedSkill, ...],
+) -> tuple[GeneratedSkill, ...]:
+    """Assign collision-free install names using bare skill directory names.
+
+    Priority: user skills win bare names over plugin skills.
+    Among plugins, sorted by (marketplace, plugin_name).
+    Collisions get -alt, -alt-2, -alt-3 suffixes.
+    """
+    # Group skills by bare directory name (from source_path)
+    groups: dict[str, list[GeneratedSkill]] = {}
+    for skill in skills:
+        bare_name = skill.source_path.name
+        groups.setdefault(bare_name, []).append(skill)
+
+    result: list[GeneratedSkill] = []
+
+    for bare_name in sorted(groups):
+        candidates = groups[bare_name]
+
+        if len(candidates) > 1:
+            # Sort by priority: user skills first (marketplace starts with _),
+            # then plugin skills by (marketplace, plugin_name)
+            candidates.sort(key=lambda s: (
+                0 if s.marketplace.startswith("_") else 1,
+                s.marketplace,
+                s.plugin_name,
+            ))
+
+        for index, skill in enumerate(candidates):
+            if index == 0:
+                assigned_name = bare_name
+            elif index == 1:
+                assigned_name = f"{bare_name}-alt"
+            else:
+                assigned_name = f"{bare_name}-alt-{index}"
+
+            if len(assigned_name) > MAX_SKILL_NAME_LENGTH:
+                raise TranslationError(
+                    f"Generated skill name exceeds {MAX_SKILL_NAME_LENGTH} characters: "
+                    f"'{assigned_name}' ({len(assigned_name)} chars) "
+                    f"from skill directory '{bare_name}'"
+                )
+
+            # Rewrite SKILL.md frontmatter name to match assigned name
+            new_files: list[GeneratedSkillFile] = []
+            for f in skill.files:
+                if f.relative_path == Path("SKILL.md"):
+                    rewritten = _rewrite_frontmatter_name(
+                        f.content.decode(), assigned_name
+                    )
+                    new_files.append(GeneratedSkillFile(
+                        relative_path=f.relative_path,
+                        content=rewritten.encode(),
+                        mode=f.mode,
+                    ))
+                else:
+                    new_files.append(f)
+
+            result.append(replace(
+                skill,
+                install_dir_name=assigned_name,
+                codex_skill_name=assigned_name,
+                files=tuple(new_files),
+            ))
+
+    return tuple(sorted(result, key=lambda s: s.install_dir_name))
 
 
 class _RawSkill:
