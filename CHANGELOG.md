@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `Edit` tool translation: Claude agents using the `Edit` tool now translate to Codex `edit` instead of producing hard diagnostic errors.
+- Authoritative reference docs in `docs/`: `agent-skills-standard.md` (open Agent Skills spec) and `codex-cli-reference.md` (Codex CLI behaviors).
+
+### Fixed
+
+- Sibling skill reference regex no longer matches `../name/` inside triple-dot ellipsis paths (e.g., `~/.claude/plugins/cache/.../plugin-name/` in comments).
+- `clean` no longer deletes a pre-existing `CLAUDE.md` that the bridge preserved but did not create. Previously, any `CLAUDE.md` containing `@AGENTS.md` was recorded as managed regardless of origin.
+
 ## [0.8.1] - 2026-03-17
 
 ### Fixed
