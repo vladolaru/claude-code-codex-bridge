@@ -296,6 +296,7 @@ Current mapping rules:
 Current tool translation table:
 
 - `Read` -> `read`
+- `Edit` -> `edit`
 - `Glob` -> `glob`
 - `Grep` -> `grep`
 - `Write` -> `write`

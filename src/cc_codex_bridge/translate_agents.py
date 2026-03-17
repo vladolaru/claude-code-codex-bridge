@@ -18,6 +18,7 @@ from cc_codex_bridge.model import (
 
 TOOL_TRANSLATIONS = {
     "Read": "read",
+    "Edit": "edit",
     "Glob": "glob",
     "Grep": "grep",
     "Write": "write",

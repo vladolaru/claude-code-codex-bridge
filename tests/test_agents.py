@@ -389,6 +389,40 @@ def test_translate_tools_rejects_invalid_shapes():
         translate_tools(["Read", 1])
 
 
+def test_translate_tools_maps_edit_to_codex_edit():
+    """The Claude Edit tool translates to the Codex edit tool."""
+    assert translate_tools(["Read", "Edit", "Write"]) == ("edit", "read", "write")
+    assert translate_tools(["Edit"]) == ("edit",)
+
+
+def test_translate_installed_agents_accepts_edit_tool(make_plugin_version):
+    """Agents using the Edit tool translate successfully instead of producing diagnostics."""
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "test-plugin",
+        "1.0.0",
+        agent_names=("mutation-tester",),
+    )
+    (version_dir / "agents" / "mutation-tester.md").write_text(
+        "---\n"
+        "name: mutation-tester\n"
+        "description: Mutation testing\n"
+        "tools:\n"
+        "  - Read\n"
+        "  - Edit\n"
+        "  - Write\n"
+        "  - Bash\n"
+        "---\n\n"
+        "You mutate code.\n"
+    )
+
+    result = translate_installed_agents_with_diagnostics(discover_latest_plugins(cache_root))
+
+    assert result.diagnostics == ()
+    assert len(result.roles) == 1
+    assert "edit" in result.roles[0].tools
+
+
 def test_translate_installed_agents_accepts_quoted_fields_and_inline_tool_lists(
     make_plugin_version,
 ):
