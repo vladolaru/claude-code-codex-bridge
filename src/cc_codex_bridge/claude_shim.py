@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+
 from cc_codex_bridge.model import ClaudeShimDecision, ProjectContext, ReconcileError
 from cc_codex_bridge.text import read_utf8_text
 
@@ -12,6 +14,19 @@ SHIM_CONTENT = "@AGENTS.md\n"
 def plan_claude_shim(project: ProjectContext) -> ClaudeShimDecision:
     """Plan safe CLAUDE.md behavior for the project root."""
     claude_md_path = project.root / "CLAUDE.md"
+
+    # Bootstrap: CLAUDE.md exists but AGENTS.md does not
+    if (
+        not project.agents_md_path.exists()
+        and claude_md_path.is_file()
+        and not claude_md_path.is_symlink()
+    ):
+        return ClaudeShimDecision(
+            action="bootstrap",
+            path=claude_md_path,
+            content=SHIM_CONTENT,
+            reason="CLAUDE.md exists without AGENTS.md; will copy to AGENTS.md and replace with shim",
+        )
 
     if not claude_md_path.exists() and not claude_md_path.is_symlink():
         return ClaudeShimDecision(
@@ -53,3 +68,18 @@ def plan_claude_shim(project: ProjectContext) -> ClaudeShimDecision:
         path=claude_md_path,
         reason="CLAUDE.md exists and is not a generator-owned shim",
     )
+
+
+def execute_bootstrap(project: ProjectContext) -> None:
+    """Copy CLAUDE.md to AGENTS.md and replace CLAUDE.md with the shim.
+
+    This is a one-time operation that:
+    1. Copies the existing CLAUDE.md content to AGENTS.md
+    2. Replaces CLAUDE.md with the ``@AGENTS.md`` shim
+
+    After this, the project has the same layout as one that was set up
+    with AGENTS.md from the start, and the normal pipeline can proceed.
+    """
+    claude_md_path = project.root / "CLAUDE.md"
+    shutil.copy2(str(claude_md_path), str(project.agents_md_path))
+    claude_md_path.write_text(SHIM_CONTENT)

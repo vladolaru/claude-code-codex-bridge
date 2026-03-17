@@ -79,6 +79,36 @@ def test_plan_claude_shim_fails_for_hand_authored_file(tmp_path: Path):
     assert "not a generator-owned shim" in decision.reason
 
 
+def test_plan_claude_shim_bootstrap_when_claude_md_exists_without_agents_md(tmp_path: Path):
+    """Bootstrap action when CLAUDE.md exists but AGENTS.md does not."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "CLAUDE.md").write_text("# My instructions\n")
+
+    project = ProjectContext(root=project_root, agents_md_path=project_root / "AGENTS.md")
+    decision = plan_claude_shim(project)
+
+    assert decision.action == "bootstrap"
+    assert decision.path == project_root / "CLAUDE.md"
+    assert decision.content == SHIM_CONTENT
+    assert "bootstrap" in decision.reason.lower() or "AGENTS.md" in decision.reason
+
+
+def test_plan_claude_shim_bootstrap_not_triggered_for_symlink_claude_md(tmp_path: Path):
+    """Bootstrap is not triggered when CLAUDE.md is a symlink, even if AGENTS.md is absent."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    other = project_root / "other.md"
+    other.write_text("# Other\n")
+    (project_root / "CLAUDE.md").symlink_to("other.md")
+
+    project = ProjectContext(root=project_root, agents_md_path=project_root / "AGENTS.md")
+    decision = plan_claude_shim(project)
+
+    # Should not be bootstrap — symlinks are handled separately
+    assert decision.action != "bootstrap"
+
+
 def test_plan_claude_shim_fails_for_non_agents_symlink(tmp_path: Path):
     """Symlinks to anything except AGENTS.md are rejected."""
     project_root = tmp_path / "project"

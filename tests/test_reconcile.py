@@ -1526,6 +1526,60 @@ def test_build_project_rejects_cross_scope_agent_role_name_collision(
         )
 
 
+def test_build_project_bootstraps_agents_md_from_claude_md(tmp_path: Path):
+    """build_project_desired_state creates AGENTS.md from CLAUDE.md when missing."""
+    from cc_codex_bridge.reconcile import build_project_desired_state
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    claude_content = "# My project instructions\n"
+    (project_root / "CLAUDE.md").write_text(claude_content)
+
+    build = build_project_desired_state(
+        project_root,
+        codex_home=tmp_path / "codex-home",
+    )
+
+    # AGENTS.md should now exist with the original CLAUDE.md content
+    assert (project_root / "AGENTS.md").exists()
+    assert (project_root / "AGENTS.md").read_text() == claude_content
+
+    # CLAUDE.md should now contain the shim
+    assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
+
+    # The shim decision should be "preserve" since bootstrap already wrote the shim
+    assert build.shim_decision.action == "preserve"
+    assert build.desired_state is not None
+
+
+def test_build_project_bootstrap_is_idempotent(tmp_path: Path):
+    """Running bootstrap twice does not corrupt AGENTS.md."""
+    from cc_codex_bridge.reconcile import build_project_desired_state
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    claude_content = "# My project instructions\n"
+    (project_root / "CLAUDE.md").write_text(claude_content)
+
+    build_project_desired_state(
+        project_root,
+        codex_home=tmp_path / "codex-home",
+    )
+
+    # After first run, AGENTS.md has original content and CLAUDE.md has shim
+    assert (project_root / "AGENTS.md").read_text() == claude_content
+    assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
+
+    # Second run should succeed with AGENTS.md already present
+    build2 = build_project_desired_state(
+        project_root,
+        codex_home=tmp_path / "codex-home",
+    )
+
+    assert build2.shim_decision.action == "preserve"
+    assert (project_root / "AGENTS.md").read_text() == claude_content
+
+
 def test_reconcile_removes_stale_global_instructions(
     make_project,
     make_plugin_version,

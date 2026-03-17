@@ -24,7 +24,10 @@ CLAUDE_PLUGIN_CACHE_DIR = DEFAULT_CLAUDE_HOME / "plugins" / "cache"
 def resolve_project_root(start_path: str | Path | None = None) -> ProjectContext:
     """Resolve a project root from cwd or an explicit path.
 
-    Searches upward from the selected path until it finds `AGENTS.md`.
+    Searches upward from the selected path until it finds ``AGENTS.md``.
+    Falls back to ``CLAUDE.md`` as a project marker when ``AGENTS.md`` is
+    absent, returning a context whose *agents_md_path* points to the
+    not-yet-created ``AGENTS.md`` so the bootstrap step can create it.
     """
     candidate = Path(start_path or Path.cwd()).resolve()
     if candidate.is_file():
@@ -34,6 +37,12 @@ def resolve_project_root(start_path: str | Path | None = None) -> ProjectContext
         agents_md_path = directory / AGENTS_MD
         if agents_md_path.is_file():
             return ProjectContext(root=directory, agents_md_path=agents_md_path)
+
+    # Fallback: accept CLAUDE.md as project marker for bootstrap
+    for directory in (candidate, *candidate.parents):
+        claude_md_path = directory / "CLAUDE.md"
+        if claude_md_path.is_file():
+            return ProjectContext(root=directory, agents_md_path=directory / AGENTS_MD)
 
     raise DiscoveryError(
         f"Could not resolve a project root with {AGENTS_MD} from: {candidate}"

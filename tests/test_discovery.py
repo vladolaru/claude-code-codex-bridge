@@ -98,6 +98,46 @@ def test_resolve_project_root_requires_agents_md(tmp_path: Path):
         resolve_project_root(project_root)
 
 
+def test_resolve_project_root_falls_back_to_claude_md(tmp_path: Path):
+    """Project root resolved via CLAUDE.md when AGENTS.md is absent."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "CLAUDE.md").write_text("# Project instructions\n")
+
+    ctx = resolve_project_root(project_root)
+
+    assert ctx.root == project_root.resolve()
+    assert ctx.agents_md_path == project_root.resolve() / "AGENTS.md"
+    assert not ctx.agents_md_path.exists()  # AGENTS.md not created yet
+
+
+def test_resolve_project_root_claude_md_fallback_walks_upward(tmp_path: Path):
+    """CLAUDE.md fallback searches parent directories like AGENTS.md does."""
+    project_root = tmp_path / "project"
+    nested = project_root / "src" / "feature"
+    nested.mkdir(parents=True)
+    (project_root / "CLAUDE.md").write_text("# Project instructions\n")
+
+    ctx = resolve_project_root(nested)
+
+    assert ctx.root == project_root.resolve()
+    assert ctx.agents_md_path == project_root.resolve() / "AGENTS.md"
+
+
+def test_resolve_project_root_prefers_agents_md_over_claude_md(tmp_path: Path):
+    """AGENTS.md takes priority when both exist."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    agents_md = project_root / "AGENTS.md"
+    agents_md.write_text("# Agents\n")
+    (project_root / "CLAUDE.md").write_text("@AGENTS.md\n")
+
+    ctx = resolve_project_root(project_root)
+
+    assert ctx.root == project_root.resolve()
+    assert ctx.agents_md_path == agents_md.resolve()
+
+
 def test_discover_latest_plugins_uses_semver_order(make_plugin_version):
     """Latest installed plugin version is selected by semantic version precedence."""
     cache_root, _ = make_plugin_version(
