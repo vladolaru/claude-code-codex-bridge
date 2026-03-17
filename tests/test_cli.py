@@ -91,7 +91,7 @@ def test_reconcile_and_dry_run_respect_fake_codex_home(
     assert reconcile_exit == 0
     assert dry_run_exit == 0
     assert (project_root / ".codex" / "config.toml").exists()
-    assert (codex_home / "skills" / "market-prompt-engineer-prompt-engineer").exists()
+    assert (codex_home / "skills" / "prompt-engineer").exists()
 
 
 def test_install_launchagent_cli_writes_plist(tmp_path: Path):
@@ -631,7 +631,7 @@ def test_reconcile_exclude_skill_removes_previously_managed_output(
         "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
     )
     codex_home = tmp_path / "codex-home"
-    generated_skill = codex_home / "skills" / "market-prompt-engineer-prompt-engineer"
+    generated_skill = codex_home / "skills" / "prompt-engineer"
 
     assert (
         cli.main(
@@ -819,7 +819,7 @@ def test_reconcile_includes_user_level_skills(make_project, tmp_path: Path, caps
     ])
 
     assert exit_code == 0
-    assert (codex_home / "skills" / "user-my-tool" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "my-tool" / "SKILL.md").exists()
 
 
 def test_reconcile_includes_project_level_skills(make_project, tmp_path: Path, capsys):
@@ -1026,7 +1026,7 @@ def test_uninstall_command_succeeds(make_project, make_plugin_version, tmp_path:
             "--codex-home", str(codex_home),
         ]) == 0
 
-    assert (codex_home / "skills" / "market-tools-review").exists()
+    assert (codex_home / "skills" / "review").exists()
 
     exit_code = cli.main([
         "uninstall",
@@ -1040,7 +1040,7 @@ def test_uninstall_command_succeeds(make_project, make_plugin_version, tmp_path:
         assert not (project / "CLAUDE.md").exists()
 
     # Global artifacts gone
-    assert not (codex_home / "skills" / "market-tools-review").exists()
+    assert not (codex_home / "skills" / "review").exists()
     from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
     assert not (codex_home / GLOBAL_REGISTRY_FILENAME).exists()
 
@@ -1075,7 +1075,7 @@ def test_uninstall_skips_missing_project(make_project, make_plugin_version, tmp_
     # Project B was cleaned
     assert not (project_b / ".codex" / "config.toml").exists()
     # Global skills removed (force-cleaned even though project A was skipped)
-    assert not (codex_home / "skills" / "market-tools-review").exists()
+    assert not (codex_home / "skills" / "review").exists()
 
 
 def test_uninstall_exits_nonzero_on_cleanup_error(make_project, tmp_path: Path, capsys):

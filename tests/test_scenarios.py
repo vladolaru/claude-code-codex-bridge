@@ -427,7 +427,7 @@ def test_rich_plugin_ecosystem(make_project, tmp_path: Path):
     skills_root = codex_home / "skills"
 
     # -- code-review skill: scripts/ preserved with permissions --
-    cr_dir = skills_root / "vlad-plugins-review-tools-code-review"
+    cr_dir = skills_root / "code-review"
     cr_skill = cr_dir / "SKILL.md"
     assert cr_skill.exists()
     assert "multi-agent code review" in cr_skill.read_text()
@@ -436,7 +436,7 @@ def test_rich_plugin_ecosystem(make_project, tmp_path: Path):
     assert cr_script.stat().st_mode & 0o111  # executable bit preserved
 
     # -- software-architecture skill: companion files + nested references --
-    arch_dir = skills_root / "vlad-plugins-review-tools-software-architecture"
+    arch_dir = skills_root / "software-architecture"
     assert (arch_dir / "SKILL.md").exists()
     assert (arch_dir / "solid-principles.md").exists()
     assert "Single Responsibility" in (arch_dir / "solid-principles.md").read_text()
@@ -444,7 +444,7 @@ def test_rich_plugin_ecosystem(make_project, tmp_path: Path):
     assert (arch_dir / "references" / "patterns" / "observer.md").exists()
 
     # -- accessible-frontend skill: sibling vendored into generated tree --
-    a11y_dir = skills_root / "vlad-plugins-review-tools-accessible-frontend"
+    a11y_dir = skills_root / "accessible-frontend"
     a11y_skill = a11y_dir / "SKILL.md"
     assert a11y_skill.exists()
     skill_content = a11y_skill.read_text()
@@ -456,7 +456,7 @@ def test_rich_plugin_ecosystem(make_project, tmp_path: Path):
     assert "Combobox" in (a11y_dir / "shared-references" / "aria-patterns.md").read_text()
 
     # -- shared-references also translated as its own skill --
-    sr_dir = skills_root / "vlad-plugins-review-tools-shared-references"
+    sr_dir = skills_root / "shared-references"
     assert (sr_dir / "SKILL.md").exists()
 
     # -- .DS_Store noise filtered --
@@ -465,8 +465,8 @@ def test_rich_plugin_ecosystem(make_project, tmp_path: Path):
     assert len(ds_store_files) == 0
 
     # -- SKILL.md frontmatter name rewritten for all skills --
-    assert "name: vlad-plugins-review-tools-code-review" in cr_skill.read_text()
-    assert "name: vlad-plugins-review-tools-software-architecture" in (
+    assert "name: code-review" in cr_skill.read_text()
+    assert "name: software-architecture" in (
         arch_dir / "SKILL.md"
     ).read_text()
 
@@ -522,14 +522,14 @@ def test_power_user_full_stack(make_project, tmp_path: Path):
 
     assert reconcile(project_root, claude_home, codex_home) == 0
 
-    # -- Plugin skills → global registry (marketplace-prefixed) --
-    assert (codex_home / "skills" / "vlad-plugins-review-tools-code-review" / "SKILL.md").exists()
-    assert (codex_home / "skills" / "vlad-plugins-review-tools-software-architecture" / "SKILL.md").exists()
+    # -- Plugin skills → global registry (bare name) --
+    assert (codex_home / "skills" / "code-review" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "software-architecture" / "SKILL.md").exists()
 
-    # -- User skills → global registry (user-prefixed) --
-    user_url = codex_home / "skills" / "user-a8c-url-shorthand" / "SKILL.md"
+    # -- User skills → global registry (bare name) --
+    user_url = codex_home / "skills" / "a8c-url-shorthand" / "SKILL.md"
     assert user_url.exists()
-    user_write = codex_home / "skills" / "user-write-like-a-pirategoat"
+    user_write = codex_home / "skills" / "write-like-a-pirategoat"
     assert (user_write / "SKILL.md").exists()
     # References dir preserved
     assert (user_write / "references" / "examples.md").exists()
@@ -584,7 +584,7 @@ def test_setup_evolves_over_time(make_project, tmp_path: Path):
     build_plugin(cache_root, "vlad-plugins", "review-tools", "1.12.0")
     assert reconcile(project_root, claude_home, codex_home) == 0
 
-    assert (codex_home / "skills" / "vlad-plugins-review-tools-code-review" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "code-review" / "SKILL.md").exists()
     config_v1 = (project_root / ".codex" / "config.toml").read_text()
     assert "vlad-plugins_review-tools_security_reviewer" in config_v1
     assert not (codex_home / "AGENTS.md").exists()  # no user CLAUDE.md yet
@@ -594,11 +594,11 @@ def test_setup_evolves_over_time(make_project, tmp_path: Path):
     build_user_claude_md(claude_home)
     assert reconcile(project_root, claude_home, codex_home) == 0
 
-    assert (codex_home / "skills" / "user-url-shorthand" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "url-shorthand" / "SKILL.md").exists()
     assert (codex_home / "AGENTS.md").exists()
     assert "Conventional Commits" in (codex_home / "AGENTS.md").read_text()
     # Plugin skills still present
-    assert (codex_home / "skills" / "vlad-plugins-review-tools-code-review" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "code-review" / "SKILL.md").exists()
 
     # --- Phase 3: Update CLAUDE.md content ---
     (claude_home / "CLAUDE.md").write_text(
@@ -625,7 +625,7 @@ def test_setup_evolves_over_time(make_project, tmp_path: Path):
     assert reconcile(project_root, claude_home, codex_home) == 0
 
     # Skills still present (same content, new version path)
-    assert (codex_home / "skills" / "vlad-plugins-review-tools-code-review" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "code-review" / "SKILL.md").exists()
     # Config regenerated
     config_v5 = (project_root / ".codex" / "config.toml").read_text()
     assert "project_reviewer" in config_v5  # project agent survived plugin change
@@ -660,9 +660,9 @@ def test_two_projects_share_user_setup(make_project, tmp_path: Path):
     assert reconcile(project_b, claude_home, codex_home) == 0
 
     # -- Global skills shared (single copy) --
-    user_skill = codex_home / "skills" / "user-url-shorthand" / "SKILL.md"
+    user_skill = codex_home / "skills" / "url-shorthand" / "SKILL.md"
     assert user_skill.exists()
-    plugin_skill = codex_home / "skills" / "vlad-plugins-review-tools-code-review" / "SKILL.md"
+    plugin_skill = codex_home / "skills" / "code-review" / "SKILL.md"
     assert plugin_skill.exists()
 
     # -- Global CLAUDE.md shared --
@@ -723,11 +723,11 @@ def test_selective_exclusion_via_config_and_cli(make_project, tmp_path: Path):
     assert reconcile(project_root, claude_home, codex_home) == 0
 
     # -- Excluded skill NOT in global registry --
-    assert not (codex_home / "skills" / "vlad-plugins-review-tools-software-architecture").exists()
+    assert not (codex_home / "skills" / "software-architecture").exists()
 
     # -- Other skills still present --
-    assert (codex_home / "skills" / "vlad-plugins-review-tools-code-review" / "SKILL.md").exists()
-    assert (codex_home / "skills" / "user-url-shorthand" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "code-review" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "url-shorthand" / "SKILL.md").exists()
 
     # -- Excluded agent NOT in config or prompts --
     config = (project_root / ".codex" / "config.toml").read_text()
@@ -754,11 +754,11 @@ def test_selective_exclusion_via_config_and_cli(make_project, tmp_path: Path):
     assert exit_code == 0
 
     # -- Plugin skills removed from global registry --
-    assert not (codex_home / "skills" / "vlad-plugins-review-tools-code-review").exists()
-    assert not (codex_home / "skills" / "vlad-plugins-review-tools-accessible-frontend").exists()
+    assert not (codex_home / "skills" / "code-review").exists()
+    assert not (codex_home / "skills" / "accessible-frontend").exists()
 
     # -- User skill and project agent still present --
-    assert (codex_home / "skills" / "user-url-shorthand" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "url-shorthand" / "SKILL.md").exists()
     config_after = (project_root / ".codex" / "config.toml").read_text()
     assert "project_reviewer" in config_after
     # Plugin agents removed
@@ -800,8 +800,8 @@ def test_clean_undoes_reconcile(make_project, tmp_path: Path):
     assert (project_root / ".codex" / "config.toml").exists()
     assert (project_root / ".codex" / "claude-code-bridge-state.json").exists()
     assert (project_root / ".codex" / "skills" / "run-tests" / "SKILL.md").exists()
-    assert (codex_home / "skills" / "vlad-plugins-review-tools-code-review" / "SKILL.md").exists()
-    assert (codex_home / "skills" / "user-url-shorthand" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "code-review" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "url-shorthand" / "SKILL.md").exists()
     assert (codex_home / "AGENTS.md").exists()
     prompts = list((project_root / ".codex" / "prompts" / "agents").glob("*.md"))
     assert len(prompts) > 0
@@ -823,8 +823,8 @@ def test_clean_undoes_reconcile(make_project, tmp_path: Path):
     assert not prompts_dir.exists() or len(list(prompts_dir.glob("*.md"))) == 0
 
     # Global skills removed (this project was the only owner)
-    assert not (codex_home / "skills" / "vlad-plugins-review-tools-code-review").exists()
-    assert not (codex_home / "skills" / "user-url-shorthand").exists()
+    assert not (codex_home / "skills" / "code-review").exists()
+    assert not (codex_home / "skills" / "url-shorthand").exists()
 
     # Hand-authored files survive
     assert (project_root / "AGENTS.md").exists()
@@ -866,8 +866,8 @@ def test_clean_dry_run_previews_without_side_effects(make_project, tmp_path: Pat
     assert (project_root / "CLAUDE.md").exists()
     assert (project_root / ".codex" / "config.toml").exists()
     assert (project_root / ".codex" / "claude-code-bridge-state.json").exists()
-    assert (codex_home / "skills" / "vlad-plugins-review-tools-code-review" / "SKILL.md").exists()
-    assert (codex_home / "skills" / "user-url-shorthand" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "code-review" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "url-shorthand" / "SKILL.md").exists()
 
 
 def test_uninstall_cleans_entire_machine(make_project, tmp_path: Path):
@@ -898,8 +898,8 @@ def test_uninstall_cleans_entire_machine(make_project, tmp_path: Path):
     # Verify everything exists
     assert (project_a / ".codex" / "config.toml").exists()
     assert (project_b / ".codex" / "config.toml").exists()
-    assert (codex_home / "skills" / "vlad-plugins-review-tools-code-review" / "SKILL.md").exists()
-    assert (codex_home / "skills" / "user-url-shorthand" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "code-review" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "url-shorthand" / "SKILL.md").exists()
     assert (codex_home / "AGENTS.md").exists()
 
     # Uninstall
@@ -917,8 +917,8 @@ def test_uninstall_cleans_entire_machine(make_project, tmp_path: Path):
     assert not (project_b / "CLAUDE.md").exists()
 
     # Global artifacts removed
-    assert not (codex_home / "skills" / "vlad-plugins-review-tools-code-review").exists()
-    assert not (codex_home / "skills" / "user-url-shorthand").exists()
+    assert not (codex_home / "skills" / "code-review").exists()
+    assert not (codex_home / "skills" / "url-shorthand").exists()
     assert not (codex_home / "AGENTS.md").exists()
     from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
     assert not (codex_home / GLOBAL_REGISTRY_FILENAME).exists()
@@ -1014,8 +1014,8 @@ def test_uninstall_skips_vanished_project_cleans_rest(make_project, tmp_path: Pa
     assert not (project_b / "CLAUDE.md").exists()
 
     # Global skills fully removed (even skills owned by the vanished project)
-    assert not (codex_home / "skills" / "vlad-plugins-review-tools-code-review").exists()
-    assert not (codex_home / "skills" / "user-url-shorthand").exists()
+    assert not (codex_home / "skills" / "code-review").exists()
+    assert not (codex_home / "skills" / "url-shorthand").exists()
 
     # Global registry removed
     from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME

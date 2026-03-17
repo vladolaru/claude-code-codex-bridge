@@ -25,7 +25,11 @@ from cc_codex_bridge.reconcile import (
 from cc_codex_bridge.render_codex_config import render_inline_codex_config, render_prompt_files
 from cc_codex_bridge.discover import discover_project_skills
 from cc_codex_bridge.translate_agents import translate_installed_agents
-from cc_codex_bridge.translate_skills import translate_installed_skills, translate_standalone_skills
+from cc_codex_bridge.translate_skills import (
+    assign_skill_names,
+    translate_installed_skills,
+    translate_standalone_skills,
+)
 
 
 def test_reconcile_writes_project_and_codex_outputs(
@@ -71,12 +75,12 @@ def test_reconcile_writes_project_and_codex_outputs(
     ).read_text() == "You are an architecture reviewer.\n"
     assert (project_root / STATE_RELATIVE_PATH).exists()
     assert (
-        codex_home / "skills" / "market-pirategoat-tools-decision-critic" / "SKILL.md"
-    ).read_text().startswith("---\nname: market-pirategoat-tools-decision-critic\n")
+        codex_home / "skills" / "decision-critic" / "SKILL.md"
+    ).read_text().startswith("---\nname: decision-critic\n")
     state_payload = json.loads((project_root / STATE_RELATIVE_PATH).read_text())
     assert "managed_codex_skill_dirs" not in state_payload
     registry_payload = _read_global_registry(codex_home)
-    assert registry_payload["skills"]["market-pirategoat-tools-decision-critic"]["owners"] == [
+    assert registry_payload["skills"]["decision-critic"]["owners"] == [
         str(project_root)
     ]
 
@@ -195,7 +199,7 @@ def test_reconcile_removes_stale_managed_skill(make_project, make_plugin_version
 
     first_desired = _build_desired(project_root, cache_root, codex_home)
     reconcile_desired_state(first_desired)
-    installed_skill = codex_home / "skills" / "market-pirategoat-tools-decision-critic"
+    installed_skill = codex_home / "skills" / "decision-critic"
     assert installed_skill.exists()
 
     _, v2_dir = make_plugin_version("market", "pirategoat-tools", "1.0.1")
@@ -234,7 +238,7 @@ def test_reconcile_shares_identical_skill_ownership_across_projects(
 
     assert any(change.resource_kind == "skill" for change in first_report.changes)
     assert all(change.resource_kind != "skill" for change in second_report.changes)
-    assert _read_global_registry(codex_home)["skills"]["market-prompt-engineer-prompt-engineer"]["owners"] == [
+    assert _read_global_registry(codex_home)["skills"]["prompt-engineer"]["owners"] == [
         str(first_project),
         str(second_project),
     ]
@@ -258,7 +262,7 @@ def test_reconcile_keeps_shared_skill_when_one_project_drops_claim(
         "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
     )
     codex_home = tmp_path / "codex-home"
-    installed_skill = codex_home / "skills" / "market-prompt-engineer-prompt-engineer"
+    installed_skill = codex_home / "skills" / "prompt-engineer"
 
     reconcile_desired_state(_build_desired(first_project, cache_root, codex_home))
     reconcile_desired_state(_build_desired(second_project, cache_root, codex_home))
@@ -269,7 +273,7 @@ def test_reconcile_keeps_shared_skill_when_one_project_drops_claim(
 
     assert installed_skill.exists()
     assert all(change.path != installed_skill for change in report.changes)
-    assert _read_global_registry(codex_home)["skills"]["market-prompt-engineer-prompt-engineer"]["owners"] == [
+    assert _read_global_registry(codex_home)["skills"]["prompt-engineer"]["owners"] == [
         str(second_project)
     ]
 
@@ -293,14 +297,14 @@ def test_reconcile_adopts_existing_matching_skill_directory(
     codex_home = tmp_path / "codex-home"
     desired = _build_desired(project_root, cache_root, codex_home)
     _write_skill_directory(
-        codex_home / "skills" / "market-prompt-engineer-prompt-engineer",
+        codex_home / "skills" / "prompt-engineer",
         desired.skills[0],
     )
 
     report = reconcile_desired_state(desired)
 
     assert all(change.resource_kind != "skill" for change in report.changes)
-    assert _read_global_registry(codex_home)["skills"]["market-prompt-engineer-prompt-engineer"]["owners"] == [
+    assert _read_global_registry(codex_home)["skills"]["prompt-engineer"]["owners"] == [
         str(project_root)
     ]
 
@@ -354,13 +358,13 @@ def test_reconcile_moves_managed_skills_when_codex_home_changes(
     second_home = tmp_path / "codex-home-two"
 
     reconcile_desired_state(_build_desired(project_root, cache_root, first_home))
-    original_skill = first_home / "skills" / "market-prompt-engineer-prompt-engineer"
+    original_skill = first_home / "skills" / "prompt-engineer"
     assert original_skill.exists()
 
     reconcile_desired_state(_build_desired(project_root, cache_root, second_home))
 
     assert not original_skill.exists()
-    assert (second_home / "skills" / "market-prompt-engineer-prompt-engineer").exists()
+    assert (second_home / "skills" / "prompt-engineer").exists()
     assert '"codex_home": "' + str(second_home.resolve()) + '"' in (
         project_root / STATE_RELATIVE_PATH
     ).read_text()
@@ -459,7 +463,7 @@ def test_reconcile_rejects_non_directory_skill_target(make_project, make_plugin_
     codex_home = tmp_path / "codex-home"
     skills_root = codex_home / "skills"
     skills_root.mkdir(parents=True)
-    (skills_root / "market-prompt-engineer-prompt-engineer").write_text("not a directory\n")
+    (skills_root / "prompt-engineer").write_text("not a directory\n")
 
     desired = _build_desired(project_root, cache_root, codex_home)
 
@@ -477,7 +481,7 @@ def test_reconcile_rejects_non_owned_skill_directory(make_project, make_plugin_v
         "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
     )
     codex_home = tmp_path / "codex-home"
-    skill_dir = codex_home / "skills" / "market-prompt-engineer-prompt-engineer"
+    skill_dir = codex_home / "skills" / "prompt-engineer"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("hand-authored\n")
 
@@ -560,7 +564,9 @@ def test_reconcile_keeps_user_level_claude_tree_untouched(
     discovery = discover(project_path=project_root)
     shim_decision = plan_claude_shim(discovery.project)
     roles = translate_installed_agents(discovery.plugins)
-    skills = translate_installed_skills(discovery.plugins)
+    plugin_skills = translate_installed_skills(discovery.plugins)
+    user_skills = translate_standalone_skills(discovery.user_skills, scope="user")
+    skills = assign_skill_names((*plugin_skills, *user_skills))
     prompt_files = render_prompt_files(roles)
     rendered_config = render_inline_codex_config(roles)
     desired = build_desired_state(
@@ -839,7 +845,7 @@ def test_reconcile_updates_skill_directory_when_sole_owner_changes_content(
         "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nVersion A.\n"
     )
     codex_home = tmp_path / "codex-home"
-    installed_skill = codex_home / "skills" / "market-prompt-engineer-prompt-engineer" / "SKILL.md"
+    installed_skill = codex_home / "skills" / "prompt-engineer" / "SKILL.md"
 
     reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
     assert "Version A." in installed_skill.read_text()
@@ -1000,10 +1006,10 @@ def test_reconcile_detects_skill_directory_with_extra_files(
     codex_home = tmp_path / "codex-home"
     desired = _build_desired(project_root, cache_root, codex_home)
     _write_skill_directory(
-        codex_home / "skills" / "market-prompt-engineer-prompt-engineer",
+        codex_home / "skills" / "prompt-engineer",
         desired.skills[0],
     )
-    (codex_home / "skills" / "market-prompt-engineer-prompt-engineer" / "EXTRA.md").write_text(
+    (codex_home / "skills" / "prompt-engineer" / "EXTRA.md").write_text(
         "extra file\n"
     )
 
@@ -1031,7 +1037,7 @@ def test_reconcile_detects_skill_directory_with_wrong_file_mode(
 
     first_desired = _build_desired(project_root, cache_root, codex_home)
     reconcile_desired_state(first_desired)
-    installed = codex_home / "skills" / "market-prompt-engineer-prompt-engineer" / "SKILL.md"
+    installed = codex_home / "skills" / "prompt-engineer" / "SKILL.md"
     installed.chmod(0o777)
 
     report = reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
@@ -1130,21 +1136,21 @@ def test_reconcile_codex_home_migration_preserves_other_owners_in_previous_regis
 
     original_registry = _read_global_registry(first_home)
     assert sorted(
-        original_registry["skills"]["market-prompt-engineer-prompt-engineer"]["owners"]
+        original_registry["skills"]["prompt-engineer"]["owners"]
     ) == sorted([str(first_project), str(second_project)])
 
     reconcile_desired_state(_build_desired(first_project, cache_root, second_home))
 
     previous_registry = _read_global_registry(first_home)
-    assert previous_registry["skills"]["market-prompt-engineer-prompt-engineer"]["owners"] == [
+    assert previous_registry["skills"]["prompt-engineer"]["owners"] == [
         str(second_project)
     ]
     new_registry = _read_global_registry(second_home)
-    assert new_registry["skills"]["market-prompt-engineer-prompt-engineer"]["owners"] == [
+    assert new_registry["skills"]["prompt-engineer"]["owners"] == [
         str(first_project)
     ]
-    assert (first_home / "skills" / "market-prompt-engineer-prompt-engineer").exists()
-    assert (second_home / "skills" / "market-prompt-engineer-prompt-engineer").exists()
+    assert (first_home / "skills" / "prompt-engineer").exists()
+    assert (second_home / "skills" / "prompt-engineer").exists()
 
 
 def test_reconcile_codex_home_migration_preserves_projects_list_in_previous_registry(
@@ -1242,7 +1248,7 @@ def test_diff_report_skips_skill_create_changes(
 
     assert "CREATE:" in rendered
     assert "(skill)" in rendered
-    skill_path = str(codex_home / "skills" / "market-prompt-engineer-prompt-engineer")
+    skill_path = str(codex_home / "skills" / "prompt-engineer")
     assert f"--- {skill_path}" not in rendered
 
 
@@ -1834,7 +1840,7 @@ def test_clean_releases_last_owner_skill(
     desired = _reconcile_once(project_root, cache_root, codex_home)
     reconcile_desired_state(desired)
 
-    skill_dir = codex_home / "skills" / "market-tools-review"
+    skill_dir = codex_home / "skills" / "review"
     assert skill_dir.exists()
 
     report = clean_project(project_root, codex_home=codex_home)
@@ -1845,7 +1851,7 @@ def test_clean_releases_last_owner_skill(
     from cc_codex_bridge.registry import GlobalSkillRegistry, GLOBAL_REGISTRY_FILENAME
     registry = GlobalSkillRegistry.from_path(codex_home / GLOBAL_REGISTRY_FILENAME)
     if registry is not None:
-        assert "market-tools-review" not in registry.skills
+        assert "review" not in registry.skills
 
 
 def test_clean_releases_shared_skill_preserves_for_other_owner(
@@ -1866,7 +1872,7 @@ def test_clean_releases_shared_skill_preserves_for_other_owner(
     desired_b = _reconcile_once(project_b, cache_root, codex_home)
     reconcile_desired_state(desired_b)
 
-    skill_dir = codex_home / "skills" / "market-tools-review"
+    skill_dir = codex_home / "skills" / "review"
     assert skill_dir.exists()
 
     # Clean project A only
@@ -1879,7 +1885,7 @@ def test_clean_releases_shared_skill_preserves_for_other_owner(
     from cc_codex_bridge.registry import GlobalSkillRegistry, GLOBAL_REGISTRY_FILENAME
     registry = GlobalSkillRegistry.from_path(codex_home / GLOBAL_REGISTRY_FILENAME)
     assert registry is not None
-    entry = registry.skills.get("market-tools-review")
+    entry = registry.skills.get("review")
     assert entry is not None
     assert project_a.resolve() not in entry.owners
     assert project_b.resolve() in entry.owners
@@ -1920,7 +1926,7 @@ def test_clean_dry_run_no_side_effects(
     # Everything still exists
     assert (project_root / ".codex" / "config.toml").exists()
     assert (project_root / "CLAUDE.md").exists()
-    assert (codex_home / "skills" / "market-tools-review").exists()
+    assert (codex_home / "skills" / "review").exists()
 
 
 def test_clean_preserves_bridge_toml(
@@ -2429,7 +2435,7 @@ def test_clean_handles_file_at_skill_path(make_project, make_plugin_version, tmp
     desired = _reconcile_once(project_root, cache_root, codex_home)
     reconcile_desired_state(desired)
 
-    skill_dir = codex_home / "skills" / "market-tools-review"
+    skill_dir = codex_home / "skills" / "review"
     assert skill_dir.is_dir()
 
     # Replace the skill directory with a regular file
@@ -2458,7 +2464,7 @@ def test_uninstall_handles_file_at_global_skill_path(
     desired = _reconcile_once(project_root, cache_root, codex_home)
     reconcile_desired_state(desired)
 
-    skill_dir = codex_home / "skills" / "market-tools-review"
+    skill_dir = codex_home / "skills" / "review"
     assert skill_dir.is_dir()
 
     # Replace the skill directory with a regular file
@@ -2559,7 +2565,9 @@ def _build_desired(
     )
     shim_decision = plan_claude_shim(discovery.project)
     roles = translate_installed_agents(discovery.plugins)
-    skills = translate_installed_skills(discovery.plugins)
+    plugin_skills = translate_installed_skills(discovery.plugins)
+    user_skills = translate_standalone_skills(discovery.user_skills, scope="user")
+    skills = assign_skill_names((*plugin_skills, *user_skills))
     prompt_files = render_prompt_files(roles)
     rendered_config = render_inline_codex_config(roles)
     return build_desired_state(
@@ -2587,7 +2595,9 @@ def _build_desired_with_project_skills(
     )
     shim_decision = plan_claude_shim(discovery.project)
     roles = translate_installed_agents(discovery.plugins)
-    skills = translate_installed_skills(discovery.plugins)
+    plugin_skills = translate_installed_skills(discovery.plugins)
+    user_skills = translate_standalone_skills(discovery.user_skills, scope="user")
+    skills = assign_skill_names((*plugin_skills, *user_skills))
     prompt_files = render_prompt_files(roles)
     rendered_config = render_inline_codex_config(roles)
 

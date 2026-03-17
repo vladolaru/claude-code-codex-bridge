@@ -109,12 +109,12 @@ def test_reconcile_combines_all_source_types(make_project, tmp_path: Path, capsy
 
     assert exit_code == 0
 
-    # Plugin skill → global registry (marketplace-prefixed)
-    plugin_skill_md = codex_home / "skills" / "market-test-plugin-test-skill" / "SKILL.md"
+    # Plugin skill → global registry (bare name)
+    plugin_skill_md = codex_home / "skills" / "test-skill" / "SKILL.md"
     assert plugin_skill_md.exists()
 
-    # User skill → global registry (scope-prefixed)
-    user_skill_md = codex_home / "skills" / "user-url-shorthand" / "SKILL.md"
+    # User skill → global registry (bare name)
+    user_skill_md = codex_home / "skills" / "url-shorthand" / "SKILL.md"
     assert user_skill_md.exists()
 
     # Project skill → project-local .codex/skills/ (raw name, no prefix)
@@ -166,9 +166,49 @@ def test_reconcile_works_with_no_plugins(make_project, tmp_path: Path, capsys):
     ])
 
     assert exit_code == 0
-    assert (codex_home / "skills" / "user-my-tool" / "SKILL.md").exists()
+    assert (codex_home / "skills" / "my-tool" / "SKILL.md").exists()
     config = (project_root / ".codex" / "config.toml").read_text()
     assert "project_reviewer" in config
+
+
+def test_reconcile_resolves_user_plugin_skill_name_collision(make_project, tmp_path: Path, capsys):
+    """When user and plugin skills share a directory name, user wins the bare name."""
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "claude-home"
+    codex_home = tmp_path / "codex-home"
+    cache_root = claude_home / "plugins" / "cache"
+
+    # Plugin skill named "review"
+    plugin_dir = cache_root / "market" / "test-plugin" / "1.0.0"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "plugin.json").write_text('{"name": "test-plugin", "version": "1.0.0"}')
+    plugin_skill = plugin_dir / "skills" / "review"
+    plugin_skill.mkdir(parents=True)
+    (plugin_skill / "SKILL.md").write_text(
+        "---\nname: review\ndescription: Plugin review\n---\n\nPlugin review content.\n"
+    )
+
+    # User skill also named "review"
+    _make_user_skill(claude_home, "review")
+
+    exit_code = cli.main([
+        "reconcile",
+        "--project", str(project_root),
+        "--claude-home", str(claude_home),
+        "--codex-home", str(codex_home),
+    ])
+
+    assert exit_code == 0
+
+    # User skill wins bare name
+    user_review_md = codex_home / "skills" / "review" / "SKILL.md"
+    assert user_review_md.exists()
+    assert "User skill content" in user_review_md.read_text()
+
+    # Plugin skill gets -alt suffix
+    plugin_review_md = codex_home / "skills" / "review-alt" / "SKILL.md"
+    assert plugin_review_md.exists()
+    assert "Plugin review content" in plugin_review_md.read_text()
 
 
 def test_reconcile_is_idempotent_with_all_sources(make_project, tmp_path: Path, capsys):

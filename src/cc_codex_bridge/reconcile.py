@@ -255,7 +255,11 @@ def build_project_desired_state(
         translate_standalone_agents,
         validate_merged_roles,
     )
-    from cc_codex_bridge.translate_skills import translate_installed_skills, translate_standalone_skills
+    from cc_codex_bridge.translate_skills import (
+        assign_skill_names,
+        translate_installed_skills,
+        translate_standalone_skills,
+    )
 
     result = discover(
         project_path=project_root,
@@ -318,7 +322,7 @@ def build_project_desired_state(
     validate_merged_roles(all_roles)
     plugin_skills = translate_installed_skills(result.plugins)
     user_skills = translate_standalone_skills(result.user_skills, scope="user")
-    all_global_skills = (*plugin_skills, *user_skills)
+    all_global_skills = assign_skill_names((*plugin_skills, *user_skills))
     project_skills = translate_standalone_skills(result.project_skills, scope="project")
 
     prompt_files = render_prompt_files(all_roles)
