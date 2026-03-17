@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from pathlib import Path
+import shutil
+import subprocess
 
 from cc_codex_bridge.model import (
     DiscoveryError,
@@ -62,6 +65,71 @@ def _resolve_cache_dir(
         return Path(cache_dir).expanduser().resolve()
     home = Path(claude_home or DEFAULT_CLAUDE_HOME).expanduser().resolve()
     return home / "plugins" / "cache"
+
+
+def query_enabled_plugin_ids(
+    project_root: Path,
+) -> frozenset[str]:
+    """Query the Claude CLI for enabled plugin IDs.
+
+    Returns a frozenset of ``marketplace/plugin_name`` strings for
+    plugins that are currently enabled. Uses *project_root* as the
+    working directory so project-scoped enabledPlugins settings apply.
+
+    Raises DiscoveryError if the ``claude`` CLI is not available.
+    """
+    claude_path = shutil.which("claude")
+    if claude_path is None:
+        raise DiscoveryError(
+            "Claude CLI not found on PATH. "
+            "The bridge requires Claude Code to be installed. "
+            "See https://docs.anthropic.com/en/docs/claude-code"
+        )
+
+    try:
+        proc = subprocess.run(
+            [claude_path, "plugins", "list", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(project_root),
+        )
+    except subprocess.TimeoutExpired:
+        raise DiscoveryError("Claude CLI timed out after 30 seconds")
+    except OSError as exc:
+        raise DiscoveryError(f"Failed to run Claude CLI: {exc}")
+
+    if proc.returncode != 0:
+        raise DiscoveryError(
+            f"Claude CLI failed (exit {proc.returncode}): {proc.stderr.strip()}"
+        )
+
+    try:
+        raw_plugins = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise DiscoveryError(f"Claude CLI returned invalid JSON: {exc}")
+
+    return _parse_enabled_plugin_ids(raw_plugins)
+
+
+def _parse_enabled_plugin_ids(
+    raw_plugins: list[dict],
+) -> frozenset[str]:
+    """Extract enabled plugin IDs from parsed CLI JSON.
+
+    Returns IDs in ``marketplace/plugin_name`` format to match the
+    bridge's internal convention.
+    """
+    enabled: set[str] = set()
+    for entry in raw_plugins:
+        if not entry.get("enabled", False):
+            continue
+        plugin_id = entry["id"]  # "plugin-name@marketplace"
+        at_index = plugin_id.index("@")
+        plugin_name = plugin_id[:at_index]
+        marketplace = plugin_id[at_index + 1:]
+        enabled.add(f"{marketplace}/{plugin_name}")
+    return frozenset(enabled)
 
 
 def discover(

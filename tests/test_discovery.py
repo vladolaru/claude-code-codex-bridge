@@ -6,7 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from cc_codex_bridge.discover import discover, discover_latest_plugins, resolve_project_root
+from cc_codex_bridge.discover import (
+    _parse_enabled_plugin_ids,
+    discover,
+    discover_latest_plugins,
+    query_enabled_plugin_ids,
+    resolve_project_root,
+)
 from cc_codex_bridge.model import DiscoveryError, SemVer
 
 def test_resolve_project_root_from_cwd(make_project, monkeypatch: pytest.MonkeyPatch):
@@ -398,3 +404,112 @@ def test_discover_works_with_only_user_skills_and_no_plugins(make_project, tmp_p
 
     assert len(result.plugins) == 0
     assert len(result.user_skills) == 1
+
+
+# ---------------------------------------------------------------------------
+# CLI-driven plugin enablement: _parse_enabled_plugin_ids
+# ---------------------------------------------------------------------------
+
+
+def test_parse_enabled_plugin_ids_returns_enabled_only():
+    """Only enabled plugin IDs are returned from CLI JSON output."""
+    raw = [
+        {"id": "alpha@marketplace-a", "version": "1.0.0", "scope": "user", "enabled": True},
+        {"id": "beta@marketplace-a", "version": "2.0.0", "scope": "user", "enabled": False},
+        {"id": "gamma@marketplace-b", "version": "3.0.0", "scope": "project", "enabled": True},
+    ]
+    result = _parse_enabled_plugin_ids(raw)
+    assert result == frozenset({"marketplace-a/alpha", "marketplace-b/gamma"})
+
+
+def test_parse_enabled_plugin_ids_converts_id_format():
+    """The plugin@marketplace format is converted to marketplace/plugin."""
+    raw = [
+        {"id": "pirategoat-tools@vladolaru-claude-code-plugins", "version": "1.0.0", "scope": "user", "enabled": True},
+    ]
+    result = _parse_enabled_plugin_ids(raw)
+    assert result == frozenset({"vladolaru-claude-code-plugins/pirategoat-tools"})
+
+
+def test_parse_enabled_plugin_ids_returns_empty_for_no_enabled():
+    """All disabled plugins produce an empty frozenset."""
+    raw = [
+        {"id": "alpha@market", "version": "1.0.0", "scope": "user", "enabled": False},
+    ]
+    result = _parse_enabled_plugin_ids(raw)
+    assert result == frozenset()
+
+
+def test_parse_enabled_plugin_ids_handles_empty_list():
+    """An empty plugin list produces an empty frozenset."""
+    assert _parse_enabled_plugin_ids([]) == frozenset()
+
+
+# ---------------------------------------------------------------------------
+# CLI-driven plugin enablement: query_enabled_plugin_ids (subprocess)
+# ---------------------------------------------------------------------------
+
+
+def test_query_enabled_plugin_ids_raises_on_missing_claude_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Missing claude CLI produces a clear DiscoveryError."""
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    with pytest.raises(DiscoveryError, match="Claude CLI not found"):
+        query_enabled_plugin_ids(tmp_path)
+
+
+def test_query_enabled_plugin_ids_raises_on_cli_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Non-zero exit from claude CLI produces a DiscoveryError."""
+    import subprocess
+
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=args[0], returncode=1, stdout="", stderr="some error"
+        ),
+    )
+    with pytest.raises(DiscoveryError, match="Claude CLI failed"):
+        query_enabled_plugin_ids(tmp_path)
+
+
+def test_query_enabled_plugin_ids_raises_on_invalid_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Invalid JSON from claude CLI produces a DiscoveryError."""
+    import subprocess
+
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=args[0], returncode=0, stdout="not json", stderr=""
+        ),
+    )
+    with pytest.raises(DiscoveryError, match="invalid JSON"):
+        query_enabled_plugin_ids(tmp_path)
+
+
+def test_query_enabled_plugin_ids_returns_enabled_from_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Successful CLI call returns parsed enabled plugin IDs."""
+    import json
+    import subprocess
+
+    cli_output = json.dumps([
+        {"id": "alpha@market", "version": "1.0.0", "scope": "user", "enabled": True},
+        {"id": "beta@market", "version": "2.0.0", "scope": "user", "enabled": False},
+    ])
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=args[0], returncode=0, stdout=cli_output, stderr=""
+        ),
+    )
+    result = query_enabled_plugin_ids(tmp_path)
+    assert result == frozenset({"market/alpha"})
