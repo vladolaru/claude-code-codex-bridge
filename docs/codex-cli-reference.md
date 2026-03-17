@@ -270,16 +270,16 @@ Note: core tools (file read, file write, file edit, shell execution, glob, grep)
 | Claude Code Source | Codex Target | Rationale |
 |--------------------|--------------|-----------|
 | `~/.claude/CLAUDE.md` | `~/.codex/AGENTS.md` | Direct equivalent, both user-global instructions |
-| `~/.claude/skills/<name>/` | `~/.codex/skills/user-<name>/` | User-level skill, global scope |
+| `~/.claude/skills/<name>/` | `~/.codex/skills/<name>/` | User-level skill, global scope (bare name; collision suffixed if needed) |
 | `.claude/skills/<name>/` | `.codex/skills/<name>/` | Project-level skill, repo scope |
-| Plugin skills | `~/.codex/skills/<marketplace>-<plugin>-<skill>/` | User-level skill, global scope |
+| Plugin skills | `~/.codex/skills/<name>/` | User-level skill, global scope (bare name; collision suffixed if needed) |
 
 ### 6.2 Key Architectural Facts
 
 1. `.codex/skills/` is natively discovered by Codex with `SkillScope::Repo` — the bridge doesn't need to register project skills anywhere
 2. `~/.codex/AGENTS.md` is loaded automatically — the bridge just writes the file
 3. Project-level `.codex/skills/` provides natural scope isolation — no prefix needed
-4. User-level `~/.codex/skills/` is a shared global namespace — prefix needed to avoid collisions
+4. User-level `~/.codex/skills/` is a shared global namespace — collisions resolved with `-alt` / `-alt-N` suffixes
 5. Codex agent roles use `.toml` config files with `developer_instructions`, not `.md` prompt files with `model`/`tools` arrays — the bridge's current agent translation format diverges from native Codex conventions (see section 3)
 6. Codex tools are controlled by sandbox policy at the session level, not per-agent tool grants — a role file can override `sandbox_mode` but doesn't list individual tools
 
