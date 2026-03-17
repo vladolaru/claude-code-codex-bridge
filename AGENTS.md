@@ -24,6 +24,9 @@ claude-code-codex-bridge/
 │       └── research/
 ├── .github/
 │   └── workflows/
+├── docs/
+│   ├── agent-skills-standard.md
+│   └── codex-cli-reference.md
 ├── src/
 │   └── cc_codex_bridge/
 │       ├── __main__.py
@@ -105,6 +108,15 @@ No agent carries context between sessions — every agent reads the code cold. T
 - **Constants, types, and named helpers are discovery mechanisms.** They are more valuable here than in a human-authored codebase — they are the primary way agents find the "right" way to do something.
 - **Consolidating duplicated logic is drift prevention**, not polish. Treat it accordingly when prioritizing work.
 
+## Domain References
+
+The bridge translates between two ecosystems. Authoritative reference documents live in `docs/`:
+
+- `docs/agent-skills-standard.md` — the open Agent Skills standard (from [agentskills.io](https://agentskills.io/)): skill directory structure, `SKILL.md` format, frontmatter fields, progressive disclosure, client implementation contract, and script conventions.
+- `docs/codex-cli-reference.md` — Codex CLI specifics (from [developers.openai.com/codex](https://developers.openai.com/codex/) and the [Codex source](https://github.com/openai/codex)): instructions discovery (`AGENTS.md`), skill discovery hierarchy, agent role configuration, `config.toml` format, and Claude Code vs Codex comparison.
+
+Consult these before making design decisions that depend on how Codex discovers skills, loads instructions, or defines agent roles.
+
 ## Canonical Architecture
 
 `DESIGN.md` is the canonical architectural source for the current implemented state of this project.
@@ -133,7 +145,7 @@ Also check `DESIGN.md` for the canonical description of the current implemented 
 - Review `.claude/docs/analysis/` for prior investigations and technical findings.
 - Review spec documents in `.claude/docs/plans/`, such as `*-spec.md`, for the intended contract and constraints.
 - Review implementation plans in `.claude/docs/plans/`, such as `*-implementation-plan.md`, for sequencing, scope, and expected milestones.
-- Review `.claude/docs/research/2026-03-11-codex-native-architecture.md` for Codex CLI native behavior (skill discovery, instructions loading, configuration layers). This is the authoritative reference for how Codex discovers skills and loads `AGENTS.md` — consult it before making design decisions that depend on Codex's native conventions.
+- Consult `docs/agent-skills-standard.md` and `docs/codex-cli-reference.md` for the authoritative domain references that the bridge targets. These supersede earlier research notes in `.claude/docs/research/`.
 - Update `DESIGN.md` whenever the implemented architecture changes materially.
 - Update the relevant analysis, spec, or plan docs when the command surface, architecture, or implementation direction changes materially.
 
