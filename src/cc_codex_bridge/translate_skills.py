@@ -16,7 +16,7 @@ from cc_codex_bridge.model import (
 from cc_codex_bridge.text import read_utf8_text
 
 
-SIBLING_SKILL_REF_RE = re.compile(r"\.\./(?P<skill>[A-Za-z0-9._-]+)/")
+SIBLING_SKILL_REF_RE = re.compile(r"(?<!\.)\.\./(?P<skill>[A-Za-z0-9._-]+)/")
 IGNORED_NAMES = {".DS_Store", "__pycache__"}
 OPTIONAL_SKILL_DIRS = {"scripts", "references", "assets", "agents"}
 

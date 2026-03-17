@@ -541,6 +541,74 @@ def test_skill_translation_rejects_symlinked_skill_md(tmp_path):
         translate_standalone_skills((skill_dir,), scope="user")
 
 
+def test_sibling_reference_regex_ignores_triple_dot_paths(
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """The sibling reference regex must not match .../name/ inside ellipsis paths.
+
+    Skill content may contain paths like ~/.claude/plugins/cache/.../plugin-name/
+    in comments or code examples.  The triple-dot pattern embeds ../ which must
+    not be treated as a sibling skill reference.
+    """
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "pirategoat-tools",
+        "1.0.0",
+        skill_names=("analyzing-sessions",),
+    )
+    skill_dir = version_dir / "skills" / "analyzing-sessions"
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: analyzing-sessions\n"
+        "description: Session analysis\n"
+        "---\n\n"
+        "# Example path\n"
+        "# ~/.claude/plugins/cache/.../pirategoat-tools/1.43.3/skills/analyzing-sessions\n"
+        "# PLUGIN_ROOT is ~/.claude/plugins/cache/.../pirategoat-tools/1.43.3\n"
+    )
+
+    skills = translate_installed_skills(discover_latest_plugins(cache_root))
+
+    assert len(skills) == 1
+    assert skills[0].install_dir_name == "market-pirategoat-tools-analyzing-sessions"
+
+
+def test_sibling_reference_regex_still_matches_real_siblings(
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Legitimate ../sibling/ references still resolve after the false-positive fix."""
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "pirategoat-tools",
+        "1.0.0",
+        skill_names=("child-skill", "shared-lib"),
+    )
+    child_dir = version_dir / "skills" / "child-skill"
+    (child_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: child-skill\n"
+        "description: Uses sibling\n"
+        "---\n\n"
+        "Read `../shared-lib/data.md` for context.\n"
+    )
+    shared_dir = version_dir / "skills" / "shared-lib"
+    (shared_dir / "SKILL.md").write_text(
+        "---\nname: shared-lib\ndescription: Shared data\n---\n\nShared.\n"
+    )
+    (shared_dir / "data.md").write_text("Shared data.\n")
+
+    skills = translate_installed_skills(discover_latest_plugins(cache_root))
+
+    child = next(s for s in skills if "child-skill" in s.install_dir_name)
+    file_paths = [f.relative_path.as_posix() for f in child.files]
+    assert "shared-lib/data.md" in file_paths
+    skill_md = next(f for f in child.files if f.relative_path == Path("SKILL.md"))
+    assert b"shared-lib/data.md" in skill_md.content
+    assert b"../shared-lib/" not in skill_md.content
+
+
 def test_translate_standalone_skill_empty_input():
     """Empty skill paths produce empty result."""
     result = translate_standalone_skills((), scope="user")
