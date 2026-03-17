@@ -137,7 +137,7 @@ def translate_installed_skills(
     generated = [
         _build_generated_skill(
             raw_skill,
-            f"{raw_skill.marketplace}-{raw_skill.plugin_name}-{raw_skill.skill_dir_name}",
+            raw_skill.skill_dir_name,
         )
         for raw_skill in raw_skills
     ]
