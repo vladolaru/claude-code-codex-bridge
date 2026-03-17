@@ -372,11 +372,24 @@ Current relocation behavior:
 
 ### Skill naming
 
-All skill install directory names are always-prefixed and deterministic:
+All generated skill install names use the bare skill directory name by default.
+When multiple skills share the same directory name across sources, collisions are
+resolved with deterministic suffixes:
 
-- plugin skills: `<marketplace>-<plugin>-<skill_directory_name>` → global `~/.codex/skills/`
-- user skills: `user-<skill_directory_name>` → global `~/.codex/skills/`
-- project skills: `<skill_directory_name>` (raw, no prefix) → project-local `.codex/skills/`
+- 1st (priority winner): `<skill-dir-name>` (bare)
+- 2nd: `<skill-dir-name>-alt`
+- 3rd: `<skill-dir-name>-alt-2`
+- Nth: `<skill-dir-name>-alt-<N-1>`
+
+Priority order for collision resolution:
+1. User skills (marketplace `_user`)
+2. Plugin skills, sorted by `(marketplace, plugin_name)`
+
+Project skills are unchanged: `<skill-dir-name>` (raw) → project-local `.codex/skills/`.
+
+All generated names must comply with the Agent Skills standard: max 64 characters,
+lowercase a-z/0-9/hyphens only, no consecutive hyphens, matching the parent
+directory name.
 
 ### Skill routing
 
@@ -574,7 +587,7 @@ Current runtime module responsibilities:
 - `registry.py`
   - global generated-skill registry serialization and deterministic skill hashing
 - `translate_skills.py`
-  - Codex skill translation for plugins and standalone sources, plus relative-reference resolution and vendoring helpers
+  - Codex skill translation for plugins and standalone sources, plus relative-reference resolution, vendoring helpers, and collision-free name assignment via `assign_skill_names()`
 - `reconcile.py`
   - desired-state modeling, diffing, atomic apply, report formatting
   - shared project build pipeline via `build_project_desired_state()`
