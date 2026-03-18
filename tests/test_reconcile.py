@@ -12,7 +12,7 @@ import cc_codex_bridge.reconcile as reconcile_module
 from cc_codex_bridge.claude_shim import plan_claude_shim
 from cc_codex_bridge.discover import discover
 from cc_codex_bridge.model import ReconcileError, TranslationError
-from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
+from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME, GlobalSkillRegistry
 from cc_codex_bridge.reconcile import (
     STATE_RELATIVE_PATH,
     ReconcileReport,
@@ -1849,7 +1849,7 @@ def test_clean_removes_all_managed_project_files(
     state_path = project_root / ".codex" / "claude-code-bridge-state.json"
     assert state_path.exists()
 
-    report = clean_project(project_root, codex_home=codex_home)
+    report = clean_project(project_root)
     assert report.applied is True
     assert len(report.changes) > 0
 
@@ -1878,7 +1878,7 @@ def test_clean_releases_last_owner_skill(
     skill_dir = codex_home / "skills" / "review"
     assert skill_dir.exists()
 
-    report = clean_project(project_root, codex_home=codex_home)
+    report = clean_project(project_root)
     assert report.applied is True
     assert not skill_dir.exists()
 
@@ -1911,7 +1911,7 @@ def test_clean_releases_shared_skill_preserves_for_other_owner(
     assert skill_dir.exists()
 
     # Clean project A only
-    report = clean_project(project_a, codex_home=codex_home)
+    report = clean_project(project_a)
     assert report.applied is True
 
     # Skill directory still exists — project B still owns it
@@ -1933,7 +1933,7 @@ def test_clean_no_state_is_noop(make_project, tmp_path: Path):
 
     from cc_codex_bridge.reconcile import clean_project
 
-    report = clean_project(project_root, codex_home=codex_home)
+    report = clean_project(project_root)
     assert report.applied is True
     assert len(report.changes) == 0
 
@@ -1954,7 +1954,7 @@ def test_clean_dry_run_no_side_effects(
     desired = _reconcile_once(project_root, cache_root, codex_home)
     reconcile_desired_state(desired)
 
-    report = clean_project(project_root, codex_home=codex_home, dry_run=True)
+    report = clean_project(project_root, dry_run=True)
     assert report.applied is False
     assert len(report.changes) > 0
 
@@ -1983,7 +1983,7 @@ def test_clean_preserves_bridge_toml(
     desired = _reconcile_once(project_root, cache_root, codex_home)
     reconcile_desired_state(desired)
 
-    clean_project(project_root, codex_home=codex_home)
+    clean_project(project_root)
 
     # bridge.toml survives
     assert bridge_toml.exists()
@@ -2007,7 +2007,7 @@ def test_clean_removes_claude_md_shim(
 
     assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
 
-    clean_project(project_root, codex_home=codex_home)
+    clean_project(project_root)
 
     assert not (project_root / "CLAUDE.md").exists()
 
@@ -2034,7 +2034,7 @@ def test_clean_preserves_preexisting_claude_md_shim(
     # Bridge preserved the existing CLAUDE.md (action=preserve, not create)
     assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
 
-    clean_project(project_root, codex_home=codex_home)
+    clean_project(project_root)
 
     # CLAUDE.md must survive clean — it was not created by the bridge
     assert (project_root / "CLAUDE.md").exists()
@@ -2058,7 +2058,7 @@ def test_clean_does_not_touch_global_agents_md(
     (codex_home / "AGENTS.md").parent.mkdir(parents=True, exist_ok=True)
     (codex_home / "AGENTS.md").write_text("# Global instructions\n")
 
-    clean_project(project_root, codex_home=codex_home)
+    clean_project(project_root)
 
     # Global AGENTS.md untouched
     assert (codex_home / "AGENTS.md").exists()
@@ -2187,7 +2187,7 @@ def test_clean_removes_project_from_registry_projects_list(
 
     # Clean project A
     from cc_codex_bridge.reconcile import clean_project
-    clean_project(project_a, codex_home=codex_home)
+    clean_project(project_a)
 
     # Project A removed, project B still present
     registry_data = _read_global_registry(codex_home)
@@ -2233,7 +2233,7 @@ def test_clean_uses_state_recorded_codex_home(make_project, tmp_path: Path):
     (skill_dir / "SKILL.md").write_text("content\n")
 
     # Clean with the wrong codex_home — should still clean the actual one
-    report = clean_project(project_root, codex_home=wrong_codex)
+    report = clean_project(project_root)
     assert report.applied is True
 
     # The actual codex registry should have the project removed
@@ -2255,6 +2255,10 @@ def test_clean_dry_run_reports_state_file_removal(make_project, tmp_path: Path):
     codex = tmp_path / "codex"
     codex.mkdir()
 
+    # Create an empty registry so clean_project doesn't fail on missing registry
+    registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
+    (codex / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
+
     state = BridgeState(
         project_root=project_root.resolve(),
         codex_home=codex.resolve(),
@@ -2264,7 +2268,7 @@ def test_clean_dry_run_reports_state_file_removal(make_project, tmp_path: Path):
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(state.to_json())
 
-    report = clean_project(project_root, codex_home=codex, dry_run=True)
+    report = clean_project(project_root, dry_run=True)
 
     removed_paths = {change.path for change in report.changes}
     assert state_path in removed_paths, "dry-run must report state file removal"
@@ -2281,6 +2285,10 @@ def test_clean_removes_full_project_skill_directory(make_project, tmp_path: Path
     project_root, _ = make_project()
     codex = tmp_path / "codex"
     codex.mkdir()
+
+    # Create an empty registry so clean_project doesn't fail on missing registry
+    registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
+    (codex / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
 
     skill_dir = project_root / ".codex" / "skills" / "demo"
     skill_dir.mkdir(parents=True)
@@ -2299,7 +2307,7 @@ def test_clean_removes_full_project_skill_directory(make_project, tmp_path: Path
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(state.to_json())
 
-    report = clean_project(project_root, codex_home=codex)
+    report = clean_project(project_root)
     assert report.applied is True
 
     # The entire skill directory should be gone, including extra.txt
@@ -2397,7 +2405,7 @@ def test_clean_rejects_symlinked_codex_ancestor(make_project, tmp_path):
     (project_root / ".codex").symlink_to(outside)
 
     with pytest.raises(ReconcileError, match="resolves outside"):
-        clean_project(project_root, codex_home=codex_home)
+        clean_project(project_root)
 
 
 def test_clean_rejects_unexpected_managed_project_skill_dirs_in_state(make_project, tmp_path: Path):
@@ -2420,7 +2428,7 @@ def test_clean_rejects_unexpected_managed_project_skill_dirs_in_state(make_proje
     state_path.write_text(state.to_json())
 
     with pytest.raises(ReconcileError, match="unexpected managed project skill directories"):
-        clean_project(project_root, codex_home=codex_home)
+        clean_project(project_root)
 
 
 def test_clean_rejects_unexpected_managed_project_files_in_state(make_project, tmp_path: Path):
@@ -2450,10 +2458,80 @@ def test_clean_rejects_unexpected_managed_project_files_in_state(make_project, t
     state_path.write_text(state.to_json())
 
     with pytest.raises(ReconcileError, match="unexpected managed project files"):
-        clean_project(project_root, codex_home=codex_home)
+        clean_project(project_root)
 
     # AGENTS.md must survive
     assert agents_md.exists()
+
+
+def test_clean_fails_when_global_registry_missing(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """clean raises when the registry is missing but state exists."""
+    from cc_codex_bridge.reconcile import clean_project
+
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "test-plugin", "1.0.0",
+        skill_names=("test-skill",),
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nReview.\n"
+    )
+    (version_dir / "skills" / "test-skill" / "SKILL.md").write_text(
+        "---\nname: test-skill\ndescription: Test\n---\n\nUse this.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+
+    reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
+    assert (project_root / STATE_RELATIVE_PATH).exists()
+
+    # Delete the registry — simulates manual removal
+    registry_path = codex_home / GLOBAL_REGISTRY_FILENAME
+    registry_path.unlink()
+
+    with pytest.raises(ReconcileError, match="global.*registry"):
+        clean_project(project_root)
+    # State file must be preserved for retry
+    assert (project_root / STATE_RELATIVE_PATH).exists()
+
+
+def test_clean_fails_when_global_registry_corrupt(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """clean raises when the registry exists but is corrupt (unparseable)."""
+    from cc_codex_bridge.reconcile import clean_project
+
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "test-plugin", "1.0.0",
+        skill_names=("test-skill",),
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nReview.\n"
+    )
+    (version_dir / "skills" / "test-skill" / "SKILL.md").write_text(
+        "---\nname: test-skill\ndescription: Test\n---\n\nUse this.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+
+    reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
+    assert (project_root / STATE_RELATIVE_PATH).exists()
+
+    # Corrupt the registry — simulates partial write or disk error
+    registry_path = codex_home / GLOBAL_REGISTRY_FILENAME
+    registry_path.write_text("not valid json{{{")
+
+    with pytest.raises(ReconcileError, match="global.*registry"):
+        clean_project(project_root)
+    # State file must be preserved for retry
+    assert (project_root / STATE_RELATIVE_PATH).exists()
 
 
 def test_clean_handles_file_at_skill_path(make_project, make_plugin_version, tmp_path: Path):
@@ -2477,7 +2555,7 @@ def test_clean_handles_file_at_skill_path(make_project, make_plugin_version, tmp
     shutil.rmtree(skill_dir)
     skill_dir.write_text("not a directory")
 
-    report = clean_project(project_root, codex_home=codex_home)
+    report = clean_project(project_root)
     assert report.applied is True
     # The file should have been removed
     assert not skill_dir.exists()

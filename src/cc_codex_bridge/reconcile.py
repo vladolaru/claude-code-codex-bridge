@@ -400,7 +400,6 @@ def reconcile_desired_state(desired: DesiredState) -> ReconcileReport:
 def clean_project(
     project_root: str | Path,
     *,
-    codex_home: str | Path | None = None,
     dry_run: bool = False,
 ) -> ReconcileReport:
     """Remove all bridge-generated artifacts from one project.
@@ -469,63 +468,67 @@ def clean_project(
             f"Refusing to use symlinked global skill registry file: {registry_path}"
         )
     registry = GlobalSkillRegistry.from_path(registry_path)
+    if registry is None:
+        raise ReconcileError(
+            f"Cannot clean: global registry missing or corrupt at {registry_path}. "
+            "Global ownership claims cannot be released safely."
+        )
 
     registry_changed = False
-    if registry is not None:
-        updated_skills = dict(registry.skills)
-        for install_dir_name in sorted(registry.skills):
-            entry = registry.skills[install_dir_name]
-            if project_root_path not in entry.owners:
-                continue
-            remaining_owners = tuple(
-                owner for owner in entry.owners if owner != project_root_path
-            )
-            if remaining_owners:
-                updated_skills[install_dir_name] = GlobalSkillEntry(
-                    content_hash=entry.content_hash,
-                    owners=remaining_owners,
-                )
-            else:
-                del updated_skills[install_dir_name]
-                skill_path = codex_home_path / "skills" / install_dir_name
-                if skill_path.exists():
-                    changes.append(Change("remove", skill_path, resource_kind="skill"))
-            registry_changed = True
-
-        # Release agent ownership claims
-        updated_agents = dict(registry.agents)
-        for agent_filename in sorted(registry.agents):
-            entry = registry.agents[agent_filename]
-            if project_root_path not in entry.owners:
-                continue
-            remaining_owners = tuple(
-                owner for owner in entry.owners if owner != project_root_path
-            )
-            if remaining_owners:
-                updated_agents[agent_filename] = GlobalAgentEntry(
-                    content_hash=entry.content_hash,
-                    owners=remaining_owners,
-                )
-            else:
-                del updated_agents[agent_filename]
-                agent_path = codex_home_path / "agents" / agent_filename
-                if agent_path.exists():
-                    changes.append(Change("remove", agent_path, resource_kind="agent"))
-            registry_changed = True
-
-        # Remove project from the projects list
-        updated_projects = tuple(
-            p for p in registry.projects if p != project_root_path
+    updated_skills = dict(registry.skills)
+    for install_dir_name in sorted(registry.skills):
+        entry = registry.skills[install_dir_name]
+        if project_root_path not in entry.owners:
+            continue
+        remaining_owners = tuple(
+            owner for owner in entry.owners if owner != project_root_path
         )
-        if updated_projects != registry.projects:
-            registry_changed = True
-
-        if registry_changed:
-            updated_registry = GlobalSkillRegistry(
-                skills=updated_skills,
-                projects=updated_projects,
-                agents=updated_agents,
+        if remaining_owners:
+            updated_skills[install_dir_name] = GlobalSkillEntry(
+                content_hash=entry.content_hash,
+                owners=remaining_owners,
             )
+        else:
+            del updated_skills[install_dir_name]
+            skill_path = codex_home_path / "skills" / install_dir_name
+            if skill_path.exists():
+                changes.append(Change("remove", skill_path, resource_kind="skill"))
+        registry_changed = True
+
+    # Release agent ownership claims
+    updated_agents = dict(registry.agents)
+    for agent_filename in sorted(registry.agents):
+        entry = registry.agents[agent_filename]
+        if project_root_path not in entry.owners:
+            continue
+        remaining_owners = tuple(
+            owner for owner in entry.owners if owner != project_root_path
+        )
+        if remaining_owners:
+            updated_agents[agent_filename] = GlobalAgentEntry(
+                content_hash=entry.content_hash,
+                owners=remaining_owners,
+            )
+        else:
+            del updated_agents[agent_filename]
+            agent_path = codex_home_path / "agents" / agent_filename
+            if agent_path.exists():
+                changes.append(Change("remove", agent_path, resource_kind="agent"))
+        registry_changed = True
+
+    # Remove project from the projects list
+    updated_projects = tuple(
+        p for p in registry.projects if p != project_root_path
+    )
+    if updated_projects != registry.projects:
+        registry_changed = True
+
+    if registry_changed:
+        updated_registry = GlobalSkillRegistry(
+            skills=updated_skills,
+            projects=updated_projects,
+            agents=updated_agents,
+        )
     else:
         updated_registry = None
 
@@ -710,7 +713,7 @@ def uninstall_all(
             continue
 
         try:
-            report = clean_project(root, codex_home=codex_home_path, dry_run=dry_run)
+            report = clean_project(root, dry_run=dry_run)
             project_results.append(UninstallProjectResult(
                 root=root,
                 status="cleaned",

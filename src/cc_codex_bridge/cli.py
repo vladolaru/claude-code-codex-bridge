@@ -387,7 +387,6 @@ def _handle_clean_command(args: argparse.Namespace) -> int:
         from cc_codex_bridge.reconcile import clean_project
         report = clean_project(
             project_root,
-            codex_home=args.codex_home,
             dry_run=args.dry_run,
         )
     except (ReconcileError, OSError, UnicodeError) as exc:
