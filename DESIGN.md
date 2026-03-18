@@ -180,7 +180,7 @@ The global registry records:
 ### Safety rules
 
 - project files are never overwritten unless they were previously recorded as managed
-- the state file may only authorize generator-owned project paths: `CLAUDE.md`, `.codex/agents/*.toml`, and `.codex/claude-code-bridge-state.json` (project skill directories are tracked separately via `managed_project_skill_dirs`; legacy paths are still recognized for migration cleanup)
+- the state file may only authorize generator-owned project paths: `CLAUDE.md`, `.codex/agents/*.toml`, and `.codex/claude-code-bridge-state.json` (project skill directories are tracked separately via `managed_project_skill_dirs`)
 - state-tracked project skill directories must be plain generated directory names; traversal, absolute paths, and nested paths are rejected as corrupted state
 - generated project-relative paths are normalized and may not use absolute paths or `..` traversal
 - corrupted or unexpected managed project paths in state are treated as a hard error — this applies to both reconcile and cleanup paths

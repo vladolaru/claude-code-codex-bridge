@@ -18,11 +18,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `derive_sandbox_mode()` for mapping Claude tools to Codex sandbox modes.
 - `GlobalAgentEntry` and `hash_agent_file()` for agent ownership tracking in the global registry.
 
+### Fixed
+
+- `clean` now fails when the global registry is missing or corrupt instead of silently orphaning global skills and agents.
+- `uninstall` treats accessible projects with missing state files as errors, preventing premature global artifact deletion.
+- Global skill directories now reject symlinks during reconcile, matching the project skill hardening.
+- Uninstall JSON output now includes global agent file removals.
+- Uninstall dry-run text summary uses `will_clean` instead of `cleaned`.
+
 ### Removed
 
 - `render_codex_config.py` module — `config.toml` and `.codex/prompts/agents/*.md` are no longer generated.
 - `GeneratedAgentRole` dataclass — replaced by `GeneratedAgentFile`.
 - `validate_merged_roles()` — replaced by `validate_merged_agents()`.
+- `translate_tools()` and `TOOL_TRANSLATIONS` — superseded by `derive_sandbox_mode()`.
+- Legacy `.codex/config.toml` and `.codex/prompts/agents/*.md` from managed-path allowlist.
+- Pre-projects-list registry owner fallback in `uninstall`.
+- Dead `codex_home` parameter from `clean_project()`.
 
 ## [0.9.0] - 2026-03-17
 
