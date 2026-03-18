@@ -320,6 +320,51 @@ def test_reconcile_fails_on_registry_conflict_for_same_skill_directory(
         reconcile_desired_state(_build_desired(second_project, cache_root, codex_home))
 
 
+def test_reconcile_updates_shared_agent_when_plugin_upgrades(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Multi-owner agent files update when the underlying plugin changes."""
+    first_project, _ = make_project("project-a")
+    second_project, _ = make_project("project-b")
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "pirategoat-tools",
+        "1.0.0",
+        agent_names=("reviewer",),
+    )
+    agent_path = version_dir / "agents" / "reviewer.md"
+    agent_path.write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nVersion A.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    installed_agent = codex_home / "agents" / "market-pirategoat-tools-reviewer.toml"
+
+    reconcile_desired_state(_build_desired(first_project, cache_root, codex_home))
+    reconcile_desired_state(_build_desired(second_project, cache_root, codex_home))
+    assert "Version A." in installed_agent.read_text()
+
+    # Simulate plugin upgrade
+    agent_path.write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nVersion B.\n"
+    )
+
+    # First project to reconcile should update the shared agent — no conflict
+    report = reconcile_desired_state(_build_desired(first_project, cache_root, codex_home))
+    assert "Version B." in installed_agent.read_text()
+    assert any(
+        change.resource_kind == "agent" and change.kind == "update"
+        for change in report.changes
+    )
+
+    # Second project should see no changes (already updated)
+    report = reconcile_desired_state(_build_desired(second_project, cache_root, codex_home))
+    assert not any(
+        change.resource_kind == "agent" for change in report.changes
+    )
+
+
 def test_reconcile_moves_managed_skills_when_codex_home_changes(
     make_project,
     make_plugin_version,

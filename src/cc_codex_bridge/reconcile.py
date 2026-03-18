@@ -1311,12 +1311,9 @@ def _plan_global_agent_mutations(
         registry_owned = existing_entry is not None
 
         if existing_entry is not None and existing_entry.content_hash != desired_hash:
-            if set(existing_entry.owners) != {desired.project_root}:
-                raise ReconcileError(
-                    f"Generated agent registry conflict for "
-                    f"{destination}: existing content hash {existing_entry.content_hash} "
-                    f"does not match desired {desired_hash}"
-                )
+            # Agent files are single files derived from the same plugin source.
+            # When the plugin upgrades, any project reconciling first should
+            # update the shared file and registry entry for all owners.
             registry_owned = True
 
         if not registry_owned:
