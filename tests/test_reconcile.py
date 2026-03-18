@@ -2378,6 +2378,34 @@ def test_diff_rejects_symlinked_codex_ancestor(
         diff_desired_state(desired)
 
 
+def test_reconcile_rejects_symlinked_global_skill_directory(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Symlinked global skill directories are rejected."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "prompt-engineer", "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    skill_dir = codex_home / "skills" / "prompt-engineer"
+    skill_dir.parent.mkdir(parents=True)
+    real_dir = tmp_path / "real-skill"
+    real_dir.mkdir()
+    (real_dir / "SKILL.md").write_text("hand-authored\n")
+    skill_dir.symlink_to(real_dir, target_is_directory=True)
+
+    desired = _build_desired(project_root, cache_root, codex_home)
+
+    with pytest.raises(ReconcileError, match="symlinked.*skill directory"):
+        diff_desired_state(desired)
+
+
 def test_clean_rejects_symlinked_codex_ancestor(make_project, tmp_path):
     """clean must refuse to operate through a symlinked .codex directory."""
     from cc_codex_bridge.reconcile import clean_project

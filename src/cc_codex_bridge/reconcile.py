@@ -1181,6 +1181,11 @@ def _plan_skill_mutations(
         if destination.exists() and not destination.is_dir():
             raise ReconcileError(f"Expected a skill directory but found a file: {destination}")
 
+        if destination.is_symlink():
+            raise ReconcileError(
+                f"Refusing to overwrite symlinked global skill directory: {destination}"
+            )
+
         if not registry_owned:
             if destination.exists() and not _directory_matches_skill(destination, skill):
                 raise ReconcileError(
