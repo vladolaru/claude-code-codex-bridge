@@ -173,6 +173,8 @@ class AgentTranslationResult:
 class GeneratedAgentFile:
     """Generated Codex agent .toml file derived from a Claude agent."""
 
+    marketplace: str
+    plugin_name: str
     source_path: Path
     scope: str  # "global" or "project"
     agent_name: str  # Codex name field (role identifier)

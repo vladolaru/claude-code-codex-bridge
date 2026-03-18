@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
-import re
 from typing import Iterable
 
 import cc_codex_bridge.frontmatter as frontmatter
@@ -20,7 +20,60 @@ from cc_codex_bridge.render_agent_toml import READ_TOOLS, WRITE_TOOLS, derive_sa
 # Union of all Claude tools that have a meaningful Codex mapping.
 RECOGNIZED_TOOLS = WRITE_TOOLS | READ_TOOLS
 
-PROMPT_COMPONENT_RE = re.compile(r"[^A-Za-z0-9-]+")
+MAX_AGENT_NAME_LENGTH = 64
+
+
+def assign_agent_names(
+    agents: tuple[GeneratedAgentFile, ...],
+) -> tuple[GeneratedAgentFile, ...]:
+    """Assign collision-free install names using bare agent file stems.
+
+    Priority: standalone agents (user/project) win bare names over plugin agents.
+    Among plugins, sorted by (marketplace, plugin_name).
+    Collisions get -alt, -alt-2, -alt-3 suffixes.
+    """
+    # Group agents by bare file stem (from source_path)
+    groups: dict[str, list[GeneratedAgentFile]] = {}
+    for agent in agents:
+        bare_name = agent.source_path.stem
+        groups.setdefault(bare_name, []).append(agent)
+
+    result: list[GeneratedAgentFile] = []
+
+    for bare_name in sorted(groups):
+        candidates = groups[bare_name]
+
+        if len(candidates) > 1:
+            # Sort by priority: standalone agents first (marketplace starts with _),
+            # then plugin agents by (marketplace, plugin_name)
+            candidates.sort(key=lambda a: (
+                0 if a.marketplace.startswith("_") else 1,
+                a.marketplace,
+                a.plugin_name,
+            ))
+
+        for index, agent in enumerate(candidates):
+            if index == 0:
+                assigned_name = bare_name
+            elif index == 1:
+                assigned_name = f"{bare_name}-alt"
+            else:
+                assigned_name = f"{bare_name}-alt-{index}"
+
+            if len(assigned_name) > MAX_AGENT_NAME_LENGTH:
+                raise TranslationError(
+                    f"Generated agent name exceeds {MAX_AGENT_NAME_LENGTH} characters: "
+                    f"'{assigned_name}' ({len(assigned_name)} chars) "
+                    f"from agent file '{bare_name}'"
+                )
+
+            result.append(replace(
+                agent,
+                agent_name=assigned_name,
+                install_filename=f"{assigned_name}.toml",
+            ))
+
+    return tuple(sorted(result, key=lambda a: a.agent_name))
 
 
 def validate_merged_agents(agents: tuple[GeneratedAgentFile, ...]) -> None:
@@ -55,15 +108,11 @@ def translate_standalone_agents(
 ) -> AgentTranslationResult:
     """Translate user-level or project-level Claude agent files into Codex agent files.
 
-    Standalone agents use a scope prefix (user or project) for agent names
-    and install filenames.  User agents get scope="global" (installed to
-    ~/.codex/agents/), project agents get scope="project" (installed to
-    .codex/agents/).
+    Agents use bare file stems for names and install filenames.  Collision
+    resolution across scopes is handled by ``assign_agent_names()``.
     """
     agents: list[GeneratedAgentFile] = []
     diagnostics: list[AgentTranslationDiagnostic] = []
-    seen_agent_names: set[str] = set()
-    seen_filenames: set[str] = set()
 
     install_scope = "global" if scope == "user" else "project"
 
@@ -91,32 +140,17 @@ def translate_standalone_agents(
         claude_tools = _extract_tool_names(parsed_fm.get("tools"))
         sandbox_mode = derive_sandbox_mode(claude_tools)
 
-        normalized_agent = _normalize_prompt_component(agent_name, kind="agent name")
-        codex_agent_name = f"{scope}_{_normalize_name(agent_name)}"
-        install_filename = f"{scope}-{normalized_agent}.toml"
-
-        if codex_agent_name in seen_agent_names:
-            raise TranslationError(
-                f"Generated duplicate agent name: {codex_agent_name} "
-                f"(from {scope} agent '{agent_name}' at {agent_path})"
-            )
-        seen_agent_names.add(codex_agent_name)
-
-        if install_filename in seen_filenames:
-            raise TranslationError(
-                f"Generated duplicate install filename: {install_filename} "
-                f"(from {scope} agent '{agent_name}' at {agent_path})"
-            )
-        seen_filenames.add(install_filename)
-
+        stem = agent_path.stem
         prompt_body = body.strip() + ("\n" if body.strip() else "")
 
         agents.append(
             GeneratedAgentFile(
+                marketplace=f"_{scope}",
+                plugin_name="personal" if scope == "user" else "local",
                 source_path=agent_path,
                 scope=install_scope,
-                agent_name=codex_agent_name,
-                install_filename=install_filename,
+                agent_name=stem,
+                install_filename=f"{stem}.toml",
                 description=description,
                 developer_instructions=prompt_body,
                 sandbox_mode=sandbox_mode,
@@ -146,8 +180,6 @@ def translate_installed_agents_with_diagnostics(
     """Translate installed Claude agent files into Codex agent file definitions."""
     agents: list[GeneratedAgentFile] = []
     diagnostics: list[AgentTranslationDiagnostic] = []
-    seen_agent_names: set[str] = set()
-    seen_filenames: set[str] = set()
 
     for plugin in plugins:
         for agent_path in plugin.agents:
@@ -176,36 +208,17 @@ def translate_installed_agents_with_diagnostics(
             claude_tools = _extract_tool_names(parsed_frontmatter.get("tools"))
             sandbox_mode = derive_sandbox_mode(claude_tools)
 
-            marketplace_ns = _normalize_role_namespace(plugin.marketplace, kind="marketplace")
-            plugin_ns = _normalize_role_namespace(plugin.plugin_name, kind="plugin name")
-            agent_id = _normalize_name(agent_name)
-            codex_agent_name = f"{marketplace_ns}_{plugin_ns}_{agent_id}"
-
-            if codex_agent_name in seen_agent_names:
-                raise TranslationError(f"Generated duplicate agent name: {codex_agent_name}")
-            seen_agent_names.add(codex_agent_name)
-
-            marketplace_pc = _normalize_prompt_component(plugin.marketplace, kind="marketplace")
-            plugin_pc = _normalize_prompt_component(plugin.plugin_name, kind="plugin name")
-            agent_pc = _normalize_prompt_component(agent_name, kind="agent name")
-            install_filename = f"{marketplace_pc}-{plugin_pc}-{agent_pc}.toml"
-
-            if install_filename in seen_filenames:
-                raise TranslationError(
-                    f"Generated duplicate install filename: {install_filename} "
-                    f"(from plugin '{plugin.plugin_name}' agent '{agent_name}' "
-                    f"at {agent_path})"
-                )
-            seen_filenames.add(install_filename)
-
+            stem = agent_path.stem
             prompt_body = body.strip() + ("\n" if body.strip() else "")
 
             agents.append(
                 GeneratedAgentFile(
+                    marketplace=plugin.marketplace,
+                    plugin_name=plugin.plugin_name,
                     source_path=agent_path,
                     scope="global",
-                    agent_name=codex_agent_name,
-                    install_filename=install_filename,
+                    agent_name=stem,
+                    install_filename=f"{stem}.toml",
                     description=description,
                     developer_instructions=prompt_body,
                     sandbox_mode=sandbox_mode,
@@ -269,37 +282,3 @@ def _optional_str(value: object) -> str | None:
         return None
     value = value.strip()
     return value or None
-
-
-ROLE_NAMESPACE_RE = re.compile(r"[^A-Za-z0-9_-]+")
-ROLE_AGENT_RE = re.compile(r"[^A-Za-z0-9_]+")
-
-
-def _normalize_role_namespace(value: str, *, kind: str) -> str:
-    """Normalize marketplace/plugin names for TOML bare-key compatibility."""
-    normalized = value.strip().replace(" ", "_")
-    normalized = ROLE_NAMESPACE_RE.sub("_", normalized)
-    normalized = re.sub(r"_+", "_", normalized).strip("_-")
-    if not normalized:
-        raise TranslationError(f"{kind.capitalize()} normalizes to an empty role namespace: {value!r}")
-    return normalized
-
-
-def _normalize_name(value: str) -> str:
-    """Normalize agent names for Codex role identifiers."""
-    normalized = value.strip().replace("-", "_").replace(" ", "_")
-    normalized = ROLE_AGENT_RE.sub("_", normalized)
-    normalized = re.sub(r"_+", "_", normalized).strip("_")
-    if not normalized:
-        raise TranslationError(f"Agent name normalizes to an empty role identifier: {value!r}")
-    return normalized
-
-
-def _normalize_prompt_component(value: str, *, kind: str) -> str:
-    """Normalize marketplace/plugin/agent names for safe file paths."""
-    normalized = value.strip().replace("_", "-").replace(" ", "-")
-    normalized = PROMPT_COMPONENT_RE.sub("-", normalized)
-    normalized = re.sub(r"-+", "-", normalized).strip("-")
-    if not normalized:
-        raise TranslationError(f"{kind.capitalize()} normalizes to an empty path segment: {value!r}")
-    return normalized

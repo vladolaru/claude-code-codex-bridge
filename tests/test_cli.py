@@ -90,7 +90,7 @@ def test_reconcile_and_dry_run_respect_fake_codex_home(
 
     assert reconcile_exit == 0
     assert dry_run_exit == 0
-    assert (codex_home / "agents" / "market-prompt-engineer-reviewer.toml").exists()
+    assert (codex_home / "agents" / "reviewer.toml").exists()
     assert (codex_home / "skills" / "prompt-engineer").exists()
 
 
@@ -220,7 +220,7 @@ def test_reconcile_diff_surfaces_non_utf8_managed_text_as_user_facing_error(
     ) == 0
     capsys.readouterr()
 
-    agent_toml_path = codex_home / "agents" / "market-prompt-engineer-reviewer.toml"
+    agent_toml_path = codex_home / "agents" / "reviewer.toml"
     agent_toml_path.write_bytes(b"\xff\xfebroken")
 
     exit_code = cli.main(
@@ -884,9 +884,9 @@ def test_reconcile_includes_standalone_agents(make_project, tmp_path: Path, caps
 
     assert exit_code == 0
     # User-level agent installed globally in codex_home/agents/
-    assert (codex_home / "agents" / "user-helper.toml").exists()
+    assert (codex_home / "agents" / "helper.toml").exists()
     # Project-level agent installed locally in .codex/agents/
-    assert (project_root / ".codex" / "agents" / "project-reviewer.toml").exists()
+    assert (project_root / ".codex" / "agents" / "reviewer.toml").exists()
 
 
 def test_module_entrypoint_invokes_cli_main(monkeypatch: pytest.MonkeyPatch):

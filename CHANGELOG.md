@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-03-18
+
+### Changed
+
+- Agent naming redesign: generated agent install names and TOML filenames now use bare file stems instead of `marketplace-plugin-agent` or `scope-agent` prefixes, matching the skill naming convention introduced in 0.9.0. Agent names like `market-pirategoat-tools-architecture-reviewer.toml` become `architecture-reviewer.toml`.
+- Agent collision resolution: when multiple agents share a file stem, standalone agents (user/project) win the bare name over plugin agents; among plugins, `(marketplace, plugin_name)` sort order determines priority. Collisions get `-alt`, `-alt-2`, etc. suffixes.
+- Agent name validation: generated agent names exceeding 64 characters after suffixing are now a hard error.
+
+### Added
+
+- `assign_agent_names()` function for deterministic, collision-free agent name assignment across all global agent candidates, mirroring `assign_skill_names()`.
+- `marketplace` and `plugin_name` fields on `GeneratedAgentFile` for priority-based collision resolution.
+
+### Removed
+
+- Three agent name normalization functions (`_normalize_role_namespace`, `_normalize_name`, `_normalize_prompt_component`) and their regex constants — agent identity now derives from the filesystem name, not the frontmatter name.
+
 ## [0.10.3] - 2026-03-18
 
 ### Fixed

@@ -76,10 +76,10 @@ def test_reconcile_writes_project_and_codex_outputs(
     assert report.applied is True
     assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
     # Global agent .toml installed to codex_home
-    global_agent_toml = codex_home / "agents" / "market-pirategoat-tools-architecture-reviewer.toml"
+    global_agent_toml = codex_home / "agents" / "architecture-reviewer.toml"
     assert global_agent_toml.exists()
     agent_content = global_agent_toml.read_text()
-    assert "architecture_reviewer" in agent_content
+    assert "architecture-reviewer" in agent_content
     assert (project_root / STATE_RELATIVE_PATH).exists()
     assert (
         codex_home / "skills" / "decision-critic" / "SKILL.md"
@@ -339,7 +339,7 @@ def test_reconcile_updates_shared_agent_when_plugin_upgrades(
         "---\nname: reviewer\ndescription: Review\n---\n\nVersion A.\n"
     )
     codex_home = tmp_path / "codex-home"
-    installed_agent = codex_home / "agents" / "market-pirategoat-tools-reviewer.toml"
+    installed_agent = codex_home / "agents" / "reviewer.toml"
 
     reconcile_desired_state(_build_desired(first_project, cache_root, codex_home))
     reconcile_desired_state(_build_desired(second_project, cache_root, codex_home))
@@ -447,7 +447,7 @@ def test_reconcile_removes_stale_managed_agent_file(
 
     first = _build_desired(project_root, cache_root, codex_home)
     reconcile_desired_state(first)
-    agent_toml_path = codex_home / "agents" / "market-prompt-engineer-reviewer.toml"
+    agent_toml_path = codex_home / "agents" / "reviewer.toml"
     assert agent_toml_path.exists()
 
     updated_agent = version_dir / "agents" / "reviewer.md"
@@ -474,7 +474,7 @@ def test_reconcile_rejects_symlinked_project_file(make_project, tmp_path: Path):
     codex_agents_dir.mkdir(parents=True)
     real_file = project_root / "real-agent.toml"
     real_file.write_text("real\n")
-    (codex_agents_dir / "project-reviewer.toml").symlink_to(real_file)
+    (codex_agents_dir / "reviewer.toml").symlink_to(real_file)
 
     cache_root = tmp_path / "claude-cache"
     cache_root.mkdir(parents=True)
@@ -960,7 +960,7 @@ def test_reconcile_removes_stale_global_agent_toml_file(
     codex_home = tmp_path / "codex-home"
 
     reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
-    agent_toml = codex_home / "agents" / "market-prompt-engineer-reviewer.toml"
+    agent_toml = codex_home / "agents" / "reviewer.toml"
     assert agent_toml.exists()
 
     (version_dir / "agents" / "reviewer.md").unlink()
@@ -1022,7 +1022,7 @@ def test_diff_report_skips_remove_and_skill_changes_in_diff_output(
 
     assert "REMOVE:" in rendered
     agent_toml_path = str(
-        codex_home / "agents" / "market-prompt-engineer-reviewer.toml"
+        codex_home / "agents" / "reviewer.toml"
     )
     assert f"--- {agent_toml_path}" not in rendered
 
@@ -1533,43 +1533,43 @@ def test_build_project_desired_state_short_circuits_on_agent_diagnostics(
     assert build.desired_state is None
 
 
-def test_build_project_rejects_cross_scope_agent_role_name_collision(
+def test_build_project_resolves_same_stem_agent_collision_with_alt_suffix(
     make_project,
     make_plugin_version,
     tmp_path: Path,
 ):
-    """Cross-scope role name collisions are rejected during build.
+    """Same-stem agents across plugin and user scopes get -alt collision resolution.
 
-    A plugin agent from marketplace="user", plugin="plugin", agent="agent"
-    produces role_name "user_plugin_agent". A user standalone agent named
-    "plugin agent" also normalizes to "user_plugin_agent". The merged set
-    must be rejected.
+    A plugin agent file "reviewer.md" and a user agent file "reviewer.md"
+    share the same stem.  The user agent wins the bare name and the plugin
+    agent gets a -alt suffix.
     """
     from cc_codex_bridge.reconcile import build_project_desired_state
 
     project_root, _ = make_project()
     cache_root, version_dir = make_plugin_version(
-        "user", "plugin", "1.0.0",
-        agent_names=("agent",),
+        "market", "plugin", "1.0.0",
+        agent_names=("reviewer",),
     )
-    (version_dir / "agents" / "agent.md").write_text(
-        "---\nname: agent\ndescription: Plugin agent\n---\n\nPlugin prompt.\n"
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Plugin reviewer\n---\n\nPlugin prompt.\n"
     )
 
     claude_home = tmp_path / "claude-home"
     agents_dir = claude_home / "agents"
     agents_dir.mkdir(parents=True)
-    (agents_dir / "plugin-agent.md").write_text(
-        "---\nname: plugin agent\ndescription: User agent\n---\n\nUser prompt.\n"
+    (agents_dir / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: User reviewer\n---\n\nUser prompt.\n"
     )
 
-    with pytest.raises(TranslationError, match="Duplicate agent name"):
-        build_project_desired_state(
-            project_root,
-            cache_dir=cache_root,
-            claude_home=claude_home,
-            codex_home=tmp_path / "codex-home",
-        )
+    result = build_project_desired_state(
+        project_root,
+        cache_dir=cache_root,
+        claude_home=claude_home,
+        codex_home=tmp_path / "codex-home",
+    )
+    assert result.desired_state is not None
+    assert result.agent_count == 2
 
 
 def test_build_project_returns_bootstrap_without_mutating(tmp_path: Path):

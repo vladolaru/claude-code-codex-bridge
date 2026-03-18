@@ -250,9 +250,9 @@ def build_project_desired_state(
     )
     from cc_codex_bridge.render_agent_toml import render_agent_toml
     from cc_codex_bridge.translate_agents import (
+        assign_agent_names,
         translate_installed_agents_with_diagnostics,
         translate_standalone_agents,
-        validate_merged_agents,
     )
     from cc_codex_bridge.translate_skills import (
         assign_skill_names,
@@ -313,12 +313,11 @@ def build_project_desired_state(
             diagnostics=tuple(all_diagnostics),
         )
 
-    all_agents = (*agent_result.agents, *user_agent_result.agents, *project_agent_result.agents)
-    validate_merged_agents(all_agents)
-
-    # Separate agents by scope
-    global_agents = tuple(a for a in all_agents if a.scope == "global")
-    project_agents = tuple(a for a in all_agents if a.scope == "project")
+    all_global_agents = assign_agent_names(
+        (*agent_result.agents, *user_agent_result.agents)
+    )
+    project_agents = project_agent_result.agents
+    global_agents = all_global_agents
 
     # Render project-local agent .toml files
     project_agent_files: list[tuple[Path, bytes]] = []
@@ -350,7 +349,7 @@ def build_project_desired_state(
         desired_state=desired_state,
         discovery=result,
         shim_decision=shim_decision,
-        agent_count=len(all_agents),
+        agent_count=len(all_global_agents) + len(project_agents),
         skill_count=total_skill_count,
         exclusion_report=exclusion_report,
         diagnostics=tuple(all_diagnostics),

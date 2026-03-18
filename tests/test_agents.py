@@ -15,6 +15,7 @@ from cc_codex_bridge.frontmatter import (
 from cc_codex_bridge.model import GeneratedAgentFile, InstalledPlugin, SemVer, TranslationError
 from cc_codex_bridge.render_agent_toml import derive_sandbox_mode, render_agent_toml
 from cc_codex_bridge.translate_agents import (
+    assign_agent_names,
     format_agent_translation_diagnostics,
     translate_standalone_agents,
     translate_installed_agents,
@@ -23,7 +24,7 @@ from cc_codex_bridge.translate_agents import (
 )
 
 def test_translate_installed_agents_produces_agent_files(make_plugin_version):
-    """Plugin agents translate to GeneratedAgentFile with global scope."""
+    """Plugin agents translate to GeneratedAgentFile with global scope and bare stem names."""
     cache_root, version_dir = make_plugin_version(
         "market",
         "pirategoat-tools",
@@ -50,17 +51,19 @@ def test_translate_installed_agents_produces_agent_files(make_plugin_version):
     assert len(agents) == 1
     agent = agents[0]
     assert isinstance(agent, GeneratedAgentFile)
-    assert agent.agent_name == "market_pirategoat-tools_architecture_reviewer"
+    assert agent.agent_name == "architecture-reviewer"
+    assert agent.install_filename == "architecture-reviewer.toml"
+    assert agent.marketplace == "market"
+    assert agent.plugin_name == "pirategoat-tools"
     assert agent.description == "Software architecture review"
     assert agent.original_model_hint == "sonnet"
     assert agent.scope == "global"
     assert agent.sandbox_mode == "workspace-write"
-    assert agent.install_filename == "market-pirategoat-tools-architecture-reviewer.toml"
     assert agent.developer_instructions == "You are an architecture reviewer.\n"
 
 
 def test_translate_standalone_agents_produces_agent_files_user_scope(tmp_path: Path):
-    """User agents translate to GeneratedAgentFile with global scope."""
+    """User agents translate to GeneratedAgentFile with global scope and bare stem names."""
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
     (agents_dir / "my-helper.md").write_text(
@@ -71,15 +74,17 @@ def test_translate_standalone_agents_produces_agent_files_user_scope(tmp_path: P
 
     assert len(result.agents) == 1
     agent = result.agents[0]
-    assert agent.agent_name == "user_my_helper"
+    assert agent.agent_name == "my-helper"
+    assert agent.install_filename == "my-helper.toml"
+    assert agent.marketplace == "_user"
+    assert agent.plugin_name == "personal"
     assert agent.scope == "global"
     assert agent.sandbox_mode == "workspace-write"
-    assert agent.install_filename == "user-my-helper.toml"
     assert agent.developer_instructions == "You help.\n"
 
 
 def test_translate_standalone_agents_produces_agent_files_project_scope(tmp_path: Path):
-    """Project agents translate to GeneratedAgentFile with project scope."""
+    """Project agents translate to GeneratedAgentFile with project scope and bare stem names."""
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
     (agents_dir / "code-reviewer.md").write_text(
@@ -90,10 +95,12 @@ def test_translate_standalone_agents_produces_agent_files_project_scope(tmp_path
 
     assert len(result.agents) == 1
     agent = result.agents[0]
-    assert agent.agent_name == "project_code_reviewer"
+    assert agent.agent_name == "code-reviewer"
+    assert agent.install_filename == "code-reviewer.toml"
+    assert agent.marketplace == "_project"
+    assert agent.plugin_name == "local"
     assert agent.scope == "project"
     assert agent.sandbox_mode == "read-only"
-    assert agent.install_filename == "project-code-reviewer.toml"
     assert agent.developer_instructions == "You review code.\n"
 
 
@@ -115,13 +122,17 @@ def test_agent_file_sandbox_mode_derived_from_tools(make_plugin_version):
     agents = translate_installed_agents(discover_latest_plugins(cache_root))
     by_name = {a.agent_name: a for a in agents}
 
-    assert by_name["market_test-plugin_writer"].sandbox_mode == "workspace-write"
-    assert by_name["market_test-plugin_reader"].sandbox_mode == "read-only"
-    assert by_name["market_test-plugin_minimal"].sandbox_mode is None
+    assert by_name["writer"].sandbox_mode == "workspace-write"
+    assert by_name["reader"].sandbox_mode == "read-only"
+    assert by_name["minimal"].sandbox_mode is None
 
 
-def test_translate_installed_agents_sanitizes_generated_names_and_paths(make_plugin_version):
-    """Unsafe agent names are normalized before agent names and install filenames are generated."""
+def test_translate_installed_agents_uses_file_stem_not_frontmatter_name(make_plugin_version):
+    """Agent identity derives from the file stem, not the frontmatter name.
+
+    A malicious frontmatter name like a path-traversal attempt has no effect
+    on generated agent names or install filenames — the file stem is used.
+    """
     cache_root, version_dir = make_plugin_version(
         "market",
         "test-plugin",
@@ -138,39 +149,121 @@ def test_translate_installed_agents_sanitizes_generated_names_and_paths(make_plu
 
     agents = translate_installed_agents(discover_latest_plugins(cache_root))
 
-    assert agents[0].agent_name == "market_test-plugin_tmp_pwn"
-    assert agents[0].install_filename == "market-test-plugin-tmp-pwn.toml"
+    # File stem is 'reviewer' regardless of frontmatter name
+    assert agents[0].agent_name == "reviewer"
+    assert agents[0].install_filename == "reviewer.toml"
 
 
-def test_translate_installed_agents_always_includes_marketplace_prefix(
-    make_plugin_version,
-):
-    """Marketplace prefix is always included in generated agent names."""
-    cache_root, alpha_dir = make_plugin_version(
-        "alpha",
-        "shared-plugin",
-        "1.0.0",
-        agent_names=("reviewer",),
+def test_assign_agent_names_resolves_collisions_with_alt_suffix():
+    """Same-stem agents from different plugins get -alt suffixes.
+
+    Standalone agents (marketplace starts with _) win bare names.
+    """
+    user_agent = GeneratedAgentFile(
+        marketplace="_user",
+        plugin_name="personal",
+        source_path=Path("/home/.claude/agents/reviewer.md"),
+        scope="global",
+        agent_name="reviewer",
+        install_filename="reviewer.toml",
+        description="User reviewer",
+        developer_instructions="User prompt.\n",
+        sandbox_mode=None,
+        original_model_hint=None,
     )
-    _, beta_dir = make_plugin_version(
-        "beta",
-        "shared-plugin",
-        "1.0.0",
-        agent_names=("reviewer",),
+    plugin_agent = GeneratedAgentFile(
+        marketplace="market",
+        plugin_name="alpha",
+        source_path=Path("/plugins/alpha/agents/reviewer.md"),
+        scope="global",
+        agent_name="reviewer",
+        install_filename="reviewer.toml",
+        description="Plugin reviewer",
+        developer_instructions="Plugin prompt.\n",
+        sandbox_mode=None,
+        original_model_hint=None,
     )
-    for agent_path in (alpha_dir / "agents" / "reviewer.md", beta_dir / "agents" / "reviewer.md"):
-        agent_path.write_text("---\nname: reviewer\ndescription: Review\n---\n\nPrompt.\n")
 
-    agents = translate_installed_agents(discover_latest_plugins(cache_root))
+    result = assign_agent_names((user_agent, plugin_agent))
 
-    assert [a.agent_name for a in agents] == [
-        "alpha_shared-plugin_reviewer",
-        "beta_shared-plugin_reviewer",
-    ]
-    assert [a.install_filename for a in agents] == [
-        "alpha-shared-plugin-reviewer.toml",
-        "beta-shared-plugin-reviewer.toml",
-    ]
+    assert len(result) == 2
+    by_name = {a.agent_name: a for a in result}
+    # User agent wins the bare name
+    assert "reviewer" in by_name
+    assert by_name["reviewer"].marketplace == "_user"
+    # Plugin agent gets -alt suffix
+    assert "reviewer-alt" in by_name
+    assert by_name["reviewer-alt"].marketplace == "market"
+    assert by_name["reviewer-alt"].install_filename == "reviewer-alt.toml"
+
+
+def test_assign_agent_names_multiple_collisions():
+    """Three-way collision produces bare, -alt, and -alt-2."""
+    agents = tuple(
+        GeneratedAgentFile(
+            marketplace=f"market-{i}",
+            plugin_name=f"plugin-{i}",
+            source_path=Path(f"/plugins/{i}/agents/reviewer.md"),
+            scope="global",
+            agent_name="reviewer",
+            install_filename="reviewer.toml",
+            description=f"Reviewer {i}",
+            developer_instructions=f"Prompt {i}.\n",
+            sandbox_mode=None,
+            original_model_hint=None,
+        )
+        for i in range(3)
+    )
+
+    result = assign_agent_names(agents)
+
+    names = sorted(a.agent_name for a in result)
+    assert names == ["reviewer", "reviewer-alt", "reviewer-alt-2"]
+
+
+def test_assign_agent_names_rejects_overlong_names():
+    """Agent names exceeding MAX_AGENT_NAME_LENGTH are rejected."""
+    from cc_codex_bridge.translate_agents import MAX_AGENT_NAME_LENGTH
+
+    long_stem = "a" * (MAX_AGENT_NAME_LENGTH + 1)
+    agent = GeneratedAgentFile(
+        marketplace="market",
+        plugin_name="plugin",
+        source_path=Path(f"/plugins/agents/{long_stem}.md"),
+        scope="global",
+        agent_name=long_stem,
+        install_filename=f"{long_stem}.toml",
+        description="Too long",
+        developer_instructions="Prompt.\n",
+        sandbox_mode=None,
+        original_model_hint=None,
+    )
+
+    with pytest.raises(TranslationError, match="exceeds"):
+        assign_agent_names((agent,))
+
+
+def test_assign_agent_names_no_collision():
+    """Unique stems pass through without modification."""
+    agents = tuple(
+        GeneratedAgentFile(
+            marketplace="market",
+            plugin_name="plugin",
+            source_path=Path(f"/plugins/agents/{name}.md"),
+            scope="global",
+            agent_name=name,
+            install_filename=f"{name}.toml",
+            description=f"Agent {name}",
+            developer_instructions="Prompt.\n",
+            sandbox_mode=None,
+            original_model_hint=None,
+        )
+        for name in ("alpha", "beta", "gamma")
+    )
+
+    result = assign_agent_names(agents)
+
+    assert sorted(a.agent_name for a in result) == ["alpha", "beta", "gamma"]
 
 
 def test_parse_markdown_with_frontmatter_supports_folded_scalars_and_nested_maps(tmp_path: Path):
@@ -261,27 +354,28 @@ def test_translate_installed_agents_reports_unsupported_tools(make_plugin_versio
         translate_installed_agents(discover_latest_plugins(cache_root))
 
 
-def test_translate_installed_agents_detects_duplicate_agent_names(make_plugin_version):
-    """Agent-name collisions across plugins are rejected."""
-    cache_root, version_dir = make_plugin_version("market", "alpha", "1.0.0", agent_names=("same",))
-    first_agent = version_dir / "agents" / "same.md"
-    first_agent.write_text("---\nname: same-role\ndescription: First\n---\n\nPrompt.\n")
-    second_agent = version_dir / "agents" / "same-again.md"
-    second_agent.write_text("---\nname: same role\ndescription: Second\n---\n\nPrompt.\n")
-
-    plugin = InstalledPlugin(
-        marketplace="market",
-        plugin_name="alpha",
-        version_text="1.0.0",
-        version=SemVer.parse("1.0.0"),
-        installed_path=version_dir,
-        source_path=version_dir,
-        skills=(),
-        agents=(first_agent, second_agent),
+def test_assign_agent_names_handles_same_stem_across_marketplaces(make_plugin_version):
+    """Same file stem in different marketplaces gets collision-free names via -alt suffixes."""
+    cache_root, alpha_dir = make_plugin_version(
+        "alpha",
+        "shared-plugin",
+        "1.0.0",
+        agent_names=("reviewer",),
     )
+    _, beta_dir = make_plugin_version(
+        "beta",
+        "shared-plugin",
+        "1.0.0",
+        agent_names=("reviewer",),
+    )
+    for agent_path in (alpha_dir / "agents" / "reviewer.md", beta_dir / "agents" / "reviewer.md"):
+        agent_path.write_text("---\nname: reviewer\ndescription: Review\n---\n\nPrompt.\n")
 
-    with pytest.raises(TranslationError, match="duplicate agent name"):
-        translate_installed_agents((plugin,))
+    agents = translate_installed_agents(discover_latest_plugins(cache_root))
+    resolved = assign_agent_names(agents)
+
+    names = sorted(a.agent_name for a in resolved)
+    assert names == ["reviewer", "reviewer-alt"]
 
 
 def test_parse_markdown_with_frontmatter_handles_literal_blocks_and_errors(tmp_path: Path):
@@ -376,7 +470,8 @@ def test_translate_installed_agents_accepts_quoted_fields_and_inline_tool_lists(
     agents = translate_installed_agents(discover_latest_plugins(cache_root))
 
     assert len(agents) == 1
-    assert agents[0].agent_name == "market_test-plugin_reviewer"
+    # agent_name derives from file stem 'reviewer', not frontmatter name
+    assert agents[0].agent_name == "reviewer"
     assert agents[0].description == "Review: carefully"
     assert agents[0].sandbox_mode == "workspace-write"
 
@@ -448,70 +543,6 @@ def test_translate_standalone_agent_with_unsupported_tools(tmp_path: Path):
     assert result.diagnostics[0].unsupported_tools == ("NotebookEdit",)
 
 
-def test_translate_standalone_agents_rejects_duplicate_normalized_agent_names(tmp_path: Path):
-    """Standalone agents with names that normalize to the same agent name are rejected."""
-    a = tmp_path / "same-role.md"
-    b = tmp_path / "same role.md"
-    a.write_text(
-        "---\nname: same-role\ndescription: First agent\n---\n\nPrompt A\n"
-    )
-    b.write_text(
-        "---\nname: same role\ndescription: Second agent\n---\n\nPrompt B\n"
-    )
-
-    with pytest.raises(TranslationError, match="duplicate agent name"):
-        translate_standalone_agents((a, b), scope="user")
-
-
-def test_translate_installed_agents_detects_duplicate_install_filenames(make_plugin_version):
-    """Install-filename collisions across plugins are rejected even when agent names differ.
-
-    Plugin "a-b" with agent "c" and plugin "a" with agent "b-c" produce
-    distinct agent names (market_a-b_c vs market_a_b_c) but identical
-    install filenames (market-a-b-c.toml), which would silently
-    overwrite one agent file.
-    """
-    cache_root, first_dir = make_plugin_version(
-        "market", "a-b", "1.0.0", agent_names=("c",)
-    )
-    first_agent = first_dir / "agents" / "c.md"
-    first_agent.write_text(
-        "---\nname: c\ndescription: First\n---\n\nPrompt.\n"
-    )
-
-    _, second_dir = make_plugin_version(
-        "market", "a", "1.0.0", agent_names=("b-c",)
-    )
-    second_agent = second_dir / "agents" / "b-c.md"
-    second_agent.write_text(
-        "---\nname: b-c\ndescription: Second\n---\n\nPrompt.\n"
-    )
-
-    first_plugin = InstalledPlugin(
-        marketplace="market",
-        plugin_name="a-b",
-        version_text="1.0.0",
-        version=SemVer.parse("1.0.0"),
-        installed_path=first_dir,
-        source_path=first_dir,
-        skills=(),
-        agents=(first_agent,),
-    )
-    second_plugin = InstalledPlugin(
-        marketplace="market",
-        plugin_name="a",
-        version_text="1.0.0",
-        version=SemVer.parse("1.0.0"),
-        installed_path=second_dir,
-        source_path=second_dir,
-        skills=(),
-        agents=(second_agent,),
-    )
-
-    with pytest.raises(TranslationError, match="duplicate install filename"):
-        translate_installed_agents((first_plugin, second_plugin))
-
-
 def test_translate_standalone_agent_empty_input():
     """Empty agent paths produce empty result."""
     result = translate_standalone_agents((), scope="user")
@@ -522,20 +553,24 @@ def test_translate_standalone_agent_empty_input():
 def test_validate_merged_agents_detects_name_collision():
     """Duplicate agent_name across scopes is rejected."""
     agent_a = GeneratedAgentFile(
+        marketplace="market",
+        plugin_name="alpha",
         source_path=Path("/plugins/a/agents/agent.md"),
         scope="global",
-        agent_name="user_plugin_agent",
-        install_filename="plugin-a-agent.toml",
+        agent_name="reviewer",
+        install_filename="reviewer.toml",
         description="From plugin scope",
         developer_instructions="Prompt A.\n",
         sandbox_mode=None,
         original_model_hint=None,
     )
     agent_b = GeneratedAgentFile(
-        source_path=Path("/home/.claude/agents/plugin-agent.md"),
+        marketplace="_user",
+        plugin_name="personal",
+        source_path=Path("/home/.claude/agents/reviewer.md"),
         scope="global",
-        agent_name="user_plugin_agent",
-        install_filename="user-plugin-agent.toml",
+        agent_name="reviewer",
+        install_filename="reviewer-copy.toml",
         description="From user scope",
         developer_instructions="Prompt B.\n",
         sandbox_mode=None,
@@ -549,9 +584,11 @@ def test_validate_merged_agents_detects_name_collision():
 def test_validate_merged_agents_detects_filename_collision():
     """Duplicate install_filename across scopes is rejected."""
     agent_a = GeneratedAgentFile(
+        marketplace="market",
+        plugin_name="alpha",
         source_path=Path("/plugins/a/agents/agent.md"),
         scope="global",
-        agent_name="agent_alpha",
+        agent_name="agent-alpha",
         install_filename="shared-agent.toml",
         description="First agent",
         developer_instructions="Prompt A.\n",
@@ -559,9 +596,11 @@ def test_validate_merged_agents_detects_filename_collision():
         original_model_hint=None,
     )
     agent_b = GeneratedAgentFile(
+        marketplace="_user",
+        plugin_name="personal",
         source_path=Path("/home/.claude/agents/agent.md"),
         scope="global",
-        agent_name="agent_beta",
+        agent_name="agent-beta",
         install_filename="shared-agent.toml",
         description="Second agent",
         developer_instructions="Prompt B.\n",
@@ -576,20 +615,24 @@ def test_validate_merged_agents_detects_filename_collision():
 def test_validate_merged_agents_accepts_unique_agents():
     """Unique agent names and install filenames pass validation."""
     agent_a = GeneratedAgentFile(
-        source_path=Path("/plugins/a/agents/agent.md"),
+        marketplace="market",
+        plugin_name="alpha",
+        source_path=Path("/plugins/a/agents/alpha.md"),
         scope="global",
-        agent_name="plugin_agent_alpha",
-        install_filename="plugin-a-alpha.toml",
+        agent_name="alpha",
+        install_filename="alpha.toml",
         description="First agent",
         developer_instructions="Prompt A.\n",
         sandbox_mode=None,
         original_model_hint=None,
     )
     agent_b = GeneratedAgentFile(
+        marketplace="_user",
+        plugin_name="personal",
         source_path=Path("/home/.claude/agents/beta.md"),
         scope="global",
-        agent_name="user_agent_beta",
-        install_filename="user-beta.toml",
+        agent_name="beta",
+        install_filename="beta.toml",
         description="Second agent",
         developer_instructions="Prompt B.\n",
         sandbox_mode=None,

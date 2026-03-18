@@ -128,25 +128,25 @@ def test_reconcile_combines_all_source_types(make_project, tmp_path: Path, capsy
     global_agents_dir = codex_home / "agents"
     assert global_agents_dir.exists()
     global_agent_files = sorted(f.name for f in global_agents_dir.glob("*.toml"))
-    assert "market-test-plugin-test-agent.toml" in global_agent_files  # plugin agent
-    assert "user-thinking-partner.toml" in global_agent_files  # user agent
+    assert "test-agent.toml" in global_agent_files  # plugin agent
+    assert "thinking-partner.toml" in global_agent_files  # user agent
 
-    # Plugin agent .toml content
-    plugin_agent_toml = (global_agents_dir / "market-test-plugin-test-agent.toml").read_text()
-    assert "market_test-plugin_test_agent" in plugin_agent_toml
+    # Plugin agent .toml content (bare stem name)
+    plugin_agent_toml = (global_agents_dir / "test-agent.toml").read_text()
+    assert "test-agent" in plugin_agent_toml
 
-    # User agent .toml content
-    user_agent_toml = (global_agents_dir / "user-thinking-partner.toml").read_text()
-    assert "user_thinking_partner" in user_agent_toml
+    # User agent .toml content (bare stem name)
+    user_agent_toml = (global_agents_dir / "thinking-partner.toml").read_text()
+    assert "thinking-partner" in user_agent_toml
 
-    # Project agent → .codex/agents/*.toml
+    # Project agent → .codex/agents/*.toml (bare stem name)
     project_agents_dir = project_root / ".codex" / "agents"
     assert project_agents_dir.exists()
     project_agent_files = sorted(f.name for f in project_agents_dir.glob("*.toml"))
-    assert "project-code-reviewer.toml" in project_agent_files
+    assert "code-reviewer.toml" in project_agent_files
 
-    project_agent_toml = (project_agents_dir / "project-code-reviewer.toml").read_text()
-    assert "project_code_reviewer" in project_agent_toml
+    project_agent_toml = (project_agents_dir / "code-reviewer.toml").read_text()
+    assert "code-reviewer" in project_agent_toml
 
     # config.toml no longer generated
     assert not (project_root / ".codex" / "config.toml").exists()
@@ -187,9 +187,9 @@ def test_reconcile_works_with_no_plugins(make_project, tmp_path: Path, capsys):
     assert (codex_home / "skills" / "my-tool" / "SKILL.md").exists()
 
     # Project agent → .codex/agents/*.toml
-    project_agent_toml = project_root / ".codex" / "agents" / "project-reviewer.toml"
+    project_agent_toml = project_root / ".codex" / "agents" / "reviewer.toml"
     assert project_agent_toml.exists()
-    assert "project_reviewer" in project_agent_toml.read_text()
+    assert "reviewer" in project_agent_toml.read_text()
 
     # config.toml no longer generated
     assert not (project_root / ".codex" / "config.toml").exists()
@@ -260,13 +260,13 @@ def test_reconcile_is_idempotent_with_all_sources(make_project, tmp_path: Path, 
 
     # Capture state after first run
     global_agents_md_v1 = (codex_home / "AGENTS.md").read_text()
-    plugin_agent_v1 = (codex_home / "agents" / "market-test-plugin-test-agent.toml").read_text()
-    project_agent_v1 = (project_root / ".codex" / "agents" / "project-reviewer.toml").read_text()
+    plugin_agent_v1 = (codex_home / "agents" / "test-agent.toml").read_text()
+    project_agent_v1 = (project_root / ".codex" / "agents" / "reviewer.toml").read_text()
 
     # Second run
     assert cli.main(args) == 0
 
     # State unchanged
     assert (codex_home / "AGENTS.md").read_text() == global_agents_md_v1
-    assert (codex_home / "agents" / "market-test-plugin-test-agent.toml").read_text() == plugin_agent_v1
-    assert (project_root / ".codex" / "agents" / "project-reviewer.toml").read_text() == project_agent_v1
+    assert (codex_home / "agents" / "test-agent.toml").read_text() == plugin_agent_v1
+    assert (project_root / ".codex" / "agents" / "reviewer.toml").read_text() == project_agent_v1
