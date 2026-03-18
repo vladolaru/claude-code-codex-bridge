@@ -2641,6 +2641,34 @@ def test_uninstall_no_errors_on_vanished_project(make_project, tmp_path: Path):
     assert report.projects[0].skip_reason == "directory not found"
 
 
+def test_uninstall_treats_no_state_as_error(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Accessible projects with no state file are errors that block global cleanup."""
+    from cc_codex_bridge.reconcile import uninstall_all
+
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "test-plugin", "1.0.0",
+        skill_names=("test-skill",),
+    )
+    (version_dir / "skills" / "test-skill" / "SKILL.md").write_text(
+        "---\nname: test-skill\ndescription: Test\n---\n\nUse this.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
+
+    # Delete the state file — simulates manual removal
+    (project_root / STATE_RELATIVE_PATH).unlink()
+
+    report = uninstall_all(codex_home=codex_home, dry_run=True)
+
+    assert report.has_errors is True
+    assert any(r.status == "no_state" for r in report.projects)
+
+
 def _reconcile_once(project_root, cache_root, codex_home):
     """Run a full discover+translate+reconcile and return the desired state."""
     from cc_codex_bridge.discover import discover

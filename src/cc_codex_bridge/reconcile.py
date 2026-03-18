@@ -101,16 +101,17 @@ class UninstallReport:
 
     @property
     def has_errors(self) -> bool:
-        """True when any accessible project had a cleanup error.
+        """True when any accessible project could not be fully cleaned.
 
         Projects skipped because the directory no longer exists are not treated
         as errors (vanished projects are expected during uninstall).  Projects
-        that were accessible but failed cleanup (status ``"skipped"`` with a
-        reason other than ``"directory not found"``) are actionable errors.
+        that were accessible but could not be cleaned — including those with
+        missing state files — are actionable errors.
         """
         return any(
-            result.status == "skipped"
-            and result.skip_reason != "directory not found"
+            result.status == "no_state"
+            or (result.status == "skipped"
+                and result.skip_reason != "directory not found")
             for result in self.projects
         )
 
