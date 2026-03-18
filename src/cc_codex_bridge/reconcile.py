@@ -687,10 +687,6 @@ def uninstall_all(
     snapshot = _load_registry_snapshot(registry_path)
     if snapshot.existed:
         project_roots.update(snapshot.registry.projects)
-        # Also include skill owners for backwards compatibility with
-        # registries that predate the projects list
-        for entry in snapshot.registry.skills.values():
-            project_roots.update(entry.owners)
 
     # Step 2: Clean each discovered project
     project_results: list[UninstallProjectResult] = []
@@ -1629,14 +1625,6 @@ def _is_allowed_managed_project_relative(relative: str) -> bool:
 
     # Agent .toml files under .codex/agents/
     if normalized.parent == AGENTS_RELATIVE_ROOT and normalized.suffix == ".toml":
-        return True
-
-    # Legacy paths still recognized for migration cleanup
-    legacy_config = Path(".codex") / "config.toml"
-    legacy_prompts_root = Path(".codex") / "prompts" / "agents"
-    if normalized_text == legacy_config.as_posix():
-        return True
-    if normalized.parent == legacy_prompts_root and normalized.suffix == ".md":
         return True
 
     return False

@@ -20,17 +20,6 @@ from cc_codex_bridge.render_agent_toml import READ_TOOLS, WRITE_TOOLS, derive_sa
 # Union of all Claude tools that have a meaningful Codex mapping.
 RECOGNIZED_TOOLS = WRITE_TOOLS | READ_TOOLS
 
-# Keep TOOL_TRANSLATIONS for backwards-compatibility with translate_tools().
-TOOL_TRANSLATIONS = {
-    "Read": "read",
-    "Edit": "edit",
-    "Glob": "glob",
-    "Grep": "grep",
-    "Write": "write",
-    "Bash": "bash",
-    "WebSearch": "web_search",
-}
-
 PROMPT_COMPONENT_RE = re.compile(r"[^A-Za-z0-9-]+")
 
 
@@ -228,27 +217,6 @@ def translate_installed_agents_with_diagnostics(
         agents=tuple(sorted(agents, key=lambda a: a.agent_name)),
         diagnostics=tuple(sorted(diagnostics, key=lambda item: str(item.source_path))),
     )
-
-
-def translate_tools(raw_tools: object) -> tuple[str, ...]:
-    """Translate Claude tool names into Codex tool identifiers.
-
-    Kept for backwards-compatibility. New code should use derive_sandbox_mode().
-    """
-    if raw_tools is None:
-        return ()
-    if not isinstance(raw_tools, list):
-        raise TranslationError(f"Agent tools must be a list, got: {type(raw_tools).__name__}")
-
-    translated: list[str] = []
-    for tool in raw_tools:
-        if not isinstance(tool, str):
-            raise TranslationError(f"Agent tool entry must be a string, got: {tool!r}")
-        translated_tool = TOOL_TRANSLATIONS.get(tool)
-        if translated_tool and translated_tool not in translated:
-            translated.append(translated_tool)
-
-    return tuple(sorted(translated))
 
 
 def format_agent_translation_diagnostics(

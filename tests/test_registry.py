@@ -95,16 +95,6 @@ def test_registry_round_trips_with_agents(tmp_path: Path):
     assert loaded.agents["market-plugin-reviewer.toml"].owners == (Path("/a/project"),)
 
 
-def test_registry_backwards_compatible_without_agents(tmp_path: Path):
-    """Registries from before agent tracking load with empty agents dict."""
-    path = tmp_path / GLOBAL_REGISTRY_FILENAME
-    path.write_text(json.dumps({"version": 1, "skills": {}}, indent=2) + "\n")
-
-    loaded = GlobalSkillRegistry.from_path(path)
-    assert loaded is not None
-    assert loaded.agents == {}
-
-
 def test_hash_agent_file_is_deterministic():
     """Agent file content hash is stable and deterministic."""
     content = 'name = "reviewer"\ndescription = "Review"\n'

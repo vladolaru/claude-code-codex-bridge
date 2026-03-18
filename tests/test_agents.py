@@ -17,7 +17,6 @@ from cc_codex_bridge.render_agent_toml import derive_sandbox_mode, render_agent_
 from cc_codex_bridge.translate_agents import (
     format_agent_translation_diagnostics,
     translate_standalone_agents,
-    translate_tools,
     translate_installed_agents,
     translate_installed_agents_with_diagnostics,
     validate_merged_agents,
@@ -325,24 +324,6 @@ def test_parse_markdown_with_frontmatter_rejects_malformed_yaml_syntax(tmp_path:
 
     with pytest.raises(TranslationError, match="Malformed frontmatter YAML"):
         parse_markdown_with_frontmatter(broken)
-
-
-def test_translate_tools_rejects_invalid_shapes():
-    """Tool translation handles invalid non-list or non-string inputs."""
-    assert translate_tools(None) == ()
-    assert translate_tools(["Write", "Read", "Read", "Unknown"]) == ("read", "write")
-
-    with pytest.raises(TranslationError, match="must be a list"):
-        translate_tools("Read")
-
-    with pytest.raises(TranslationError, match="must be a string"):
-        translate_tools(["Read", 1])
-
-
-def test_translate_tools_maps_edit_to_codex_edit():
-    """The Claude Edit tool translates to the Codex edit tool."""
-    assert translate_tools(["Read", "Edit", "Write"]) == ("edit", "read", "write")
-    assert translate_tools(["Edit"]) == ("edit",)
 
 
 def test_translate_installed_agents_accepts_edit_tool(make_plugin_version):
