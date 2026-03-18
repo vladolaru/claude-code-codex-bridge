@@ -11,8 +11,15 @@ from cc_codex_bridge import cli
 from cc_codex_bridge.doctor import _check_claude_cli, doctor_exit_code, overall_status, run_doctor
 
 
-def test_run_doctor_reports_warnings_without_failing_for_missing_optional_state(tmp_path: Path):
+def test_run_doctor_reports_warnings_without_failing_for_missing_optional_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
     """Missing Claude cache or PATH visibility should not make doctor fail outright."""
+    from cc_codex_bridge.doctor import DoctorCheck
+    monkeypatch.setattr(
+        "cc_codex_bridge.doctor._check_claude_cli",
+        lambda: DoctorCheck(name="claude_cli", status="ok", message="mocked"),
+    )
     codex_home = tmp_path / "codex-home"
     launchagents_dir = tmp_path / "LaunchAgents"
     bin_dir = tmp_path / "bin"
@@ -86,8 +93,15 @@ def test_doctor_rejects_semver_lookalikes_that_discovery_rejects(tmp_path: Path)
     assert "no valid" in cache_check.message.lower()
 
 
-def test_doctor_cli_supports_json_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+def test_doctor_cli_supports_json_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+):
     """The CLI doctor command should return JSON output for installer use."""
+    from cc_codex_bridge.doctor import DoctorCheck
+    monkeypatch.setattr(
+        "cc_codex_bridge.doctor._check_claude_cli",
+        lambda: DoctorCheck(name="claude_cli", status="ok", message="mocked"),
+    )
     codex_home = tmp_path / "codex-home"
     launchagents_dir = tmp_path / "LaunchAgents"
 
