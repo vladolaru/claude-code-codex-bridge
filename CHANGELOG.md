@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-03-18
+
+### Added
+
+- `-v`/`--version` flag: `cc-codex-bridge --version` now prints the installed version.
+- `VERSION` field in `status` output (both text and JSON formats).
+- `VERSION` field in `doctor` output (both text and JSON formats).
+
 ## [0.11.0] - 2026-03-18
 
 ### Changed

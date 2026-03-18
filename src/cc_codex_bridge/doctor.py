@@ -77,8 +77,11 @@ def doctor_exit_code(checks: Iterable[DoctorCheck]) -> int:
 
 def format_doctor_report(checks: Iterable[DoctorCheck]) -> str:
     """Render doctor checks in a stable human-readable form."""
+    from cc_codex_bridge import __version__
+
     materialized = tuple(checks)
     lines = [
+        f"VERSION: v{__version__}",
         f"STATUS: {overall_status(materialized)}",
         f"CHECKS_OK: {sum(1 for check in materialized if check.status == 'ok')}",
         f"CHECKS_WARNING: {sum(1 for check in materialized if check.status == 'warning')}",
@@ -93,9 +96,12 @@ def format_doctor_report(checks: Iterable[DoctorCheck]) -> str:
 
 def format_doctor_json(checks: Iterable[DoctorCheck]) -> str:
     """Render doctor checks as deterministic JSON."""
+    from cc_codex_bridge import __version__
+
     materialized = tuple(checks)
     return json.dumps(
         {
+            "version": __version__,
             "status": overall_status(materialized),
             "checks": [
                 {

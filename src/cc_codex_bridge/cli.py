@@ -71,8 +71,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override the Codex home path (mainly for testing).",
     )
 
+    from cc_codex_bridge import __version__
+
     parser = argparse.ArgumentParser(
-        description="Generate Codex bridge artifacts from installed Claude Code plugins.",
+        prog="cc-codex-bridge",
+        description=f"cc-codex-bridge v{__version__} — Generate Codex bridge artifacts from installed Claude Code plugins.",
+    )
+    parser.add_argument(
+        "-v", "--version",
+        action="version",
+        version=f"%(prog)s v{__version__}",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -709,7 +717,10 @@ def _build_status_payload(
         pending_change_count = len(report.changes)
         status = "in_sync" if not report.changes else "pending_changes"
 
+    from cc_codex_bridge import __version__
+
     return {
+        "version": __version__,
         "status": status,
         "pending_change_count": pending_change_count,
         "categorized_changes": categorized_changes,
@@ -738,6 +749,7 @@ def format_status_report(report, exclusion_report: ExclusionReport, *, diagnosti
     project_files = categorized["project_files"]
     skills = categorized["skills"]
     lines = [
+        f"VERSION: v{payload['version']}",
         f"STATUS: {payload['status']}",
         f"PENDING_CHANGES: {payload['pending_change_count']}",
         (
