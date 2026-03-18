@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-03-18
+
 ### Changed
 
 - Agent translation now produces native Codex `.toml` files instead of `.md` prompt files and `config.toml` entries. Global agents (plugin + user) install to `~/.codex/agents/` with registry tracking. Project agents install to `.codex/agents/`.
@@ -17,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `render_agent_toml.py` module for rendering self-contained Codex agent `.toml` files.
 - `derive_sandbox_mode()` for mapping Claude tools to Codex sandbox modes.
 - `GlobalAgentEntry` and `hash_agent_file()` for agent ownership tracking in the global registry.
+- Plugin enablement filtering: `discover_latest_plugins()` now queries `claude plugins list --json` to only sync plugins that are actually enabled. The `doctor` command checks for `claude` CLI availability.
 
 ### Fixed
 
@@ -25,6 +28,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Global skill directories now reject symlinks during reconcile, matching the project skill hardening.
 - Uninstall JSON output now includes global agent file removals.
 - Uninstall dry-run text summary uses `will_clean` instead of `cleaned`.
+- Triple-quote sequences in agent TOML rendering are now escaped to prevent TOML parse errors.
+- Shared global agents now update correctly when a plugin upgrades.
 
 ### Removed
 
