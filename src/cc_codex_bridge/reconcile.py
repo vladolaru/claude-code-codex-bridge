@@ -393,8 +393,13 @@ def reconcile_desired_state(desired: DesiredState) -> ReconcileReport:
     if not plan.changes and not plan.registry_writes and not state_write_needed:
         return ReconcileReport(changes=(), applied=True)
 
+    state_existed = desired.state_path.exists()
     _apply_changes(desired, plan, prev_managed)
-    return ReconcileReport(changes=plan.changes, applied=True)
+    changes = list(plan.changes)
+    if state_write_needed:
+        kind = "create" if not state_existed else "update"
+        changes.append(Change(kind, desired.state_path, resource_kind="state"))
+    return ReconcileReport(changes=tuple(changes), applied=True)
 
 
 def clean_project(

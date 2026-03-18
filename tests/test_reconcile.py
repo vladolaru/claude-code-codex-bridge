@@ -1794,6 +1794,47 @@ def test_diff_reports_state_file_repair(
     assert state_changes[0].kind == "create"
 
 
+def test_reconcile_reports_state_file_in_changes(
+    make_project, make_plugin_version, tmp_path,
+):
+    """reconcile must include the state file write in its returned changes."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "tools", "1.0.0", skill_names=("review",))
+    codex_home = tmp_path / "codex_home"
+    codex_home.mkdir()
+
+    desired = _build_desired(project_root, cache_root, codex_home)
+    report = reconcile_desired_state(desired)
+
+    state_changes = [c for c in report.changes if c.path == desired.state_path]
+    assert len(state_changes) == 1
+    assert state_changes[0].kind == "create"
+
+
+def test_reconcile_reports_state_file_update_in_changes(
+    make_project, make_plugin_version, tmp_path,
+):
+    """reconcile must report state file as 'update' when it already existed."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "tools", "1.0.0", skill_names=("review",))
+    codex_home = tmp_path / "codex_home"
+    codex_home.mkdir()
+
+    desired = _build_desired(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    # Delete the state file — managed files are still present, so a re-reconcile
+    # only needs to write the state file (as an update, since it existed before).
+    desired.state_path.unlink()
+
+    desired2 = _build_desired(project_root, cache_root, codex_home)
+    report = reconcile_desired_state(desired2)
+
+    state_changes = [c for c in report.changes if c.path == desired2.state_path]
+    assert len(state_changes) == 1
+    assert state_changes[0].kind == "create"
+
+
 def test_diff_detects_extra_file_in_project_skill_directory(
     make_project, make_plugin_version, tmp_path,
 ):
