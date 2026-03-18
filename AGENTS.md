@@ -224,7 +224,10 @@ When asked to prepare or execute a release, agents should:
 
 1. update `CHANGELOG.md`
 2. update both version declarations
-3. run `make release VERSION=X.Y.Z` from a clean `main` worktree using the repository `.venv`
+3. reinstall the editable package so the installed distribution metadata matches the new version: `source .venv/bin/activate && pip install -e ".[dev]" -q`
+4. run `make release VERSION=X.Y.Z` from a clean `main` worktree using the repository `.venv`
+
+**Why reinstall:** The editable install caches the previous version in distribution metadata (`importlib.metadata.version()`). Without reinstalling, `make release` passes version alignment checks but `pytest` fails because the test suite asserts that the installed distribution version matches `__version__`.
 
 `make release` is the maintainer-facing release command. It checks version alignment, verifies that the selected interpreter has `pytest` and `setuptools`, verifies the worktree is clean, requires the current branch to be `main`, runs `pytest tests -q`, creates the annotated `vX.Y.Z` tag, and atomically pushes `main` plus the tag.
 
