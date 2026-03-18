@@ -519,6 +519,10 @@ def _format_uninstall_json(report) -> str:
                 str(c.path) for c in report.global_removals
                 if c.resource_kind == "skill"
             ],
+            "agents": [
+                str(c.path) for c in report.global_removals
+                if c.resource_kind == "agent"
+            ],
             "agents_md": next(
                 (str(c.path) for c in report.global_removals
                  if c.resource_kind == "global_instructions"),
@@ -585,7 +589,8 @@ def _format_uninstall_report(report, *, dry_run: bool = False) -> str:
         cleaned = sum(1 for r in report.projects if r.status == "cleaned")
         skipped = sum(1 for r in report.projects if r.status == "skipped")
         no_state = sum(1 for r in report.projects if r.status == "no_state")
-        parts = [f"{cleaned} cleaned"]
+        cleaned_label = "will_clean" if dry_run else "cleaned"
+        parts = [f"{cleaned} {cleaned_label}"]
         if skipped:
             parts.append(f"{skipped} skipped")
         if no_state:

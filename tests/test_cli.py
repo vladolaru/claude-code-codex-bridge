@@ -1227,6 +1227,28 @@ def test_uninstall_dry_run_json(make_project, make_plugin_version, tmp_path: Pat
     assert data["projects"][0]["status"] in ("will_clean", "not_found")
 
 
+def test_uninstall_json_includes_global_agents(
+    make_project, make_plugin_version, tmp_path: Path, capsys,
+):
+    """Uninstall JSON output includes global agent file removals."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "test-plugin", "1.0.0", agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nReview.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    cli.main(["reconcile", "--project", str(project_root), "--cache-dir", str(cache_root), "--codex-home", str(codex_home)])
+    capsys.readouterr()
+
+    exit_code = cli.main(["uninstall", "--codex-home", str(codex_home), "--dry-run", "--json"])
+    output = json.loads(capsys.readouterr().out)
+
+    assert "agents" in output["global"]
+    assert any("reviewer" in path for path in output["global"]["agents"])
+
+
 def test_find_bridge_launchagents_discovers_matching_plists(tmp_path: Path):
     """find_bridge_launchagents returns plists matching the bridge label pattern."""
     from cc_codex_bridge.install_launchagent import find_bridge_launchagents
