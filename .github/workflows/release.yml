@@ -65,7 +65,9 @@ jobs:
           .venv-package-smoke/bin/python -m pip install --no-index --find-links .wheelhouse "cc-codex-bridge==${PACKAGE_VERSION}"
           .venv-package-smoke/bin/cc-codex-bridge --help
           .venv-package-smoke/bin/python -m cc_codex_bridge --help
-          .venv-package-smoke/bin/cc-codex-bridge doctor --json
+          # doctor may exit 1 in CI (claude CLI not installed) — verify JSON parses and has expected checks
+          .venv-package-smoke/bin/cc-codex-bridge doctor --json > doctor-output.json || true
+          python -c "import json, sys; d=json.load(open('doctor-output.json')); checks={c['name'] for c in d['checks']}; assert 'python' in checks and 'codex_home' in checks, f'missing checks: {checks}'"
         shell: bash
 
       - name: Upload built distributions

@@ -6,11 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [0.10.1] - 2026-03-18
+## [0.10.2] - 2026-03-18
 
 ### Fixed
 
 - Doctor tests no longer depend on `claude` CLI being available in CI.
+- CI smoke checks tolerate missing `claude` CLI in the runner environment.
 
 ## [0.10.0] - 2026-03-18
 
