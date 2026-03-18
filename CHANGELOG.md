@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-03-18
+
+### Fixed
+
+- `reconcile` now includes the state file write in its change report. Previously, when global artifacts were already present (e.g. a second project onboarded after a first), the reconcile printed "No changes." even though it created the project state file.
+
 ## [0.12.0] - 2026-03-18
 
 ### Added
