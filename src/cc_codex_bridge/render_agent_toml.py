@@ -41,7 +41,8 @@ def render_agent_toml(
     ]
     if sandbox_mode is not None:
         lines.append(f'sandbox_mode = "{sandbox_mode}"')
-    lines.append(f'developer_instructions = """\n{developer_instructions}"""')
+    escaped_body = _escape_toml_multiline_string(developer_instructions)
+    lines.append(f'developer_instructions = """\n{escaped_body}"""')
     lines.append("")
     return "\n".join(lines)
 
@@ -55,3 +56,28 @@ def _escape_toml_string(value: str) -> str:
         .replace("\n", "\\n")
         .replace("\t", "\\t")
     )
+
+
+def _escape_toml_multiline_string(value: str) -> str:
+    """Escape a string for TOML multiline basic string context.
+
+    In a multiline basic string (delimited by triple double-quotes),
+    runs of three or more consecutive unescaped double-quotes would
+    prematurely close the string.  We break such runs by backslash-
+    escaping every third consecutive quote.
+    """
+    result: list[str] = []
+    consecutive_quotes = 0
+    for char in value:
+        if char == '"':
+            consecutive_quotes += 1
+            if consecutive_quotes == 3:
+                # Break the run: replace the third quote with \"
+                result.append('\\"')
+                consecutive_quotes = 0
+            else:
+                result.append(char)
+        else:
+            consecutive_quotes = 0
+            result.append(char)
+    return "".join(result)

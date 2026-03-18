@@ -682,6 +682,28 @@ def test_render_agent_toml_escapes_multiline_instructions():
     assert parsed["developer_instructions"] == "Line one.\nLine two.\nLine three.\n"
 
 
+def test_render_agent_toml_escapes_triple_quotes_in_body():
+    """Triple-quote sequences in developer_instructions don't break TOML."""
+    body_with_triple_quotes = 'Example:\n```toml\nfoo = """bar"""\n```\n'
+    result = render_agent_toml(
+        "toml-example-agent",
+        "Shows TOML examples",
+        body_with_triple_quotes,
+    )
+    # Must parse as valid TOML
+    parsed = tomllib.loads(result)
+    assert parsed["developer_instructions"] == body_with_triple_quotes
+    assert parsed["name"] == "toml-example-agent"
+
+
+def test_render_agent_toml_escapes_long_quote_runs():
+    """Runs of 4+ quotes are also handled correctly."""
+    body = 'Four quotes: """" and five: """"".\n'
+    result = render_agent_toml("quote-agent", "Quotes", body)
+    parsed = tomllib.loads(result)
+    assert parsed["developer_instructions"] == body
+
+
 def test_derive_sandbox_mode_write_tools():
     """Write-capable tools produce workspace-write."""
     assert derive_sandbox_mode(("Read", "Bash", "Write")) == "workspace-write"
