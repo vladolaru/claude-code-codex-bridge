@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Plugin resource ownership tracking in the global registry with multi-project ownership and content hash fast path. Vendored plugin resource directories are now shared safely across projects and removed only when no project claims them.
+
+### Changed
+
+- State version bumped to 8. Existing bridge state files are re-created on next reconcile.
+
+### Removed
+
+- `managed_plugin_dirs` field removed from BridgeState (replaced by global registry tracking).
+
 ## [0.12.1] - 2026-03-18
 
 ### Fixed

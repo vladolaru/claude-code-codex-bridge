@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Iterable
 
-from cc_codex_bridge.model import GeneratedSkill, GeneratedSkillFile, ReconcileError, VendoredPluginResource
+from cc_codex_bridge.model import GeneratedSkill, GeneratedSkillFile, ReconcileError
 from cc_codex_bridge.text import read_utf8_text
 
 
@@ -216,10 +216,6 @@ def hash_generated_skill_files(files: Iterable[GeneratedSkillFile]) -> str:
         digest.update(generated_file.content)
     return f"sha256:{digest.hexdigest()}"
 
-
-def hash_vendored_plugin_resource(resource: VendoredPluginResource) -> str:
-    """Return the deterministic content hash for one vendored plugin resource."""
-    return hash_generated_skill_files(resource.files)
 
 
 def _require_content_hash(data: dict[str, object], path: Path) -> str:
