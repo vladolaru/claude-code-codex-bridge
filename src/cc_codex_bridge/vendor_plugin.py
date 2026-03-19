@@ -10,6 +10,10 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from cc_codex_bridge.model import GeneratedSkillFile
 
 
 # Patterns that reference plugin-level directories.
@@ -70,3 +74,35 @@ def rewrite_plugin_paths(content: str, vendored_root: Path) -> str:
     result = _PLUGIN_ROOT_REF_RE.sub(root_str, result)
 
     return result
+
+
+# Patterns for transitive dependency detection in vendored Python scripts.
+# Matches os.path.join(..., "dirname", ...) and Path(..., "dirname", ...) calls
+# where dirname looks like a directory name (lowercase letters, digits, hyphens,
+# underscores).
+_PYTHON_PATH_JOIN_DIR_RE = re.compile(
+    r'(?:os\.path\.join|Path)\s*\([^)]*?["\'](?P<dir>[a-z][a-z0-9_-]*)["\']'
+)
+
+
+def detect_transitive_plugin_dirs(
+    files: tuple[GeneratedSkillFile, ...],
+    plugin_source: Path,
+) -> set[str]:
+    """Scan vendored file content for references to other plugin directories.
+
+    Detects patterns like ``os.path.join(plugin_root, "agents", ...)`` in
+    Python scripts that reference sibling directories at the plugin root.
+    Only returns directory names that actually exist at the plugin source root.
+    """
+    referenced: set[str] = set()
+    for f in files:
+        try:
+            content = f.content.decode()
+        except UnicodeDecodeError:
+            continue
+        for match in _PYTHON_PATH_JOIN_DIR_RE.finditer(content):
+            dir_name = match.group("dir")
+            if (plugin_source / dir_name).is_dir():
+                referenced.add(dir_name)
+    return referenced

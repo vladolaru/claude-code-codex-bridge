@@ -912,12 +912,56 @@ def test_skill_plugin_root_references_are_rewritten(make_plugin_version, tmp_pat
     assert 'figma-parse-nodes.py' in content
 
     # Plugin resources should be collected
-    assert len(result.plugin_resources) == 1
-    resource = result.plugin_resources[0]
+    assert len(result.plugin_resources) >= 1
+    resource = next(r for r in result.plugin_resources if r.target_dir_name == "scripts")
     assert resource.marketplace == "market"
     assert resource.plugin_name == "pirategoat-tools"
     assert resource.target_dir_name == "scripts"
     assert any(f.relative_path == Path("figma-parse-nodes.py") for f in resource.files)
+
+
+def test_skill_plugin_root_transitive_vendoring(make_plugin_version, tmp_path: Path):
+    """Scripts vendored for skills that reference other plugin dirs trigger transitive vendoring."""
+    cache_root, version_dir = make_plugin_version(
+        "market", "pirategoat-tools", "1.0.0",
+        skill_names=("using-figma",),
+    )
+    # Create plugin-level scripts that reference agents/shared/
+    scripts_dir = version_dir / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "figma-helper.py").write_text(
+        'import os\n'
+        'plugin_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))\n'
+        'config_path = os.path.join(plugin_root, "config", "defaults.json")\n'
+    )
+
+    # Create the config/ directory at plugin root
+    config_dir = version_dir / "config"
+    config_dir.mkdir()
+    (config_dir / "defaults.json").write_text('{"key": "value"}\n')
+
+    skill_dir = version_dir / "skills" / "using-figma"
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: using-figma\ndescription: Figma integration\n---\n\n"
+        'PLUGIN_ROOT="<skill base directory>/../.."\n'
+        'python3 "$PLUGIN_ROOT/scripts/figma-helper.py" input.json\n'
+    )
+
+    bridge = tmp_path / "bridge-home"
+    result = translate_installed_skills(
+        discover_latest_plugins(cache_root),
+        bridge_home=bridge,
+    )
+
+    # Should have scripts (direct) + config (transitive) vendored
+    assert len(result.plugin_resources) >= 2
+    vendored_dirs = {r.target_dir_name for r in result.plugin_resources}
+    assert "scripts" in vendored_dirs
+    assert "config" in vendored_dirs
+
+    # Verify the config file is in the vendored resources
+    config_resource = next(r for r in result.plugin_resources if r.target_dir_name == "config")
+    assert any(f.relative_path == Path("defaults.json") for f in config_resource.files)
 
 
 def _write_skill_directory(destination: Path, skill: GeneratedSkill) -> Path:

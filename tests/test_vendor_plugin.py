@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from cc_codex_bridge.model import GeneratedSkillFile
 from cc_codex_bridge.vendor_plugin import (
     detect_plugin_resource_dirs,
+    detect_transitive_plugin_dirs,
     rewrite_plugin_paths,
 )
 
@@ -97,3 +99,117 @@ def test_rewrite_claude_cache_discovery_pattern():
     # The original discovery lines should be removed or replaced
     assert 'find ~/.claude' not in result
     assert '/tmp/.pirategoat-tools-root' not in result
+
+
+# -- transitive dependency detection --
+
+
+def test_detect_transitive_finds_os_path_join_reference(tmp_path):
+    """Scripts referencing os.path.join(plugin_root, "agents", ...) detect agents dir."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "agents" / "shared").mkdir(parents=True)
+    (plugin_root / "agents" / "shared" / "protocol.md").write_text("Protocol content")
+
+    files = (
+        GeneratedSkillFile(
+            relative_path=Path("bootstrap.py"),
+            content=b'protocol_path = os.path.join(plugin_root, "agents", "shared", "protocol.md")',
+            mode=0o755,
+        ),
+    )
+    dirs = detect_transitive_plugin_dirs(files, plugin_root)
+    assert "agents" in dirs
+
+
+def test_detect_transitive_finds_path_constructor_reference(tmp_path):
+    """Scripts referencing Path(root, "dirname", ...) detect the directory."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "data").mkdir(parents=True)
+    (plugin_root / "data" / "config.json").write_text("{}")
+
+    files = (
+        GeneratedSkillFile(
+            relative_path=Path("loader.py"),
+            content=b'config = Path(plugin_root, "data", "config.json")',
+            mode=0o644,
+        ),
+    )
+    dirs = detect_transitive_plugin_dirs(files, plugin_root)
+    assert "data" in dirs
+
+
+def test_detect_transitive_ignores_nonexistent_dirs(tmp_path):
+    """Only returns directories that actually exist at plugin root."""
+    plugin_root = tmp_path / "plugin"
+    plugin_root.mkdir()
+
+    files = (
+        GeneratedSkillFile(
+            relative_path=Path("script.py"),
+            content=b'os.path.join(root, "nonexistent", "file")',
+            mode=0o755,
+        ),
+    )
+    dirs = detect_transitive_plugin_dirs(files, plugin_root)
+    assert dirs == set()
+
+
+def test_detect_transitive_skips_binary_files(tmp_path):
+    """Binary files are skipped without error."""
+    plugin_root = tmp_path / "plugin"
+    plugin_root.mkdir()
+
+    files = (
+        GeneratedSkillFile(
+            relative_path=Path("data.bin"),
+            content=b'\x00\x01\x02\xff\xfe',
+            mode=0o644,
+        ),
+    )
+    dirs = detect_transitive_plugin_dirs(files, plugin_root)
+    assert dirs == set()
+
+
+def test_detect_transitive_finds_multiple_dirs(tmp_path):
+    """Multiple referenced directories are all detected."""
+    plugin_root = tmp_path / "plugin"
+    (plugin_root / "agents").mkdir(parents=True)
+    (plugin_root / "templates").mkdir(parents=True)
+
+    files = (
+        GeneratedSkillFile(
+            relative_path=Path("bootstrap.py"),
+            content=(
+                b'agents_path = os.path.join(root, "agents", "shared")\n'
+                b'tmpl_path = os.path.join(root, "templates", "base.html")\n'
+            ),
+            mode=0o755,
+        ),
+    )
+    dirs = detect_transitive_plugin_dirs(files, plugin_root)
+    assert dirs == {"agents", "templates"}
+
+
+def test_detect_transitive_ignores_files_not_dirs(tmp_path):
+    """References to names that are files (not dirs) at plugin root are ignored."""
+    plugin_root = tmp_path / "plugin"
+    plugin_root.mkdir()
+    (plugin_root / "readme").write_text("Not a directory")
+
+    files = (
+        GeneratedSkillFile(
+            relative_path=Path("script.py"),
+            content=b'os.path.join(root, "readme", "something")',
+            mode=0o755,
+        ),
+    )
+    dirs = detect_transitive_plugin_dirs(files, plugin_root)
+    assert dirs == set()
+
+
+def test_detect_transitive_empty_files(tmp_path):
+    """Empty file tuple returns no transitive dirs."""
+    plugin_root = tmp_path / "plugin"
+    plugin_root.mkdir()
+    dirs = detect_transitive_plugin_dirs((), plugin_root)
+    assert dirs == set()

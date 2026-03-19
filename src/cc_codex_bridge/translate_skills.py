@@ -304,6 +304,8 @@ def _build_generated_skill(
     # Detect plugin resource references and rewrite paths
     plugin_resources: list[VendoredPluginResource] = []
     if bridge_home is not None:
+        from cc_codex_bridge.vendor_plugin import detect_transitive_plugin_dirs
+
         detected_dirs = detect_plugin_resource_dirs(rewritten)
         if detected_dirs:
             vendored_root = plugin_resource_dir(
@@ -332,6 +334,33 @@ def _build_generated_skill(
                     source_dir=source_dir,
                     target_dir_name=dir_name,
                     files=files,
+                ))
+
+            # Detect transitive dependencies: vendored scripts may reference
+            # other plugin-level directories (e.g., agents/shared/ protocols)
+            vendored_files = tuple(f for r in plugin_resources for f in r.files)
+            transitive_dirs = detect_transitive_plugin_dirs(
+                vendored_files, raw_skill.plugin_root,
+            )
+            already_vendored = {r.target_dir_name for r in plugin_resources}
+            for dir_name in sorted(transitive_dirs - already_vendored):
+                source_dir = raw_skill.plugin_root / dir_name
+                resource_files_t: dict[Path, tuple[bytes, int]] = {}
+                _copy_tree(source_dir, Path(), resource_files_t)
+                files_t = tuple(
+                    GeneratedSkillFile(
+                        relative_path=path,
+                        content=resource_files_t[path][0],
+                        mode=resource_files_t[path][1],
+                    )
+                    for path in sorted(resource_files_t)
+                )
+                plugin_resources.append(VendoredPluginResource(
+                    marketplace=raw_skill.marketplace,
+                    plugin_name=raw_skill.plugin_name,
+                    source_dir=source_dir,
+                    target_dir_name=dir_name,
+                    files=files_t,
                 ))
 
     diagnostic = _validate_generated_skill(rewritten, install_dir_name, skill_md_path)

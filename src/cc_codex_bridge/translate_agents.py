@@ -185,7 +185,11 @@ def translate_installed_agents_with_diagnostics(
 ) -> AgentTranslationResult:
     """Translate installed Claude agent files into Codex agent file definitions."""
     from cc_codex_bridge.bridge_home import plugin_resource_dir
-    from cc_codex_bridge.vendor_plugin import detect_plugin_resource_dirs, rewrite_plugin_paths
+    from cc_codex_bridge.vendor_plugin import (
+        detect_plugin_resource_dirs,
+        detect_transitive_plugin_dirs,
+        rewrite_plugin_paths,
+    )
 
     agents: list[GeneratedAgentFile] = []
     diagnostics: list[AgentTranslationDiagnostic] = []
@@ -230,6 +234,7 @@ def translate_installed_agents_with_diagnostics(
                     )
                     prompt_body = rewrite_plugin_paths(prompt_body, vendored_root)
 
+                    agent_plugin_resources: list[VendoredPluginResource] = []
                     for dir_name in sorted(detected_dirs):
                         source_dir = plugin.source_path / dir_name
                         if not source_dir.is_dir():
@@ -245,13 +250,48 @@ def translate_installed_agents_with_diagnostics(
                                 content=path.read_bytes(),
                                 mode=path.stat().st_mode & 0o777,
                             ))
-                        all_plugin_resources.append(VendoredPluginResource(
+                        agent_plugin_resources.append(VendoredPluginResource(
                             marketplace=plugin.marketplace,
                             plugin_name=plugin.plugin_name,
                             source_dir=source_dir,
                             target_dir_name=dir_name,
                             files=tuple(file_entries),
                         ))
+
+                    # Detect transitive dependencies: vendored scripts may
+                    # reference other plugin-level directories (e.g.,
+                    # agents/shared/ protocols loaded by bootstrap scripts)
+                    vendored_files = tuple(
+                        f for r in agent_plugin_resources for f in r.files
+                    )
+                    transitive_dirs = detect_transitive_plugin_dirs(
+                        vendored_files, plugin.source_path,
+                    )
+                    already_vendored = {
+                        r.target_dir_name for r in agent_plugin_resources
+                    }
+                    for dir_name in sorted(transitive_dirs - already_vendored):
+                        source_dir = plugin.source_path / dir_name
+                        file_entries_t: list[GeneratedSkillFile] = []
+                        for path in sorted(source_dir.rglob("*")):
+                            if path.is_dir():
+                                continue
+                            if path.name in {".DS_Store", "__pycache__"} or path.suffix == ".pyc":
+                                continue
+                            file_entries_t.append(GeneratedSkillFile(
+                                relative_path=path.relative_to(source_dir),
+                                content=path.read_bytes(),
+                                mode=path.stat().st_mode & 0o777,
+                            ))
+                        agent_plugin_resources.append(VendoredPluginResource(
+                            marketplace=plugin.marketplace,
+                            plugin_name=plugin.plugin_name,
+                            source_dir=source_dir,
+                            target_dir_name=dir_name,
+                            files=tuple(file_entries_t),
+                        ))
+
+                    all_plugin_resources.extend(agent_plugin_resources)
 
             agents.append(
                 GeneratedAgentFile(

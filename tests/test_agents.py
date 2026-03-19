@@ -776,9 +776,53 @@ def test_agent_plugin_root_references_are_rewritten(make_plugin_version, tmp_pat
     assert '$PLUGIN_ROOT' not in agent.developer_instructions
     assert 'bootstrap-reviewer.py' in agent.developer_instructions
 
-    # Plugin resources should be collected
-    assert len(result.plugin_resources) == 1
-    resource = result.plugin_resources[0]
+    # Plugin resources should be collected (scripts directly + agents transitively)
+    assert len(result.plugin_resources) >= 1
+    resource = next(r for r in result.plugin_resources if r.target_dir_name == "scripts")
     assert resource.marketplace == "market"
     assert resource.plugin_name == "pirategoat-tools"
     assert resource.target_dir_name == "scripts"
+
+
+def test_agent_shared_protocols_are_vendored_transitively(make_plugin_version, tmp_path):
+    """Agents with bootstrap scripts that reference agents/shared/ get those vendored too."""
+    cache_root, version_dir = make_plugin_version(
+        "market", "pirategoat-tools", "1.0.0",
+        agent_names=("security-reviewer",),
+    )
+    # Create plugin-level scripts with bootstrap that references agents/shared/
+    scripts_dir = version_dir / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "bootstrap-reviewer.py").write_text(
+        'import os\n'
+        'plugin_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))\n'
+        'protocol_path = os.path.join(plugin_root, "agents", "shared", "reviewer-protocol.md")\n'
+    )
+
+    # Create agents/shared/ protocols
+    shared_dir = version_dir / "agents" / "shared"
+    shared_dir.mkdir(parents=True, exist_ok=True)
+    (shared_dir / "reviewer-protocol.md").write_text("# Protocol\nReview rules here.\n")
+
+    (version_dir / "agents" / "security-reviewer.md").write_text(
+        "---\nname: security-reviewer\ndescription: Security review\ntools:\n  - Read\n  - Bash\n---\n\n"
+        "python3 $PLUGIN_ROOT/scripts/bootstrap-reviewer.py --agent security-reviewer\n"
+    )
+
+    bridge = tmp_path / "bridge-home"
+    result = translate_installed_agents_with_diagnostics(
+        discover_latest_plugins(cache_root),
+        bridge_home=bridge,
+    )
+
+    # Should have scripts + agents vendored (transitive dep)
+    assert len(result.plugin_resources) >= 2
+    vendored_dirs = {r.target_dir_name for r in result.plugin_resources}
+    assert "scripts" in vendored_dirs
+    assert "agents" in vendored_dirs
+
+    # Verify the agents/shared/ protocol file is in the vendored resources
+    agents_resource = next(r for r in result.plugin_resources if r.target_dir_name == "agents")
+    protocol_files = [f for f in agents_resource.files if "reviewer-protocol" in str(f.relative_path)]
+    assert len(protocol_files) == 1
+    assert b"Review rules here." in protocol_files[0].content
