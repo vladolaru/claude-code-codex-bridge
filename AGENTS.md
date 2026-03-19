@@ -62,8 +62,9 @@ The bridge reads local Claude Code state and produces Codex-compatible outputs s
 - `CLAUDE.md` as the `@AGENTS.md` shim
 - `~/.codex/agents/*.toml` (global agent files, tracked in global registry)
 - `.codex/agents/*.toml` (project-local agent files)
-- `.codex/claude-code-bridge-state.json`
 - `~/.codex/skills/*`
+- `~/.cc-codex-bridge/projects/<hash>/state.json` (per-project bridge state)
+- `~/.cc-codex-bridge/registry.json` (global ownership registry)
 
 Do not treat generated `.codex/*` or generated Codex skill directories as hand-authored source.
 

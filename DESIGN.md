@@ -49,10 +49,10 @@ These are derived artifacts and must not become hand-maintained sources:
 
 - `CLAUDE.md`
 - `.codex/agents/*.toml`
-- `.codex/claude-code-bridge-state.json`
 - `~/.codex/agents/*.toml`
-- `~/.codex/claude-code-bridge-global-state.json`
 - `~/.codex/skills/*`
+- `~/.cc-codex-bridge/projects/<hash>/state.json`
+- `~/.cc-codex-bridge/registry.json`
 
 ### Authority rule
 
@@ -129,9 +129,6 @@ Utility commands such as `doctor` and the LaunchAgent commands are intentionally
   - self-contained Codex agent files derived from project-scope Claude agents
   - each `.toml` contains `name`, `description`, `developer_instructions`, and optional `sandbox_mode`
   - Codex discovers these automatically (no `config.toml` needed)
-- `.codex/claude-code-bridge-state.json`
-  - project-local ownership state for reconcile safety
-  - tracks managed project files, managed project skill directory names, and version
 - `.codex/skills/<skill-name>/`
   - project-local Codex skill directories derived from Claude project skills
 
@@ -140,12 +137,21 @@ Utility commands such as `doctor` and the LaunchAgent commands are intentionally
 - `~/.codex/agents/*.toml`
   - self-contained Codex agent files derived from plugin and user-scope Claude agents
   - tracked in the global registry alongside skills
-- `~/.codex/claude-code-bridge-global-state.json`
-  - global generated-skill and agent ownership registry keyed by install directory name (skills) and filename (agents)
 - `~/.codex/skills/<generated-skill-name>/`
   - self-contained Codex skill directories derived from Claude plugin and user skills
 - `~/.codex/AGENTS.md`
   - user-global Codex instructions bridged from `~/.claude/CLAUDE.md`
+
+### Bridge-internal outputs
+
+These are internal state files stored under `~/.cc-codex-bridge/` (configurable via `$CC_BRIDGE_HOME`):
+
+- `~/.cc-codex-bridge/projects/<hash>/state.json`
+  - per-project ownership state for reconcile safety
+  - project directory keyed by SHA-256 hash of the resolved project root path
+  - tracks managed project files, managed project skill directory names, bridge home, codex home, and version
+- `~/.cc-codex-bridge/registry.json`
+  - global generated-skill and agent ownership registry keyed by install directory name (skills) and filename (agents)
 
 ### Local-only rule
 
@@ -168,13 +174,14 @@ The reconcile engine is conservative by design.
 
 Ownership is split across project-local and user-global state.
 
-The project-local state file records:
+The project state file (at `~/.cc-codex-bridge/projects/<hash>/state.json`) records:
 
 - project root
 - Codex home path
+- bridge home path
 - managed project-relative file paths (including agent `.toml` files under `.codex/agents/`)
 - managed project skill directory names (tracked separately for directory-snapshot comparison)
-- state version (currently 5)
+- state version (currently 6)
 
 The global registry records:
 
@@ -185,7 +192,7 @@ The global registry records:
 ### Safety rules
 
 - project files are never overwritten unless they were previously recorded as managed
-- the state file may only authorize generator-owned project paths: `CLAUDE.md`, `.codex/agents/*.toml`, and `.codex/claude-code-bridge-state.json` (project skill directories are tracked separately via `managed_project_skill_dirs`)
+- the state file may only authorize generator-owned project paths: `CLAUDE.md` and `.codex/agents/*.toml` (project skill directories are tracked separately via `managed_project_skill_dirs`)
 - state-tracked project skill directories must be plain generated directory names; traversal, absolute paths, and nested paths are rejected as corrupted state
 - generated project-relative paths are normalized and may not use absolute paths or `..` traversal
 - corrupted or unexpected managed project paths in state are treated as a hard error — this applies to both reconcile and cleanup paths
@@ -203,7 +210,7 @@ The global registry records:
 - existing global agent `.toml` files are adopted only when their content hash matches the desired generated content exactly
 - conflicting content for an existing generated agent file is a hard error
 - generated agent files are removed only when the global registry shows no remaining owners
-- all write targets must resolve within their expected root (`project_root` for project files, `codex_home` for global files) after symlink resolution — this catches symlinked ancestor directories that would redirect operations outside the expected tree
+- all write targets must resolve within their expected root (`project_root` for project files, `codex_home` for global Codex files, `bridge_home` for state and registry files) after symlink resolution — this catches symlinked ancestor directories that would redirect operations outside the expected tree
 - skill translation rejects symlinked resource directories, symlinked files (including SKILL.md), and symlinked subdirectories within resource directories
 - project skills are tracked as managed directory names and compared using exact directory-snapshot matching, consistent with global skills
 - project files are written atomically via temp-file-then-rename to avoid partial reads
@@ -456,12 +463,13 @@ Reconcile lives in `src/cc_codex_bridge/reconcile.py`.
 
 - project root
 - Codex home
+- bridge home
 - project files with desired bytes (includes `CLAUDE.md` shim and project-local agent `.toml` files under `.codex/agents/`)
 - project skills (directory-snapshot comparison, installed to `.codex/skills/`)
 - generated skills (global registry, installed to `~/.codex/skills/`)
 - global agents (global registry, installed as `.toml` files to `~/.codex/agents/`)
 - global instructions content (for `~/.codex/AGENTS.md`)
-- path to the state file
+- path to the state file (under bridge home)
 
 ### Diff model
 
@@ -480,7 +488,7 @@ Supported kinds in current reporting:
 ### Reconcile flow
 
 1. load previous state if present
-2. load the current global registry (skills and agents) under the resolved Codex home
+2. load the current global registry (skills and agents) from bridge home
 3. compute desired project file changes (shim, project-local agent `.toml` files)
 4. compute desired project skill directory mutations using directory-snapshot comparison
 5. compute desired generated-skill claims and reconcile changes from registry ownership plus on-disk content hashes
@@ -490,7 +498,7 @@ Supported kinds in current reporting:
 9. write project file and skill directory changes directly
 10. write global agent files and instructions file if needed
 11. write updated global registry file (a single file tracks both skills and agents)
-12. write the project-local state file
+12. write the state file under bridge home
 13. remove stale managed outputs whose last owner released them
 
 `diff_desired_state()` additionally reports state file create/update changes that `reconcile_desired_state()` would perform, ensuring `status` and `reconcile --dry-run` show the same pending changes as a real reconcile.
@@ -617,6 +625,8 @@ Per-project LaunchAgent plists are no longer generated. The legacy `build_launch
 
 Current runtime module responsibilities:
 
+- `bridge_home.py`
+  - bridge home directory resolution (`~/.cc-codex-bridge/`, configurable via `$CC_BRIDGE_HOME`) and project-specific state path computation
 - `cli.py`
   - argument parsing, command dispatch, summary/error reporting
 - `discover.py`
