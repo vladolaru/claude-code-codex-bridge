@@ -203,6 +203,12 @@ def build_parser() -> argparse.ArgumentParser:
             default=None,
             help="Exclude one agent (`marketplace/plugin/agent.md`) from sync. Repeatable.",
         )
+        pipeline_parser.add_argument(
+            "--exclude-command",
+            action="append",
+            default=None,
+            help="Exclude one command from sync (repeatable; name, scope/name, or marketplace/plugin/name).",
+        )
     status_parser.add_argument(
         "--json",
         action="store_true",
@@ -293,6 +299,7 @@ def main(argv: list[str] | None = None) -> int:
             exclude_plugins=args.exclude_plugin or (),
             exclude_skills=args.exclude_skill or (),
             exclude_agents=args.exclude_agent or (),
+            exclude_commands=args.exclude_command or (),
         )
     except (DiscoveryError, TranslationError, ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -316,6 +323,7 @@ def main(argv: list[str] | None = None) -> int:
                     exclude_plugins=args.exclude_plugin or (),
                     exclude_skills=args.exclude_skill or (),
                     exclude_agents=args.exclude_agent or (),
+                    exclude_commands=args.exclude_command or (),
                 )
             except (DiscoveryError, TranslationError, ReconcileError, OSError, UnicodeError) as exc:
                 print(f"Error: {exc}", file=sys.stderr)
@@ -360,6 +368,7 @@ def main(argv: list[str] | None = None) -> int:
                 build.shim_decision.action,
                 build.agent_count,
                 build.skill_count,
+                build.command_count,
                 build.exclusion_report,
             )
             if skill_diags:
@@ -377,6 +386,7 @@ def main(argv: list[str] | None = None) -> int:
                 build.shim_decision.action,
                 build.agent_count,
                 build.skill_count,
+                build.command_count,
                 build.exclusion_report,
             )
             if args.diff:
@@ -690,6 +700,7 @@ def _print_summary(
     shim_action: str,
     agent_count: int,
     skill_count: int,
+    command_count: int,
     exclusion_report: ExclusionReport,
 ) -> None:
     """Print a human-readable discovery summary."""
@@ -699,6 +710,7 @@ def _print_summary(
     print(f"PLUGINS_FOUND: {len(result.plugins)}")
     print(f"GENERATED_AGENTS: {agent_count}")
     print(f"GENERATED_SKILLS: {skill_count}")
+    print(f"TRANSLATED_COMMANDS: {command_count}")
     for plugin in result.plugins:
         print(
             "PLUGIN: "
@@ -710,18 +722,22 @@ def _print_summary(
     print(f"EXCLUDED_PLUGINS: {len(exclusion_report.plugins)}")
     print(f"EXCLUDED_SKILLS: {len(exclusion_report.skills)}")
     print(f"EXCLUDED_AGENTS: {len(exclusion_report.agents)}")
+    print(f"EXCLUDED_COMMANDS: {len(exclusion_report.commands)}")
     for plugin_id in exclusion_report.plugins:
         print(f"EXCLUDED_PLUGIN: {plugin_id}")
     for skill_id in exclusion_report.skills:
         print(f"EXCLUDED_SKILL: {skill_id}")
     for agent_id in exclusion_report.agents:
         print(f"EXCLUDED_AGENT: {agent_id}")
+    for command_id in exclusion_report.commands:
+        print(f"EXCLUDED_COMMAND: {command_id}")
 
 
 def _build_status_payload(
     report,
     exclusion_report: ExclusionReport,
     *,
+    command_count: int = 0,
     diagnostics=None,
     skill_diagnostics=None,
 ) -> dict[str, object]:
@@ -766,6 +782,7 @@ def _build_status_payload(
     from cc_codex_bridge import __version__
 
     return {
+        "command_count": command_count,
         "version": __version__,
         "status": status,
         "pending_change_count": pending_change_count,
@@ -776,18 +793,20 @@ def _build_status_payload(
             "plugins": list(exclusion_report.plugins),
             "skills": list(exclusion_report.skills),
             "agents": list(exclusion_report.agents),
+            "commands": list(exclusion_report.commands),
         },
     }
 
 
 def format_status_json(
     report, exclusion_report: ExclusionReport,
-    *, diagnostics=None, skill_diagnostics=None,
+    *, command_count: int = 0, diagnostics=None, skill_diagnostics=None,
 ) -> str:
     """Render status output as deterministic JSON."""
     return json.dumps(
         _build_status_payload(
             report, exclusion_report,
+            command_count=command_count,
             diagnostics=diagnostics, skill_diagnostics=skill_diagnostics,
         ),
         indent=2,
@@ -797,11 +816,12 @@ def format_status_json(
 
 def format_status_report(
     report, exclusion_report: ExclusionReport,
-    *, diagnostics=None, skill_diagnostics=None,
+    *, command_count: int = 0, diagnostics=None, skill_diagnostics=None,
 ) -> str:
     """Render status output as human-readable text."""
     payload = _build_status_payload(
         report, exclusion_report,
+        command_count=command_count,
         diagnostics=diagnostics, skill_diagnostics=skill_diagnostics,
     )
     categorized = payload["categorized_changes"]

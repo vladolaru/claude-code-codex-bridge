@@ -1516,3 +1516,45 @@ def test_reconcile_bootstrap_reports_error_on_symlinked_agents_md(tmp_path: Path
     assert exit_code == 1
     captured = capsys.readouterr()
     assert "Error:" in captured.err
+
+
+def test_cli_exclude_command_flag(make_project, make_plugin_version, tmp_path: Path, capsys):
+    """--exclude-command filters commands from reconcile."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("portable",),
+    )
+    # Create two commands in the plugin
+    commands_dir = version_dir / "commands"
+    commands_dir.mkdir(parents=True)
+    (commands_dir / "deploy.md").write_text(
+        "---\ndescription: Deploy the project\n---\n\nDeploy steps.\n"
+    )
+    (commands_dir / "test.md").write_text(
+        "---\ndescription: Run tests\n---\n\nTest steps.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+
+    # Reconcile with one command excluded
+    exit_code = cli.main(
+        [
+            "reconcile",
+            "--project",
+            str(project_root),
+            "--cache-dir",
+            str(cache_root),
+            "--codex-home",
+            str(codex_home),
+            "--exclude-command",
+            "market/prompt-engineer/deploy.md",
+        ]
+    )
+
+    assert exit_code == 0
+    # The excluded command should not produce a skill directory
+    assert not (codex_home / "skills" / "deploy").exists()
+    # The non-excluded command should still be generated
+    assert (codex_home / "skills" / "test").exists()

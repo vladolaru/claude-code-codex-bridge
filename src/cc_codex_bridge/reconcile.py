@@ -240,6 +240,7 @@ class ProjectBuildResult:
     shim_decision: ClaudeShimDecision
     agent_count: int
     skill_count: int
+    command_count: int
     exclusion_report: object  # ExclusionReport from exclusions module
     diagnostics: tuple  # AgentTranslationDiagnostic and SkillValidationDiagnostic items
 
@@ -309,6 +310,7 @@ def build_project_desired_state(
             shim_decision=shim_decision,
             agent_count=0,
             skill_count=0,
+            command_count=0,
             exclusion_report=exclusion_report,
             diagnostics=(),
         )
@@ -333,6 +335,7 @@ def build_project_desired_state(
             shim_decision=shim_decision,
             agent_count=0,
             skill_count=0,
+            command_count=0,
             exclusion_report=exclusion_report,
             diagnostics=tuple(all_diagnostics),
         )
@@ -394,6 +397,11 @@ def build_project_desired_state(
     all_diagnostics = (*all_diagnostics, *skill_diagnostics, *command_diagnostics)
 
     total_skill_count = len(all_global_skills) + len(all_project_skills)
+    command_count = (
+        len(plugin_command_result.skills)
+        + len(user_command_result.skills)
+        + len(project_command_result.skills)
+    )
     desired_state = build_desired_state(
         result, shim_decision,
         all_global_skills, codex_home=codex_home,
@@ -408,6 +416,7 @@ def build_project_desired_state(
         shim_decision=shim_decision,
         agent_count=len(all_global_agents) + len(project_agents),
         skill_count=total_skill_count,
+        command_count=command_count,
         exclusion_report=exclusion_report,
         diagnostics=tuple(all_diagnostics),
     )
