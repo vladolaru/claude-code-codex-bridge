@@ -35,12 +35,12 @@ def test_translate_command_produces_generated_skill(make_plugin_version):
     skill = result.skills[0]
     assert skill.marketplace == "market"
     assert skill.plugin_name == "pirategoat-tools"
-    assert skill.install_dir_name == "code-review"
-    assert skill.original_skill_name == "code-review"
+    assert skill.install_dir_name == "cmd-code-review"
+    assert skill.original_skill_name == "cmd-code-review"
 
     skill_md = next(f for f in skill.files if f.relative_path == Path("SKILL.md"))
     content = skill_md.content.decode()
-    assert "name: code-review" in content
+    assert "name: cmd-code-review" in content
     assert "description: Review code incrementally" in content
     assert "Review the code." in content
 
@@ -247,7 +247,7 @@ def test_translate_standalone_commands(tmp_path: Path):
     assert len(result.skills) == 1
     assert result.skills[0].marketplace == "_user"
     assert result.skills[0].plugin_name == "personal"
-    assert result.skills[0].install_dir_name == "my-cmd"
+    assert result.skills[0].install_dir_name == "cmd-my-cmd"
 
 
 def test_translate_standalone_project_commands(tmp_path: Path):
@@ -281,3 +281,41 @@ def test_translate_command_no_plugin_root_leaves_variable(make_plugin_version):
     content = skill_md.content.decode()
     # For standalone commands, plugin_root is None, so variable stays
     assert "${CLAUDE_PLUGIN_ROOT}" in content
+
+
+def test_translate_command_skill_name_has_cmd_prefix(make_plugin_version):
+    """Command-derived skills are prefixed with cmd- to avoid namespace collisions."""
+    cache_root, version_dir = make_plugin_version(
+        "market", "tools", "1.0.0",
+    )
+    commands_dir = version_dir / "commands"
+    commands_dir.mkdir()
+    (commands_dir / "code-review.md").write_text(
+        "---\ndescription: Review code\n---\n\nReview the code.\n"
+    )
+
+    plugins = discover_latest_plugins(cache_root)
+    result = translate_installed_commands(plugins)
+    assert len(result.skills) == 1
+
+    skill = result.skills[0]
+    assert skill.install_dir_name == "cmd-code-review"
+    assert skill.original_skill_name == "cmd-code-review"
+    assert skill.codex_skill_name == "cmd-code-review"
+
+    skill_md = next(f for f in skill.files if f.relative_path == Path("SKILL.md"))
+    content = skill_md.content.decode()
+    assert "name: cmd-code-review" in content
+
+
+def test_translate_standalone_command_has_cmd_prefix(tmp_path):
+    """Standalone commands also get the cmd- prefix."""
+    commands_dir = tmp_path / "commands"
+    commands_dir.mkdir()
+    (commands_dir / "optimize.md").write_text(
+        "---\ndescription: Optimize\n---\n\nOptimize things.\n"
+    )
+
+    result = translate_standalone_commands((commands_dir / "optimize.md",), scope="user")
+    assert len(result.skills) == 1
+    assert result.skills[0].install_dir_name == "cmd-optimize"

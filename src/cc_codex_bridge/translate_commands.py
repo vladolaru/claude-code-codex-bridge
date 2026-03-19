@@ -100,8 +100,8 @@ def _translate_one_command(
         # Derive description from filename stem: "code-review" → "code review"
         description = command_path.stem.replace("-", " ").replace("_", " ")
 
-    # Derive skill name from filename stem (without .md)
-    skill_name = command_path.stem
+    # Derive skill name from filename stem (without .md), prefixed with cmd-
+    skill_name = f"cmd-{command_path.stem}"
     install_dir_name = skill_name
 
     # Apply variable replacements to the body

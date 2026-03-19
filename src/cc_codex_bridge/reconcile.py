@@ -156,7 +156,7 @@ def _normalise_command_skill_source_paths(
     source_paths to use the stem as a pseudo-directory name.
     """
     return tuple(
-        replace(skill, source_path=skill.source_path.parent / skill.source_path.stem)
+        replace(skill, source_path=skill.source_path.parent / f"cmd-{skill.source_path.stem}")
         if skill.source_path.suffix == ".md"
         else skill
         for skill in skills

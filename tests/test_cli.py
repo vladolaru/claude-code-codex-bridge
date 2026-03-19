@@ -1652,6 +1652,6 @@ def test_cli_exclude_command_flag(make_project, make_plugin_version, tmp_path: P
 
     assert exit_code == 0
     # The excluded command should not produce a skill directory
-    assert not (codex_home / "skills" / "deploy").exists()
+    assert not (codex_home / "skills" / "cmd-deploy").exists()
     # The non-excluded command should still be generated
-    assert (codex_home / "skills" / "test").exists()
+    assert (codex_home / "skills" / "cmd-test").exists()

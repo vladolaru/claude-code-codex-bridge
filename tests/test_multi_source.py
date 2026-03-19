@@ -293,10 +293,10 @@ def test_plugin_commands_appear_as_global_skills(
     assert build.desired_state is not None
 
     skill_names = [s.install_dir_name for s in build.desired_state.skills]
-    assert "review" in skill_names
+    assert "cmd-review" in skill_names
 
     # Verify $ARGUMENTS was replaced
-    review_skill = next(s for s in build.desired_state.skills if s.install_dir_name == "review")
+    review_skill = next(s for s in build.desired_state.skills if s.install_dir_name == "cmd-review")
     skill_md = next(f for f in review_skill.files if f.relative_path == Path("SKILL.md"))
     content = skill_md.content.decode()
     assert "$ARGUMENTS" not in content
@@ -321,4 +321,4 @@ def test_project_commands_appear_as_project_skills(
     assert build.desired_state is not None
 
     project_skill_names = [s.install_dir_name for s in build.desired_state.project_skills]
-    assert "build" in project_skill_names
+    assert "cmd-build" in project_skill_names
