@@ -225,3 +225,14 @@ class GeneratedSkill:
     original_skill_name: str
     codex_skill_name: str
     files: tuple[GeneratedSkillFile, ...]
+
+
+@dataclass(frozen=True)
+class VendoredPluginResource:
+    """One plugin resource directory to write under bridge home."""
+
+    marketplace: str
+    plugin_name: str
+    source_dir: Path         # e.g., /path/to/plugin/scripts
+    target_dir_name: str     # e.g., "scripts"
+    files: tuple[GeneratedSkillFile, ...]  # reuse GeneratedSkillFile for file content

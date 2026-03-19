@@ -16,6 +16,7 @@ from cc_codex_bridge.model import (
     GeneratedAgentFile,
     GeneratedSkill,
     ReconcileError,
+    VendoredPluginResource,
 )
 from cc_codex_bridge.registry import (
     GLOBAL_REGISTRY_FILENAME,
@@ -54,6 +55,7 @@ class DesiredState:
     global_instructions: bytes | None = None
     project_skills: tuple[GeneratedSkill, ...] = ()
     global_agents: tuple[GeneratedAgentFile, ...] = ()
+    plugin_resources: tuple[VendoredPluginResource, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -955,6 +957,23 @@ def _apply_changes(
             elif change.kind == "remove":
                 change.path.unlink(missing_ok=True)
                 _cleanup_empty_parents(change.path.parent, desired.project_root / ".codex")
+
+    # Write vendored plugin resources
+    for resource in desired.plugin_resources:
+        resource_dir = (
+            desired.bridge_home
+            / "plugins"
+            / f"{resource.marketplace}-{resource.plugin_name}"
+            / resource.target_dir_name
+        )
+        if resource_dir.exists():
+            shutil.rmtree(resource_dir)
+        resource_dir.mkdir(parents=True, exist_ok=True)
+        for f in resource.files:
+            file_path = resource_dir / f.relative_path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_bytes(f.content)
+            file_path.chmod(f.mode)
 
     for registry_write in plan.registry_writes:
         _atomic_write_file(
