@@ -3222,7 +3222,7 @@ def _snapshot_tree(root: Path) -> dict[str, tuple[str, str | bytes]]:
     return snapshot
 
 
-def test_status_detects_stale_vendored_resources(
+def test_hash_fast_path_skips_on_disk_comparison(
     make_plugin_version, make_project, tmp_path,
 ):
     """Hash-based fast path skips on-disk comparison when registry hash matches.
