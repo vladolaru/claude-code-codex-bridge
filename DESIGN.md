@@ -35,7 +35,7 @@ These are authoritative inputs:
 - optional project exclusion config at `.codex/bridge.toml`
 - installed Claude plugin skills discovered from the local Claude plugin cache
 - installed Claude plugin agents discovered from the local Claude plugin cache
-- plugin-local resources attached to those skills, such as `scripts/`, `references/`, `assets/`, and `agents/`
+- plugin-local resources attached to those skills, including `scripts/`, `references/`, `assets/`, and any additional directories
 - user-level Claude skills from `~/.claude/skills/`
 - user-level Claude agents from `~/.claude/agents/`
 - project-level Claude skills from `.claude/skills/`

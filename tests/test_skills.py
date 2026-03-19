@@ -60,6 +60,71 @@ def test_generated_skills_copy_bundled_resources(make_plugin_version, tmp_path: 
     assert (installed_root / "scripts" / "check.sh").stat().st_mode & 0o777 == 0o755
 
 
+def test_generated_skills_copy_nonstandard_directories(make_plugin_version, tmp_path: Path):
+    """Non-standard directories (beyond scripts/references/assets) are copied."""
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "arch-plugin",
+        "1.0.0",
+        skill_names=("software-architecture",),
+    )
+    skill_dir = version_dir / "skills" / "software-architecture"
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: software-architecture\n"
+        "description: Architecture patterns\n"
+        "---\n\n"
+        "Read `patterns/behavioral/strategy.md` for details.\n"
+    )
+    # Non-standard directory: patterns/ with subdirectories
+    patterns_dir = skill_dir / "patterns" / "behavioral"
+    patterns_dir.mkdir(parents=True)
+    (patterns_dir / "strategy.md").write_text("Strategy pattern.\n")
+    (skill_dir / "patterns" / "creational").mkdir()
+    (skill_dir / "patterns" / "creational" / "factory.md").write_text("Factory pattern.\n")
+
+    skills = translate_installed_skills(discover_latest_plugins(cache_root)).skills
+    codex_home = tmp_path / "codex-home"
+    for skill in skills:
+        _write_skill_directory(codex_home / "skills" / skill.install_dir_name, skill)
+
+    installed_root = codex_home / "skills" / "software-architecture"
+    assert (installed_root / "patterns" / "behavioral" / "strategy.md").read_text() == "Strategy pattern.\n"
+    assert (installed_root / "patterns" / "creational" / "factory.md").read_text() == "Factory pattern.\n"
+
+
+def test_generated_skills_skip_ignored_directories(make_plugin_version, tmp_path: Path):
+    """Known noise directories (.git, node_modules, etc.) are not copied."""
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "tools",
+        "1.0.0",
+        skill_names=("my-tool",),
+    )
+    skill_dir = version_dir / "skills" / "my-tool"
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: my-tool\ndescription: A tool\n---\n\nBody.\n"
+    )
+    # Create directories that should be ignored
+    (skill_dir / "node_modules" / "dep").mkdir(parents=True)
+    (skill_dir / "node_modules" / "dep" / "index.js").write_text("module.exports = {}\n")
+    (skill_dir / ".git" / "objects").mkdir(parents=True)
+    (skill_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    # And a valid directory that should be copied
+    (skill_dir / "examples").mkdir()
+    (skill_dir / "examples" / "demo.md").write_text("Demo.\n")
+
+    skills = translate_installed_skills(discover_latest_plugins(cache_root)).skills
+    codex_home = tmp_path / "codex-home"
+    for skill in skills:
+        _write_skill_directory(codex_home / "skills" / skill.install_dir_name, skill)
+
+    installed_root = codex_home / "skills" / "my-tool"
+    assert (installed_root / "examples" / "demo.md").read_text() == "Demo.\n"
+    assert not (installed_root / "node_modules").exists()
+    assert not (installed_root / ".git").exists()
+
+
 def test_translate_installed_skills_resolves_sibling_directory_references(
     make_plugin_version,
     tmp_path: Path,
@@ -172,7 +237,7 @@ def test_translate_installed_skills_rejects_colliding_sibling_reference(
         skill_names=("my-skill",),
     )
     skill_dir = version_dir / "skills" / "my-skill"
-    # Create a references/ dir inside the skill (one of OPTIONAL_SKILL_DIRS)
+    # Create a references/ dir inside the skill
     (skill_dir / "references").mkdir(parents=True)
     (skill_dir / "references" / "guide.md").write_text("Guide.\n")
 

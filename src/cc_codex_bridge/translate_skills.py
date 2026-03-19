@@ -37,7 +37,7 @@ def _format_skill_validation_diagnostic(diagnostic: SkillValidationDiagnostic) -
 
 SIBLING_SKILL_REF_RE = re.compile(r"(?<!\.)\.\./(?P<skill>[A-Za-z0-9._-]+)/")
 IGNORED_NAMES = {".DS_Store", "__pycache__"}
-OPTIONAL_SKILL_DIRS = {"scripts", "references", "assets", "agents"}
+IGNORED_SKILL_DIRS = {".git", "node_modules", "__pycache__", ".venv", ".tox"}
 
 MAX_SKILL_NAME_LENGTH = 64
 
@@ -336,7 +336,8 @@ def _resolve_relative_references(
     rewritten = content
     existing_dirs = {
         entry.name for entry in skill_dir.iterdir()
-        if entry.is_dir() and entry.name in OPTIONAL_SKILL_DIRS
+        if entry.is_dir() and not _should_ignore(entry)
+        and entry.name not in IGNORED_SKILL_DIRS
     }
 
     for ref_name in sorted(matches):
@@ -416,7 +417,12 @@ def _copy_skill_tree(
     target_prefix: Path,
     generated_files: dict[Path, tuple[bytes, int]],
 ) -> None:
-    """Copy only the official skill-layout files from a skill root."""
+    """Copy skill files and all non-ignored directories from a skill root.
+
+    The Agent Skills Standard allows arbitrary directories alongside the
+    standard ``scripts/``, ``references/``, and ``assets/`` directories.
+    We copy everything except known noise (see ``IGNORED_SKILL_DIRS``).
+    """
     for entry in sorted(source_root.iterdir()):
         if _should_ignore(entry):
             continue
@@ -432,7 +438,7 @@ def _copy_skill_tree(
             )
             continue
 
-        if entry.is_dir() and entry.name in OPTIONAL_SKILL_DIRS:
+        if entry.is_dir() and entry.name not in IGNORED_SKILL_DIRS:
             if entry.is_symlink():
                 raise TranslationError(
                     f"Refusing to follow symlinked resource directory: {entry}"
