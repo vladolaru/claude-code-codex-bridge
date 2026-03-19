@@ -13,7 +13,7 @@ from cc_codex_bridge.text import read_utf8_text
 
 
 GLOBAL_REGISTRY_VERSION = 1
-GLOBAL_REGISTRY_FILENAME = "claude-code-bridge-global-state.json"
+GLOBAL_REGISTRY_FILENAME = "registry.json"
 
 
 @dataclass(frozen=True)

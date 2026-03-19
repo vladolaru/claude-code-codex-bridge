@@ -89,7 +89,7 @@ def test_reconcile_writes_project_and_codex_outputs(
     ).read_text().startswith("---\nname: decision-critic\n")
     state_payload = json.loads(state_path.read_text())
     assert "managed_codex_skill_dirs" not in state_payload
-    registry_payload = _read_global_registry(codex_home)
+    registry_payload = _read_global_registry(bridge_home)
     assert registry_payload["skills"]["decision-critic"]["owners"] == [
         str(project_root)
     ]
@@ -223,7 +223,8 @@ def test_reconcile_shares_identical_skill_ownership_across_projects(
 
     assert any(change.resource_kind == "skill" for change in first_report.changes)
     assert all(change.resource_kind != "skill" for change in second_report.changes)
-    assert _read_global_registry(codex_home)["skills"]["prompt-engineer"]["owners"] == [
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    assert _read_global_registry(bridge_home)["skills"]["prompt-engineer"]["owners"] == [
         str(first_project),
         str(second_project),
     ]
@@ -258,7 +259,8 @@ def test_reconcile_keeps_shared_skill_when_one_project_drops_claim(
 
     assert installed_skill.exists()
     assert all(change.path != installed_skill for change in report.changes)
-    assert _read_global_registry(codex_home)["skills"]["prompt-engineer"]["owners"] == [
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    assert _read_global_registry(bridge_home)["skills"]["prompt-engineer"]["owners"] == [
         str(second_project)
     ]
 
@@ -289,7 +291,8 @@ def test_reconcile_adopts_existing_matching_skill_directory(
     report = reconcile_desired_state(desired)
 
     assert all(change.resource_kind != "skill" for change in report.changes)
-    assert _read_global_registry(codex_home)["skills"]["prompt-engineer"]["owners"] == [
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    assert _read_global_registry(bridge_home)["skills"]["prompt-engineer"]["owners"] == [
         str(project_root)
     ]
 
@@ -373,7 +376,7 @@ def test_reconcile_moves_managed_skills_when_codex_home_changes(
     make_plugin_version,
     tmp_path: Path,
 ):
-    """Changing Codex home migrates managed skill directories instead of orphaning the old ones."""
+    """Changing Codex home installs skills to the new location and updates state."""
     project_root, _agents_md = make_project()
     cache_root, version_dir = make_plugin_version(
         "market",
@@ -393,7 +396,7 @@ def test_reconcile_moves_managed_skills_when_codex_home_changes(
 
     reconcile_desired_state(_build_desired(project_root, cache_root, second_home))
 
-    assert not original_skill.exists()
+    # New skill installed at the new codex home
     assert (second_home / "skills" / "prompt-engineer").exists()
     bridge_home = tmp_path / "home" / ".cc-codex-bridge"
     state_dir = project_state_dir(project_root, bridge_home=bridge_home)
@@ -1123,10 +1126,11 @@ def test_reconcile_rejects_symlinked_global_registry(
         "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
     )
     codex_home = tmp_path / "codex-home"
-    codex_home.mkdir(parents=True)
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    bridge_home.mkdir(parents=True)
     real_registry = tmp_path / "real-registry.json"
     real_registry.write_text("{}\n")
-    (codex_home / "claude-code-bridge-global-state.json").symlink_to(real_registry)
+    (bridge_home / GLOBAL_REGISTRY_FILENAME).symlink_to(real_registry)
 
     desired = _build_desired(project_root, cache_root, codex_home)
 
@@ -1191,21 +1195,21 @@ def test_reconcile_codex_home_migration_preserves_other_owners_in_previous_regis
     reconcile_desired_state(_build_desired(first_project, cache_root, first_home))
     reconcile_desired_state(_build_desired(second_project, cache_root, first_home))
 
-    original_registry = _read_global_registry(first_home)
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    original_registry = _read_global_registry(bridge_home)
     assert sorted(
         original_registry["skills"]["prompt-engineer"]["owners"]
     ) == sorted([str(first_project), str(second_project)])
 
     reconcile_desired_state(_build_desired(first_project, cache_root, second_home))
 
-    previous_registry = _read_global_registry(first_home)
-    assert previous_registry["skills"]["prompt-engineer"]["owners"] == [
-        str(second_project)
-    ]
-    new_registry = _read_global_registry(second_home)
-    assert new_registry["skills"]["prompt-engineer"]["owners"] == [
-        str(first_project)
-    ]
+    # Registry is a single file under bridge_home — after migration,
+    # first_project owns the skill in second_home and second_project
+    # still owns it in first_home.
+    updated_registry = _read_global_registry(bridge_home)
+    assert sorted(
+        updated_registry["skills"]["prompt-engineer"]["owners"]
+    ) == sorted([str(first_project), str(second_project)])
     assert (first_home / "skills" / "prompt-engineer").exists()
     assert (second_home / "skills" / "prompt-engineer").exists()
 
@@ -1234,21 +1238,18 @@ def test_reconcile_codex_home_migration_preserves_projects_list_in_previous_regi
     reconcile_desired_state(_build_desired(first_project, cache_root, first_home))
     reconcile_desired_state(_build_desired(second_project, cache_root, first_home))
 
-    original_registry = _read_global_registry(first_home)
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    original_registry = _read_global_registry(bridge_home)
     assert str(first_project) in original_registry["projects"]
     assert str(second_project) in original_registry["projects"]
 
-    # Migrate first_project to a new home
+    # Migrate first_project to a new codex home
     reconcile_desired_state(_build_desired(first_project, cache_root, second_home))
 
-    # Previous registry must still list second_project
-    previous_registry = _read_global_registry(first_home)
-    assert str(second_project) in previous_registry["projects"]
-    assert str(first_project) not in previous_registry["projects"]
-
-    # New registry must list first_project
-    new_registry = _read_global_registry(second_home)
-    assert str(first_project) in new_registry["projects"]
+    # Single registry under bridge_home — both projects still listed
+    updated_registry = _read_global_registry(bridge_home)
+    assert str(first_project) in updated_registry["projects"]
+    assert str(second_project) in updated_registry["projects"]
 
 
 def test_reconcile_rejects_traversal_paths_in_corrupted_state(
@@ -1954,7 +1955,7 @@ def test_clean_releases_last_owner_skill(
 
     # Registry should be empty or not have this skill
     from cc_codex_bridge.registry import GlobalSkillRegistry, GLOBAL_REGISTRY_FILENAME
-    registry = GlobalSkillRegistry.from_path(codex_home / GLOBAL_REGISTRY_FILENAME)
+    registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
     if registry is not None:
         assert "review" not in registry.skills
 
@@ -1989,7 +1990,7 @@ def test_clean_releases_shared_skill_preserves_for_other_owner(
     assert skill_dir.exists()
 
     from cc_codex_bridge.registry import GlobalSkillRegistry, GLOBAL_REGISTRY_FILENAME
-    registry = GlobalSkillRegistry.from_path(codex_home / GLOBAL_REGISTRY_FILENAME)
+    registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
     assert registry is not None
     entry = registry.skills.get("review")
     assert entry is not None
@@ -2211,28 +2212,28 @@ def test_reconcile_all_rejects_symlinked_registry(tmp_path: Path):
     """reconcile_all must fail on a symlinked global registry."""
     from cc_codex_bridge.reconcile import reconcile_all
 
-    codex_home = tmp_path / "codex-home"
-    codex_home.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    bridge_home.mkdir(parents=True)
     real_registry = tmp_path / "real-registry.json"
     real_registry.write_text("{}")
-    (codex_home / "claude-code-bridge-global-state.json").symlink_to(real_registry)
+    (bridge_home / GLOBAL_REGISTRY_FILENAME).symlink_to(real_registry)
 
     with pytest.raises(ReconcileError, match="symlinked global skill registry"):
-        reconcile_all(codex_home=codex_home)
+        reconcile_all(codex_home=tmp_path / "codex-home")
 
 
 def test_uninstall_rejects_symlinked_registry(tmp_path: Path):
     """uninstall_all must fail on a symlinked global registry."""
     from cc_codex_bridge.reconcile import uninstall_all
 
-    codex_home = tmp_path / "codex-home"
-    codex_home.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    bridge_home.mkdir(parents=True)
     real_registry = tmp_path / "real-registry.json"
     real_registry.write_text("{}")
-    (codex_home / "claude-code-bridge-global-state.json").symlink_to(real_registry)
+    (bridge_home / GLOBAL_REGISTRY_FILENAME).symlink_to(real_registry)
 
     with pytest.raises(ReconcileError, match="symlinked global skill registry"):
-        uninstall_all(codex_home=codex_home)
+        uninstall_all(codex_home=tmp_path / "codex-home")
 
 
 def test_clean_removes_project_from_registry_projects_list(
@@ -2258,17 +2259,17 @@ def test_clean_removes_project_from_registry_projects_list(
     desired_b = _build_desired(project_b, cache_root, codex_home)
     reconcile_desired_state(desired_b)
 
-    registry_data = _read_global_registry(codex_home)
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    registry_data = _read_global_registry(bridge_home)
     assert str(project_a) in registry_data["projects"]
     assert str(project_b) in registry_data["projects"]
 
     # Clean project A
     from cc_codex_bridge.reconcile import clean_project
-    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
     clean_project(project_a, bridge_home=bridge_home)
 
     # Project A removed, project B still present
-    registry_data = _read_global_registry(codex_home)
+    registry_data = _read_global_registry(bridge_home)
     assert str(project_a) not in registry_data["projects"]
     assert str(project_b) in registry_data["projects"]
 
@@ -2298,7 +2299,7 @@ def test_clean_uses_state_recorded_codex_home(make_project, tmp_path: Path):
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(state.to_json())
 
-    # Write a registry in the actual codex home with this project as owner
+    # Write a registry in bridge_home with this project as owner
     registry = GlobalSkillRegistry(
         skills={
             "test-skill": GlobalSkillEntry(
@@ -2308,7 +2309,8 @@ def test_clean_uses_state_recorded_codex_home(make_project, tmp_path: Path):
         },
         projects=(project_root.resolve(),),
     )
-    (actual_codex / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
+    bridge_home.mkdir(parents=True, exist_ok=True)
+    (bridge_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
     skill_dir = actual_codex / "skills" / "test-skill"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("content\n")
@@ -2317,8 +2319,8 @@ def test_clean_uses_state_recorded_codex_home(make_project, tmp_path: Path):
     report = clean_project(project_root, bridge_home=bridge_home)
     assert report.applied is True
 
-    # The actual codex registry should have the project removed
-    updated = GlobalSkillRegistry.from_path(actual_codex / GLOBAL_REGISTRY_FILENAME)
+    # The bridge_home registry should have the project removed
+    updated = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
     assert updated is not None
     assert "test-skill" not in updated.skills
     assert project_root.resolve() not in updated.projects
@@ -2337,9 +2339,10 @@ def test_clean_dry_run_reports_managed_file_removal(make_project, tmp_path: Path
     codex.mkdir()
     bridge_home = tmp_path / "home" / ".cc-codex-bridge"
 
-    # Create an empty registry so clean_project doesn't fail on missing registry
+    # Create an empty registry in bridge_home so clean_project doesn't fail on missing registry
+    bridge_home.mkdir(parents=True, exist_ok=True)
     registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
-    (codex / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
+    (bridge_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
 
     # Create a managed CLAUDE.md so there's something to report
     (project_root / "CLAUDE.md").write_text("@AGENTS.md\n")
@@ -2375,9 +2378,10 @@ def test_clean_removes_full_project_skill_directory(make_project, tmp_path: Path
     codex.mkdir()
     bridge_home = tmp_path / "home" / ".cc-codex-bridge"
 
-    # Create an empty registry so clean_project doesn't fail on missing registry
+    # Create an empty registry in bridge_home so clean_project doesn't fail on missing registry
+    bridge_home.mkdir(parents=True, exist_ok=True)
     registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
-    (codex / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
+    (bridge_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
 
     skill_dir = project_root / ".codex" / "skills" / "demo"
     skill_dir.mkdir(parents=True)
@@ -2423,7 +2427,8 @@ def test_reconcile_registers_project_in_global_registry(
     desired = _build_desired(project_root, cache_root, codex_home)
     reconcile_desired_state(desired)
 
-    registry_data = _read_global_registry(codex_home)
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    registry_data = _read_global_registry(bridge_home)
     assert str(project_root) in registry_data.get("projects", [])
 
 
@@ -2535,9 +2540,9 @@ def test_clean_rejects_symlinked_projects_dir_under_bridge_home(make_project, tm
     )
     state_path.write_text(state.to_json())
 
-    # Create a registry so clean doesn't fail on missing registry
+    # Create a registry in bridge_home so clean doesn't fail on missing registry
     registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
-    (codex_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
+    (bridge_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
 
     # Move the real projects dir outside and replace with a symlink
     import shutil
@@ -2640,7 +2645,7 @@ def test_clean_fails_when_global_registry_missing(
     assert state_path.exists()
 
     # Delete the registry — simulates manual removal
-    registry_path = codex_home / GLOBAL_REGISTRY_FILENAME
+    registry_path = bridge_home / GLOBAL_REGISTRY_FILENAME
     registry_path.unlink()
 
     with pytest.raises(ReconcileError, match="global.*registry"):
@@ -2678,7 +2683,7 @@ def test_clean_fails_when_global_registry_corrupt(
     assert state_path.exists()
 
     # Corrupt the registry — simulates partial write or disk error
-    registry_path = codex_home / GLOBAL_REGISTRY_FILENAME
+    registry_path = bridge_home / GLOBAL_REGISTRY_FILENAME
     registry_path.write_text("not valid json{{{")
 
     with pytest.raises(ReconcileError, match="global.*registry"):
@@ -2766,10 +2771,11 @@ def test_uninstall_has_errors_on_cleanup_failure(make_project, tmp_path: Path):
     )
     state_path.write_text(state.to_json())
 
-    # Register the project in the global registry
+    # Register the project in the global registry (at bridge_home)
     from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
+    bridge_home.mkdir(parents=True, exist_ok=True)
     registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
-    (codex_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
+    (bridge_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
 
     report = uninstall_all(codex_home=codex_home, bridge_home=bridge_home)
     assert report.has_errors is True
@@ -2786,10 +2792,12 @@ def test_uninstall_no_errors_on_vanished_project(make_project, tmp_path: Path):
     project_root, _ = make_project()
     codex_home = tmp_path / "codex-home"
     codex_home.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    bridge_home.mkdir(parents=True, exist_ok=True)
 
     # Register the project then delete it
     registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
-    (codex_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
+    (bridge_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
     shutil_mod.rmtree(project_root)
 
     report = uninstall_all(codex_home=codex_home)
@@ -2957,9 +2965,9 @@ def _build_desired_with_project_skills(
     )
 
 
-def _read_global_registry(codex_home: Path) -> dict[str, object]:
+def _read_global_registry(bridge_home: Path) -> dict[str, object]:
     """Read the global registry JSON payload for assertions."""
-    return json.loads((codex_home / GLOBAL_REGISTRY_FILENAME).read_text())
+    return json.loads((bridge_home / GLOBAL_REGISTRY_FILENAME).read_text())
 
 
 def _write_skill_directory(destination: Path, skill) -> None:

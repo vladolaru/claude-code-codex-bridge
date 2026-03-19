@@ -543,7 +543,7 @@ def clean_project(
             changes.append(Change("remove", path))
 
     # Release skill ownership claims from the global registry
-    registry_path = codex_home_path / GLOBAL_REGISTRY_FILENAME
+    registry_path = bridge_home_path / GLOBAL_REGISTRY_FILENAME
     if registry_path.is_symlink():
         raise ReconcileError(
             f"Refusing to use symlinked global skill registry file: {registry_path}"
@@ -646,7 +646,7 @@ def clean_project(
         _atomic_write_file(
             registry_path,
             updated_registry.to_json().encode(),
-            container=codex_home_path,
+            container=bridge_home_path,
         )
 
     # Remove the state file last, then clean up its parent if empty
@@ -691,7 +691,8 @@ def reconcile_all(
     from cc_codex_bridge.translate_agents import format_agent_translation_diagnostics
 
     codex_home_path = Path(codex_home or DEFAULT_CODEX_HOME).expanduser().resolve()
-    registry_path = codex_home_path / GLOBAL_REGISTRY_FILENAME
+    bridge_home_path = Path(bridge_home or resolve_bridge_home()).expanduser().resolve()
+    registry_path = bridge_home_path / GLOBAL_REGISTRY_FILENAME
 
     snapshot = _load_registry_snapshot(registry_path)
     project_roots = list(snapshot.registry.projects) if snapshot.existed else []
@@ -773,7 +774,7 @@ def uninstall_all(
 
     codex_home_path = Path(codex_home or DEFAULT_CODEX_HOME).expanduser().resolve()
     bridge_home_path = Path(bridge_home or resolve_bridge_home()).expanduser().resolve()
-    registry_path = codex_home_path / GLOBAL_REGISTRY_FILENAME
+    registry_path = bridge_home_path / GLOBAL_REGISTRY_FILENAME
 
     # Step 1: Discover project roots from the registry
     project_roots: set[Path] = set()
@@ -1098,11 +1099,11 @@ def _plan_mutations(
     project_skill_changes = _plan_project_skill_mutations(desired, previous_state)
 
     # Load registry snapshots once and share between skill and agent planners.
-    current_snapshot = _load_registry_snapshot(desired.codex_home / GLOBAL_REGISTRY_FILENAME)
+    current_snapshot = _load_registry_snapshot(desired.bridge_home / GLOBAL_REGISTRY_FILENAME)
     previous_snapshot = current_snapshot
-    if previous_state is not None and previous_state.codex_home != desired.codex_home:
+    if previous_state is not None and previous_state.bridge_home != desired.bridge_home:
         previous_snapshot = _load_registry_snapshot(
-            previous_state.codex_home / GLOBAL_REGISTRY_FILENAME
+            previous_state.bridge_home / GLOBAL_REGISTRY_FILENAME
         )
 
     skill_changes, updated_current, updated_previous = _plan_skill_mutations(

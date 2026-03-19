@@ -1050,7 +1050,8 @@ def test_uninstall_command_succeeds(make_project, make_plugin_version, tmp_path:
     # Global artifacts gone
     assert not (codex_home / "skills" / "review").exists()
     from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
-    assert not (codex_home / GLOBAL_REGISTRY_FILENAME).exists()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    assert not (bridge_home / GLOBAL_REGISTRY_FILENAME).exists()
 
 
 def test_uninstall_skips_missing_project(make_project, make_plugin_version, tmp_path: Path):
@@ -1109,7 +1110,8 @@ def test_uninstall_exits_nonzero_on_cleanup_error(make_project, tmp_path: Path, 
 
     # Register the project
     registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
-    (codex_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
+    bridge_home.mkdir(parents=True, exist_ok=True)
+    (bridge_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
 
     exit_code = cli.main([
         "uninstall",

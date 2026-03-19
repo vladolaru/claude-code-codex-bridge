@@ -109,7 +109,7 @@ def test_bridge_state_round_trips_with_project_skill_dirs(tmp_path):
 
 def test_global_skill_registry_round_trips(tmp_path: Path):
     """A valid global registry serializes and deserializes deterministically."""
-    path = tmp_path / "claude-code-bridge-global-state.json"
+    path = tmp_path / "registry.json"
     registry = GlobalSkillRegistry(
         skills={
             "prompt-engineer-prompt-engineer": GlobalSkillEntry(

@@ -944,7 +944,8 @@ def test_uninstall_cleans_entire_machine(make_project, tmp_path: Path):
     assert not (codex_home / "skills" / "url-shorthand").exists()
     assert not (codex_home / "AGENTS.md").exists()
     from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
-    assert not (codex_home / GLOBAL_REGISTRY_FILENAME).exists()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    assert not (bridge_home / GLOBAL_REGISTRY_FILENAME).exists()
 
     # LaunchAgent plist removed
     assert not (la_dir / "com.openai.codex-bridge.project-a.abc123.plist").exists()
@@ -1042,7 +1043,8 @@ def test_uninstall_skips_vanished_project_cleans_rest(make_project, tmp_path: Pa
 
     # Global registry removed
     from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
-    assert not (codex_home / GLOBAL_REGISTRY_FILENAME).exists()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    assert not (bridge_home / GLOBAL_REGISTRY_FILENAME).exists()
 
 
 # ===========================================================================
@@ -1068,7 +1070,8 @@ def test_reconcile_all_reconciles_registered_projects(make_project, tmp_path: Pa
     # Verify both in registry
     import json as json_mod
     from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
-    reg = json_mod.loads((codex_home / GLOBAL_REGISTRY_FILENAME).read_text())
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    reg = json_mod.loads((bridge_home / GLOBAL_REGISTRY_FILENAME).read_text())
     assert str(project_a) in reg["projects"]
     assert str(project_b) in reg["projects"]
 
