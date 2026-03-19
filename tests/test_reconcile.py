@@ -612,8 +612,8 @@ def test_reconcile_keeps_user_level_claude_tree_untouched(
         content = render_agent_toml(agent.agent_name, agent.description, agent.developer_instructions, sandbox_mode=agent.sandbox_mode)
         project_agent_files.append((relpath, content.encode()))
 
-    plugin_skills = translate_installed_skills(discovery.plugins)
-    user_skills = translate_standalone_skills(discovery.user_skills, scope="user")
+    plugin_skills = translate_installed_skills(discovery.plugins).skills
+    user_skills = translate_standalone_skills(discovery.user_skills, scope="user").skills
     skills = assign_skill_names((*plugin_skills, *user_skills))
     desired = build_desired_state(
         discovery,
@@ -2765,8 +2765,8 @@ def _reconcile_once(project_root, cache_root, codex_home):
         content = render_agent_toml(agent.agent_name, agent.description, agent.developer_instructions, sandbox_mode=agent.sandbox_mode)
         project_agent_files.append((relpath, content.encode()))
 
-    plugin_skills = translate_installed_skills(result.plugins)
-    user_skills = translate_standalone_skills(result.user_skills, scope="user")
+    plugin_skills = translate_installed_skills(result.plugins).skills
+    user_skills = translate_standalone_skills(result.user_skills, scope="user").skills
     skills = assign_skill_names((*plugin_skills, *user_skills))
     return build_desired_state(
         result, shim_decision, skills,
@@ -2806,8 +2806,8 @@ def _build_desired(
         content = render_agent_toml(agent.agent_name, agent.description, agent.developer_instructions, sandbox_mode=agent.sandbox_mode)
         project_agent_files.append((relpath, content.encode()))
 
-    plugin_skills = translate_installed_skills(discovery.plugins)
-    user_skills = translate_standalone_skills(discovery.user_skills, scope="user")
+    plugin_skills = translate_installed_skills(discovery.plugins).skills
+    user_skills = translate_standalone_skills(discovery.user_skills, scope="user").skills
     skills = assign_skill_names((*plugin_skills, *user_skills))
     return build_desired_state(
         discovery,
@@ -2849,11 +2849,11 @@ def _build_desired_with_project_skills(
         content = render_agent_toml(agent.agent_name, agent.description, agent.developer_instructions, sandbox_mode=agent.sandbox_mode)
         project_agent_files.append((relpath, content.encode()))
 
-    plugin_skills = translate_installed_skills(discovery.plugins)
-    user_skills = translate_standalone_skills(discovery.user_skills, scope="user")
+    plugin_skills = translate_installed_skills(discovery.plugins).skills
+    user_skills = translate_standalone_skills(discovery.user_skills, scope="user").skills
     skills = assign_skill_names((*plugin_skills, *user_skills))
 
-    project_skills = translate_standalone_skills(discovery.project_skills, scope="project")
+    project_skills = translate_standalone_skills(discovery.project_skills, scope="project").skills
 
     return build_desired_state(
         discovery,

@@ -74,6 +74,24 @@ def parse_markdown_with_frontmatter(path: Path) -> tuple[dict[str, object], str]
     return frontmatter, body
 
 
+def parse_frontmatter_from_content(content: str) -> dict[str, object]:
+    """Parse frontmatter from in-memory content (no file I/O)."""
+    if not content.startswith("---\n"):
+        return {}
+
+    lines = content.splitlines()
+    end_index = None
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            end_index = index
+            break
+
+    if end_index is None:
+        raise TranslationError("Unclosed frontmatter block")
+
+    return parse_frontmatter_lines(lines[1:end_index])
+
+
 def parse_frontmatter_lines(lines: list[str]) -> dict[str, object]:
     """Parse frontmatter lines with safe YAML and normalize accepted shapes."""
     frontmatter_text = "\n".join(lines)

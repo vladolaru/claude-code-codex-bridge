@@ -43,7 +43,7 @@ def test_generated_skills_copy_bundled_resources(make_plugin_version, tmp_path: 
     check_script.write_text("#!/bin/sh\necho ok\n")
     check_script.chmod(0o755)
 
-    skills = translate_installed_skills(discover_latest_plugins(cache_root))
+    skills = translate_installed_skills(discover_latest_plugins(cache_root)).skills
     codex_home = tmp_path / "codex-home"
     installed_paths = tuple(
         _write_skill_directory(codex_home / "skills" / skill.install_dir_name, skill)
@@ -86,7 +86,7 @@ def test_translate_installed_skills_resolves_sibling_directory_references(
         'python3 "../shared-scripts/decision-critic.py"\n'
     )
 
-    skills = translate_installed_skills(discover_latest_plugins(cache_root))
+    skills = translate_installed_skills(discover_latest_plugins(cache_root)).skills
     for skill in skills:
         _write_skill_directory(tmp_path / "codex-home" / "skills" / skill.install_dir_name, skill)
 
@@ -128,7 +128,7 @@ def test_translate_installed_skills_vendors_referenced_sibling_skills(
     sibling_references.mkdir()
     (sibling_references / "test-philosophy.md").write_text("Behavior over implementation.\n")
 
-    skills = translate_installed_skills(discover_latest_plugins(cache_root))
+    skills = translate_installed_skills(discover_latest_plugins(cache_root)).skills
     for skill in skills:
         _write_skill_directory(tmp_path / "codex-home" / "skills" / skill.install_dir_name, skill)
 
@@ -216,7 +216,7 @@ def test_translate_installed_skills_handles_name_and_directory_collisions(make_p
             "Review instructions.\n"
         )
 
-    skills = translate_installed_skills(discover_latest_plugins(cache_root))
+    skills = translate_installed_skills(discover_latest_plugins(cache_root)).skills
 
     # Both plugins produce the same provisional bare name.
     # Collision resolution is handled by assign_skill_names() in a later step.
@@ -352,10 +352,10 @@ def test_translate_user_skill(tmp_path: Path):
 
     result = translate_standalone_skills((skill_dir,), scope="user")
 
-    assert len(result) == 1
-    assert result[0].install_dir_name == "my-tool"
-    assert result[0].codex_skill_name == "my-tool"
-    skill_md = next(f for f in result[0].files if f.relative_path == Path("SKILL.md"))
+    assert len(result.skills) == 1
+    assert result.skills[0].install_dir_name == "my-tool"
+    assert result.skills[0].codex_skill_name == "my-tool"
+    skill_md = next(f for f in result.skills[0].files if f.relative_path == Path("SKILL.md"))
     assert b"name: my-tool" in skill_md.content
 
 
@@ -369,10 +369,10 @@ def test_translate_project_skill(tmp_path: Path):
 
     result = translate_standalone_skills((skill_dir,), scope="project")
 
-    assert len(result) == 1
-    assert result[0].install_dir_name == "run-tests"
-    assert result[0].codex_skill_name == "run-tests"
-    skill_md = next(f for f in result[0].files if f.relative_path == Path("SKILL.md"))
+    assert len(result.skills) == 1
+    assert result.skills[0].install_dir_name == "run-tests"
+    assert result.skills[0].codex_skill_name == "run-tests"
+    skill_md = next(f for f in result.skills[0].files if f.relative_path == Path("SKILL.md"))
     assert b"name: run-tests" in skill_md.content
 
 
@@ -390,10 +390,10 @@ def test_translate_standalone_skill_with_sibling_reference(tmp_path: Path):
 
     result = translate_standalone_skills((skill_dir,), scope="user")
 
-    assert len(result) == 1
-    skill_md = next(f for f in result[0].files if f.relative_path == Path("SKILL.md"))
+    assert len(result.skills) == 1
+    skill_md = next(f for f in result.skills[0].files if f.relative_path == Path("SKILL.md"))
     assert b"shared/guide.md" in skill_md.content
-    guide = next(f for f in result[0].files if f.relative_path == Path("shared") / "guide.md")
+    guide = next(f for f in result.skills[0].files if f.relative_path == Path("shared") / "guide.md")
     assert guide.content == b"Guide content.\n"
 
 
@@ -574,7 +574,7 @@ def test_sibling_reference_regex_ignores_triple_dot_paths(
         "# PLUGIN_ROOT is ~/.claude/plugins/cache/.../pirategoat-tools/1.43.3\n"
     )
 
-    skills = translate_installed_skills(discover_latest_plugins(cache_root))
+    skills = translate_installed_skills(discover_latest_plugins(cache_root)).skills
 
     assert len(skills) == 1
     assert skills[0].install_dir_name == "analyzing-sessions"
@@ -605,7 +605,7 @@ def test_sibling_reference_regex_still_matches_real_siblings(
     )
     (shared_dir / "data.md").write_text("Shared data.\n")
 
-    skills = translate_installed_skills(discover_latest_plugins(cache_root))
+    skills = translate_installed_skills(discover_latest_plugins(cache_root)).skills
 
     child = next(s for s in skills if "child-skill" in s.install_dir_name)
     file_paths = [f.relative_path.as_posix() for f in child.files]
@@ -618,7 +618,66 @@ def test_sibling_reference_regex_still_matches_real_siblings(
 def test_translate_standalone_skill_empty_input():
     """Empty skill paths produce empty result."""
     result = translate_standalone_skills((), scope="user")
-    assert result == ()
+    assert result.skills == ()
+    assert result.diagnostics == ()
+
+
+# -- skill validation diagnostic tests --
+
+
+def test_skill_translation_produces_no_warnings_for_valid_skill(make_plugin_version):
+    """Valid skills produce no diagnostics."""
+    cache_root, version_dir = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("my-tool",),
+    )
+    (version_dir / "skills" / "my-tool" / "SKILL.md").write_text(
+        "---\nname: my-tool\ndescription: A useful tool\n---\n\nBody.\n"
+    )
+    result = translate_installed_skills(discover_latest_plugins(cache_root))
+    assert len(result.skills) == 1
+    assert result.diagnostics == ()
+
+
+def test_skill_translation_warns_on_missing_description(make_plugin_version):
+    """Missing description is a source-quality warning, not a hard error."""
+    cache_root, version_dir = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("bad-skill",),
+    )
+    (version_dir / "skills" / "bad-skill" / "SKILL.md").write_text(
+        "---\nname: bad-skill\n---\n\nBody.\n"
+    )
+    result = translate_installed_skills(discover_latest_plugins(cache_root))
+    assert len(result.skills) == 1
+    assert len(result.diagnostics) == 1
+    assert result.diagnostics[0].skill_name == "bad-skill"
+    assert any("description" in w for w in result.diagnostics[0].warnings)
+
+
+def test_skill_translation_warns_on_unexpected_fields(make_plugin_version):
+    """Unexpected frontmatter fields produce warnings, not errors."""
+    cache_root, version_dir = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("my-tool",),
+    )
+    (version_dir / "skills" / "my-tool" / "SKILL.md").write_text(
+        "---\nname: my-tool\ndescription: A tool\ncustom-field: value\n---\n\nBody.\n"
+    )
+    result = translate_installed_skills(discover_latest_plugins(cache_root))
+    assert len(result.skills) == 1
+    assert len(result.diagnostics) == 1
+    assert any("unexpected" in w.lower() for w in result.diagnostics[0].warnings)
+
+
+def test_standalone_skill_translation_returns_diagnostics(tmp_path: Path):
+    """Standalone skill translation also collects validation warnings."""
+    skill_dir = tmp_path / "skills" / "my-tool"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: my-tool\n---\n\nNo description.\n"
+    )
+    result = translate_standalone_skills((skill_dir,), scope="user")
+    assert len(result.skills) == 1
+    assert len(result.diagnostics) == 1
+    assert any("description" in w for w in result.diagnostics[0].warnings)
 
 
 # -- assign_skill_names tests --

@@ -170,6 +170,23 @@ class AgentTranslationResult:
 
 
 @dataclass(frozen=True)
+class SkillValidationDiagnostic:
+    """One skill validation warning from the Agent Skills Standard."""
+
+    source_path: Path
+    skill_name: str
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SkillTranslationResult:
+    """Skill translation result plus any validation diagnostics."""
+
+    skills: tuple[GeneratedSkill, ...]
+    diagnostics: tuple[SkillValidationDiagnostic, ...]
+
+
+@dataclass(frozen=True)
 class GeneratedAgentFile:
     """Generated Codex agent .toml file derived from a Claude agent."""
 

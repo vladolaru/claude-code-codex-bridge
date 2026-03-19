@@ -223,7 +223,7 @@ class ProjectBuildResult:
     agent_count: int
     skill_count: int
     exclusion_report: object  # ExclusionReport from exclusions module
-    diagnostics: tuple  # AgentTranslationDiagnostic tuple
+    diagnostics: tuple  # AgentTranslationDiagnostic and SkillValidationDiagnostic items
 
 
 def build_project_desired_state(
@@ -331,16 +331,23 @@ def build_project_desired_state(
         )
         project_agent_files.append((relpath, content.encode()))
 
-    plugin_skills = translate_installed_skills(result.plugins)
-    user_skills = translate_standalone_skills(result.user_skills, scope="user")
-    all_global_skills = assign_skill_names((*plugin_skills, *user_skills))
-    project_skills = translate_standalone_skills(result.project_skills, scope="project")
+    plugin_skill_result = translate_installed_skills(result.plugins)
+    user_skill_result = translate_standalone_skills(result.user_skills, scope="user")
+    all_global_skills = assign_skill_names((*plugin_skill_result.skills, *user_skill_result.skills))
+    project_skill_result = translate_standalone_skills(result.project_skills, scope="project")
 
-    total_skill_count = len(all_global_skills) + len(project_skills)
+    skill_diagnostics = (
+        *plugin_skill_result.diagnostics,
+        *user_skill_result.diagnostics,
+        *project_skill_result.diagnostics,
+    )
+    all_diagnostics = (*all_diagnostics, *skill_diagnostics)
+
+    total_skill_count = len(all_global_skills) + len(project_skill_result.skills)
     desired_state = build_desired_state(
         result, shim_decision,
         all_global_skills, codex_home=codex_home,
-        project_skills=project_skills,
+        project_skills=project_skill_result.skills,
         global_agents=global_agents,
         project_agent_files=project_agent_files,
     )
@@ -609,6 +616,7 @@ def reconcile_all(
     dry_run: bool = False,
 ) -> ReconcileAllReport:
     """Reconcile all registered projects."""
+    from cc_codex_bridge.model import AgentTranslationDiagnostic
     from cc_codex_bridge.translate_agents import format_agent_translation_diagnostics
 
     codex_home_path = Path(codex_home or DEFAULT_CODEX_HOME).expanduser().resolve()
@@ -651,10 +659,16 @@ def reconcile_all(
                     ))
                     continue
 
-            if build.diagnostics:
+            # Only agent diagnostics block reconciliation.
+            # Skill validation warnings are informational and do not prevent sync.
+            agent_diags = tuple(
+                d for d in build.diagnostics
+                if isinstance(d, AgentTranslationDiagnostic)
+            )
+            if agent_diags:
                 errors.append(ReconcileAllError(
                     project_root=project_root,
-                    error=format_agent_translation_diagnostics(build.diagnostics),
+                    error=format_agent_translation_diagnostics(agent_diags),
                 ))
                 continue
 

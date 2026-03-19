@@ -12,9 +12,27 @@ from cc_codex_bridge.model import (
     GeneratedSkill,
     GeneratedSkillFile,
     InstalledPlugin,
+    SkillTranslationResult,
+    SkillValidationDiagnostic,
     TranslationError,
 )
+from cc_codex_bridge.validate_skill import validate_skill_metadata
 from cc_codex_bridge.text import read_utf8_text
+
+
+def format_skill_validation_diagnostics(
+    diagnostics: Iterable[SkillValidationDiagnostic],
+) -> str:
+    """Render skill validation diagnostics as stable human-readable lines."""
+    return "\n".join(
+        _format_skill_validation_diagnostic(d) for d in diagnostics
+    )
+
+
+def _format_skill_validation_diagnostic(diagnostic: SkillValidationDiagnostic) -> str:
+    """Render one skill validation diagnostic."""
+    warnings_text = "; ".join(diagnostic.warnings)
+    return f"  skill '{diagnostic.skill_name}' ({diagnostic.source_path}): {warnings_text}"
 
 
 SIBLING_SKILL_REF_RE = re.compile(r"(?<!\.)\.\./(?P<skill>[A-Za-z0-9._-]+)/")
@@ -118,7 +136,7 @@ class _RawSkill:
 
 def translate_installed_skills(
     plugins: Iterable[InstalledPlugin],
-) -> tuple[GeneratedSkill, ...]:
+) -> SkillTranslationResult:
     """Translate installed Claude skills into self-contained Codex skills."""
     raw_skills: list[_RawSkill] = []
 
@@ -134,28 +152,35 @@ def translate_installed_skills(
                 )
             )
 
-    generated = [
-        _build_generated_skill(
+    generated: list[GeneratedSkill] = []
+    diagnostics: list[SkillValidationDiagnostic] = []
+    for raw_skill in raw_skills:
+        skill, diagnostic = _build_generated_skill(
             raw_skill,
             raw_skill.skill_dir_name,
         )
-        for raw_skill in raw_skills
-    ]
+        generated.append(skill)
+        if diagnostic is not None:
+            diagnostics.append(diagnostic)
 
-    return tuple(sorted(generated, key=lambda item: item.install_dir_name))
+    return SkillTranslationResult(
+        skills=tuple(sorted(generated, key=lambda item: item.install_dir_name)),
+        diagnostics=tuple(diagnostics),
+    )
 
 
 def translate_standalone_skills(
     skill_paths: Iterable[Path],
     *,
     scope: str,
-) -> tuple[GeneratedSkill, ...]:
+) -> SkillTranslationResult:
     """Translate user-level or project-level Claude skills into Codex skills.
 
     Both user-level and project-level skills use their raw directory name.
     Collision resolution across scopes is handled by ``assign_skill_names()``.
     """
     generated: list[GeneratedSkill] = []
+    diagnostics: list[SkillValidationDiagnostic] = []
 
     for skill_path in skill_paths:
         original_name = _read_required_skill_name(skill_path / "SKILL.md")
@@ -172,6 +197,9 @@ def translate_standalone_skills(
             skill_path, skill_content,
         )
         rewritten = _rewrite_frontmatter_name(rewritten, install_dir_name)
+        diagnostic = _validate_generated_skill(rewritten, install_dir_name, skill_path / "SKILL.md")
+        if diagnostic is not None:
+            diagnostics.append(diagnostic)
         generated_files[Path("SKILL.md")] = (
             rewritten.encode(),
             (skill_path / "SKILL.md").stat().st_mode & 0o777,
@@ -199,7 +227,10 @@ def translate_standalone_skills(
             files=files,
         ))
 
-    return tuple(sorted(generated, key=lambda s: s.install_dir_name))
+    return SkillTranslationResult(
+        skills=tuple(sorted(generated, key=lambda s: s.install_dir_name)),
+        diagnostics=tuple(diagnostics),
+    )
 
 
 def _read_required_skill_name(skill_md_path: Path) -> str:
@@ -215,10 +246,33 @@ def _read_required_skill_name(skill_md_path: Path) -> str:
     return skill_name
 
 
+def _validate_generated_skill(
+    content: str,
+    install_dir_name: str,
+    source_path: Path,
+) -> SkillValidationDiagnostic | None:
+    """Validate generated SKILL.md; raise on structural errors, return warning diagnostic."""
+    parsed = frontmatter.parse_frontmatter_from_content(content)
+    errors, warnings = validate_skill_metadata(parsed, dir_name=install_dir_name)
+    if errors:
+        raise TranslationError(
+            f"Generated skill fails structural validation "
+            f"(source: {source_path}): {'; '.join(errors)}"
+        )
+    if warnings:
+        name = str(parsed.get("name", install_dir_name))
+        return SkillValidationDiagnostic(
+            source_path=source_path,
+            skill_name=name,
+            warnings=tuple(warnings),
+        )
+    return None
+
+
 def _build_generated_skill(
     raw_skill: _RawSkill,
     install_dir_name: str,
-) -> GeneratedSkill:
+) -> tuple[GeneratedSkill, SkillValidationDiagnostic | None]:
     """Build the generated file tree for one installed Claude skill."""
     generated_files: dict[Path, tuple[bytes, int]] = {}
 
@@ -234,6 +288,7 @@ def _build_generated_skill(
         raw_skill.skill_path, skill_content,
     )
     rewritten = _rewrite_frontmatter_name(rewritten, install_dir_name)
+    diagnostic = _validate_generated_skill(rewritten, install_dir_name, skill_md_path)
     generated_files[Path("SKILL.md")] = (
         rewritten.encode(),
         (skill_md_path.stat().st_mode & 0o777),
@@ -252,7 +307,7 @@ def _build_generated_skill(
         for path in sorted(generated_files)
     )
 
-    return GeneratedSkill(
+    skill = GeneratedSkill(
         marketplace=raw_skill.marketplace,
         plugin_name=raw_skill.plugin_name,
         source_path=raw_skill.skill_path,
@@ -261,6 +316,7 @@ def _build_generated_skill(
         codex_skill_name=install_dir_name,
         files=files,
     )
+    return skill, diagnostic
 
 
 def _resolve_relative_references(

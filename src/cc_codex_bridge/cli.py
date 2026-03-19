@@ -29,7 +29,13 @@ from cc_codex_bridge.install_launchagent import (
     find_bridge_launchagents,
     install_launchagent,
 )
-from cc_codex_bridge.model import DiscoveryError, ReconcileError, TranslationError
+from cc_codex_bridge.model import (
+    AgentTranslationDiagnostic,
+    DiscoveryError,
+    ReconcileError,
+    SkillValidationDiagnostic,
+    TranslationError,
+)
 from cc_codex_bridge.reconcile import (
     STATE_RELATIVE_PATH,
     build_project_desired_state,
@@ -39,6 +45,7 @@ from cc_codex_bridge.reconcile import (
     reconcile_desired_state,
 )
 from cc_codex_bridge.translate_agents import format_agent_translation_diagnostics
+from cc_codex_bridge.translate_skills import format_skill_validation_diagnostics
 
 
 PIPELINE_COMMANDS = {"reconcile", "validate", "status"}
@@ -322,15 +329,30 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
 
+    # Split diagnostics: agent diagnostics block reconciliation,
+    # skill warnings are informational only.
+    agent_diags = tuple(
+        d for d in build.diagnostics if isinstance(d, AgentTranslationDiagnostic)
+    )
+    skill_diags = tuple(
+        d for d in build.diagnostics if isinstance(d, SkillValidationDiagnostic)
+    )
+
     try:
-        if build.diagnostics:
+        if agent_diags:
             if args.command == "status":
                 if args.json:
-                    print(format_status_json(None, build.exclusion_report, diagnostics=build.diagnostics))
+                    print(format_status_json(
+                        None, build.exclusion_report,
+                        diagnostics=agent_diags, skill_diagnostics=skill_diags,
+                    ))
                 else:
-                    print(format_status_report(None, build.exclusion_report, diagnostics=build.diagnostics))
+                    print(format_status_report(
+                        None, build.exclusion_report,
+                        diagnostics=agent_diags, skill_diagnostics=skill_diags,
+                    ))
                 return 0
-            raise TranslationError(format_agent_translation_diagnostics(build.diagnostics))
+            raise TranslationError(format_agent_translation_diagnostics(agent_diags))
 
         if args.command == "validate":
             _print_summary(
@@ -340,6 +362,9 @@ def main(argv: list[str] | None = None) -> int:
                 build.skill_count,
                 build.exclusion_report,
             )
+            if skill_diags:
+                print("\nSkill validation warnings:", file=sys.stderr)
+                print(format_skill_validation_diagnostics(skill_diags), file=sys.stderr)
             return 0
 
         if args.command == "reconcile":
@@ -358,14 +383,23 @@ def main(argv: list[str] | None = None) -> int:
                 print(format_diff_report(build.desired_state, report))
             else:
                 print(format_change_report(report))
+            if skill_diags:
+                print("\nSkill validation warnings:", file=sys.stderr)
+                print(format_skill_validation_diagnostics(skill_diags), file=sys.stderr)
             return 0
 
         if args.command == "status":
             report = diff_desired_state(build.desired_state)
             if args.json:
-                print(format_status_json(report, build.exclusion_report))
+                print(format_status_json(
+                    report, build.exclusion_report,
+                    skill_diagnostics=skill_diags,
+                ))
             else:
-                print(format_status_report(report, build.exclusion_report))
+                print(format_status_report(
+                    report, build.exclusion_report,
+                    skill_diagnostics=skill_diags,
+                ))
             return 0
     except (TranslationError, ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -689,6 +723,7 @@ def _build_status_payload(
     exclusion_report: ExclusionReport,
     *,
     diagnostics=None,
+    skill_diagnostics=None,
 ) -> dict[str, object]:
     """Build a stable status payload from reconcile diff output."""
     categorized_changes: dict[str, dict[str, list[str]]] = {
@@ -717,6 +752,17 @@ def _build_status_payload(
         pending_change_count = len(report.changes)
         status = "in_sync" if not report.changes else "pending_changes"
 
+    rendered_skill_warnings = [
+        {
+            "kind": "skill_validation",
+            "source_path": str(d.source_path),
+            "skill_name": d.skill_name,
+            "warnings": list(d.warnings),
+            "message": format_skill_validation_diagnostics((d,)),
+        }
+        for d in (skill_diagnostics or ())
+    ]
+
     from cc_codex_bridge import __version__
 
     return {
@@ -725,6 +771,7 @@ def _build_status_payload(
         "pending_change_count": pending_change_count,
         "categorized_changes": categorized_changes,
         "diagnostics": rendered_diagnostics,
+        "skill_warnings": rendered_skill_warnings,
         "excluded": {
             "plugins": list(exclusion_report.plugins),
             "skills": list(exclusion_report.skills),
@@ -733,18 +780,30 @@ def _build_status_payload(
     }
 
 
-def format_status_json(report, exclusion_report: ExclusionReport, *, diagnostics=None) -> str:
+def format_status_json(
+    report, exclusion_report: ExclusionReport,
+    *, diagnostics=None, skill_diagnostics=None,
+) -> str:
     """Render status output as deterministic JSON."""
     return json.dumps(
-        _build_status_payload(report, exclusion_report, diagnostics=diagnostics),
+        _build_status_payload(
+            report, exclusion_report,
+            diagnostics=diagnostics, skill_diagnostics=skill_diagnostics,
+        ),
         indent=2,
         sort_keys=True,
     )
 
 
-def format_status_report(report, exclusion_report: ExclusionReport, *, diagnostics=None) -> str:
+def format_status_report(
+    report, exclusion_report: ExclusionReport,
+    *, diagnostics=None, skill_diagnostics=None,
+) -> str:
     """Render status output as human-readable text."""
-    payload = _build_status_payload(report, exclusion_report, diagnostics=diagnostics)
+    payload = _build_status_payload(
+        report, exclusion_report,
+        diagnostics=diagnostics, skill_diagnostics=skill_diagnostics,
+    )
     categorized = payload["categorized_changes"]
     project_files = categorized["project_files"]
     skills = categorized["skills"]
@@ -773,6 +832,8 @@ def format_status_report(report, exclusion_report: ExclusionReport, *, diagnosti
     ]
     for diagnostic in payload["diagnostics"]:
         lines.append(f"DIAGNOSTIC: {diagnostic['message']}")
+    for warning in payload["skill_warnings"]:
+        lines.append(f"SKILL_WARNING: {warning['message']}")
     for path in project_files["create"]:
         lines.append(f"PROJECT_FILE_CREATE: {path}")
     for path in project_files["update"]:
