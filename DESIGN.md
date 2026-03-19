@@ -152,7 +152,7 @@ These are internal state files stored under `~/.cc-codex-bridge/` (configurable 
   - project directory keyed by SHA-256 hash of the resolved project root path
   - tracks managed project files, managed project skill directory names, bridge home, codex home, and version
 - `~/.cc-codex-bridge/registry.json`
-  - global generated-skill and agent ownership registry keyed by install directory name (skills) and filename (agents)
+  - global generated-skill, agent, and plugin resource ownership registry keyed by install directory name (skills), filename (agents), and vendored directory name (plugin resources)
 - `~/.cc-codex-bridge/plugins/<marketplace>-<plugin>/<dir>/`
   - vendored copies of plugin-level resource directories (e.g., `scripts/`, `agents/`)
   - written during reconciliation when skills or agents reference `$PLUGIN_ROOT` paths
@@ -187,13 +187,13 @@ The project state file (at `~/.cc-codex-bridge/projects/<hash>/state.json`) reco
 - bridge home path
 - managed project-relative file paths (including agent `.toml` files under `.codex/agents/`)
 - managed project skill directory names (tracked separately for directory-snapshot comparison)
-- managed vendored plugin directory names (tracked for cleanup)
-- state version (currently 7)
+- state version (currently 8)
 
 The global registry records:
 
 - generated skill install directory names with content hashes and owning project roots
 - generated agent `.toml` filenames with content hashes and owning project roots
+- vendored plugin resource directory names with content hashes and owning project roots
 - a sorted list of all reconciled project roots (the `projects` list)
 
 ### Safety rules
@@ -217,6 +217,8 @@ The global registry records:
 - existing global agent `.toml` files are adopted only when their content hash matches the desired generated content exactly
 - conflicting content for an existing generated agent file is a hard error
 - generated agent files are removed only when the global registry shows no remaining owners
+- vendored plugin resource directories are removed only when the global registry shows no remaining owners
+- vendored plugin resource directories use content hash tracking for fast change detection — on-disk comparison is skipped when the registry hash matches the desired hash
 - all write targets must resolve within their expected root (`project_root` for project files, `codex_home` for global Codex files, `bridge_home` for state and registry files) after symlink resolution — this catches symlinked ancestor directories that would redirect operations outside the expected tree
 - skill translation rejects symlinked resource directories, symlinked files (including SKILL.md), and symlinked subdirectories within resource directories
 - project skills are tracked as managed directory names and compared using exact directory-snapshot matching, consistent with global skills
@@ -527,11 +529,12 @@ Supported kinds in current reporting:
 7. compute desired global instructions changes for `~/.codex/AGENTS.md`
 8. validate ownership constraints
 9. write project file and skill directory changes directly
-10. write vendored plugin resource directories under bridge home
-11. write global agent files and instructions file if needed
-12. write updated global registry file (a single file tracks both skills and agents)
-13. write the state file under bridge home
-14. remove stale managed outputs whose last owner released them
+10. compute vendored plugin resource content hashes, claim registry ownership, and write vendored plugin resource directories under bridge home
+11. detect stale plugin resources no longer in the desired state and release registry ownership (last-owner directories are removed)
+12. write global agent files and instructions file if needed
+13. write updated global registry file (a single file tracks skills, agents, and plugin resources)
+14. write the state file under bridge home
+15. remove stale managed outputs whose last owner released them
 
 `diff_desired_state()` additionally reports state file create/update changes that `reconcile_desired_state()` would perform, ensuring `status` and `reconcile --dry-run` show the same pending changes as a real reconcile.
 
@@ -681,7 +684,7 @@ Current runtime module responsibilities:
 - `render_agent_toml.py`
   - self-contained Codex agent `.toml` file rendering and Claude-tool-to-sandbox-mode mapping
 - `registry.py`
-  - global generated-skill and agent ownership registry serialization, deterministic skill and agent content hashing
+  - global generated-skill, agent, and plugin resource ownership registry serialization, deterministic skill, agent, and plugin resource content hashing
 - `translate_skills.py`
   - Codex skill translation for plugins and standalone sources, plus relative-reference resolution, vendoring helpers, and collision-free name assignment via `assign_skill_names()`
 - `vendor_plugin.py`
@@ -695,7 +698,7 @@ Current runtime module responsibilities:
   - multi-project reconcile via `reconcile_all()`
   - machine-level uninstall via `uninstall_all()`
 - `state.py`
-  - project-local managed-state serialization and validation, including managed vendored plugin directory tracking
+  - project-local managed-state serialization and validation
 - `install_launchagent.py`
   - LaunchAgent label generation, plist rendering, plist installation
   - bridge LaunchAgent plist discovery via `find_bridge_launchagents()`
@@ -722,6 +725,7 @@ The suite currently verifies:
 - LaunchAgent rendering and installation (global plist model)
 - plugin resource detection, path rewriting, and transitive dependency detection
 - plugin resource vendoring through skill and agent translation pipelines
+- plugin resource ownership tracking in the global registry with multi-project ownership and content hash fast path
 - plugin resource cleanup in clean and uninstall commands
 - project-level clean and machine-level uninstall
 - multi-project reconcile-all with missing project error handling
