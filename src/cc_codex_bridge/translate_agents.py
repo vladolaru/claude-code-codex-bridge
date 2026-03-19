@@ -11,8 +11,10 @@ from cc_codex_bridge.model import (
     AgentTranslationDiagnostic,
     AgentTranslationResult,
     GeneratedAgentFile,
+    GeneratedSkillFile,
     InstalledPlugin,
     TranslationError,
+    VendoredPluginResource,
 )
 from cc_codex_bridge.render_agent_toml import READ_TOOLS, WRITE_TOOLS, derive_sandbox_mode
 
@@ -166,9 +168,11 @@ def translate_standalone_agents(
 
 def translate_installed_agents(
     plugins: Iterable[InstalledPlugin],
+    *,
+    bridge_home: Path | None = None,
 ) -> tuple[GeneratedAgentFile, ...]:
     """Translate installed Claude agent files into Codex agent file definitions."""
-    result = translate_installed_agents_with_diagnostics(plugins)
+    result = translate_installed_agents_with_diagnostics(plugins, bridge_home=bridge_home)
     if result.diagnostics:
         raise TranslationError(format_agent_translation_diagnostics(result.diagnostics))
     return result.agents
@@ -176,10 +180,16 @@ def translate_installed_agents(
 
 def translate_installed_agents_with_diagnostics(
     plugins: Iterable[InstalledPlugin],
+    *,
+    bridge_home: Path | None = None,
 ) -> AgentTranslationResult:
     """Translate installed Claude agent files into Codex agent file definitions."""
+    from cc_codex_bridge.bridge_home import plugin_resource_dir
+    from cc_codex_bridge.vendor_plugin import detect_plugin_resource_dirs, rewrite_plugin_paths
+
     agents: list[GeneratedAgentFile] = []
     diagnostics: list[AgentTranslationDiagnostic] = []
+    all_plugin_resources: list[VendoredPluginResource] = []
 
     for plugin in plugins:
         for agent_path in plugin.agents:
@@ -211,6 +221,38 @@ def translate_installed_agents_with_diagnostics(
             stem = agent_path.stem
             prompt_body = body.strip() + ("\n" if body.strip() else "")
 
+            # Detect and rewrite plugin resource paths
+            if bridge_home is not None:
+                detected_dirs = detect_plugin_resource_dirs(prompt_body)
+                if detected_dirs:
+                    vendored_root = plugin_resource_dir(
+                        plugin.marketplace, plugin.plugin_name, bridge_home=bridge_home,
+                    )
+                    prompt_body = rewrite_plugin_paths(prompt_body, vendored_root)
+
+                    for dir_name in sorted(detected_dirs):
+                        source_dir = plugin.source_path / dir_name
+                        if not source_dir.is_dir():
+                            continue
+                        file_entries: list[GeneratedSkillFile] = []
+                        for path in sorted(source_dir.rglob("*")):
+                            if path.is_dir():
+                                continue
+                            if path.name in {".DS_Store", "__pycache__"} or path.suffix == ".pyc":
+                                continue
+                            file_entries.append(GeneratedSkillFile(
+                                relative_path=path.relative_to(source_dir),
+                                content=path.read_bytes(),
+                                mode=path.stat().st_mode & 0o777,
+                            ))
+                        all_plugin_resources.append(VendoredPluginResource(
+                            marketplace=plugin.marketplace,
+                            plugin_name=plugin.plugin_name,
+                            source_dir=source_dir,
+                            target_dir_name=dir_name,
+                            files=tuple(file_entries),
+                        ))
+
             agents.append(
                 GeneratedAgentFile(
                     marketplace=plugin.marketplace,
@@ -229,6 +271,7 @@ def translate_installed_agents_with_diagnostics(
     return AgentTranslationResult(
         agents=tuple(sorted(agents, key=lambda a: a.agent_name)),
         diagnostics=tuple(sorted(diagnostics, key=lambda item: str(item.source_path))),
+        plugin_resources=tuple(all_plugin_resources),
     )
 
 

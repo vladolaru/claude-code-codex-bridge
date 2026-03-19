@@ -325,7 +325,8 @@ def build_project_desired_state(
             diagnostics=(),
         )
 
-    agent_result = translate_installed_agents_with_diagnostics(result.plugins)
+    bridge_home_path = Path(bridge_home or resolve_bridge_home()).expanduser().resolve()
+    agent_result = translate_installed_agents_with_diagnostics(result.plugins, bridge_home=bridge_home_path)
     user_agent_result = translate_standalone_agents(result.user_agents, scope="user")
     project_agent_result = translate_standalone_agents(result.project_agents, scope="project")
 
@@ -368,7 +369,6 @@ def build_project_desired_state(
         )
         project_agent_files.append((relpath, content.encode()))
 
-    bridge_home_path = Path(bridge_home or resolve_bridge_home()).expanduser().resolve()
     plugin_skill_result = translate_installed_skills(result.plugins, bridge_home=bridge_home_path)
     user_skill_result = translate_standalone_skills(result.user_skills, scope="user")
     project_skill_result = translate_standalone_skills(result.project_skills, scope="project")
@@ -413,7 +413,18 @@ def build_project_desired_state(
         + len(user_command_result.skills)
         + len(project_command_result.skills)
     )
-    plugin_resources = plugin_skill_result.plugin_resources
+    # Collect and deduplicate plugin resources from skills and agents
+    all_plugin_resources: dict[tuple[str, str, str], VendoredPluginResource] = {}
+    for resource in plugin_skill_result.plugin_resources:
+        key = (resource.marketplace, resource.plugin_name, resource.target_dir_name)
+        all_plugin_resources[key] = resource
+    for resource in agent_result.plugin_resources:
+        key = (resource.marketplace, resource.plugin_name, resource.target_dir_name)
+        all_plugin_resources[key] = resource
+    plugin_resources = tuple(sorted(
+        all_plugin_resources.values(),
+        key=lambda r: (r.marketplace, r.plugin_name, r.target_dir_name),
+    ))
     desired_state = build_desired_state(
         result, shim_decision,
         all_global_skills, codex_home=codex_home,

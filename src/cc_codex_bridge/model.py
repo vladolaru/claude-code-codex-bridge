@@ -170,6 +170,7 @@ class AgentTranslationResult:
 
     agents: tuple[GeneratedAgentFile, ...]
     diagnostics: tuple[AgentTranslationDiagnostic, ...]
+    plugin_resources: tuple[VendoredPluginResource, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -747,3 +747,38 @@ def test_derive_sandbox_mode_no_tools():
     """No tools returns None (inherit from parent)."""
     assert derive_sandbox_mode(None) is None
     assert derive_sandbox_mode(()) is None
+
+
+def test_agent_plugin_root_references_are_rewritten(make_plugin_version, tmp_path):
+    """Agents referencing $PLUGIN_ROOT/scripts/ get paths rewritten."""
+    cache_root, version_dir = make_plugin_version(
+        "market", "pirategoat-tools", "1.0.0",
+        agent_names=("security-reviewer",),
+    )
+    # Create plugin-level scripts
+    scripts_dir = version_dir / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "bootstrap-reviewer.py").write_text("print('bootstrap')\n")
+
+    (version_dir / "agents" / "security-reviewer.md").write_text(
+        "---\nname: security-reviewer\ndescription: Security review\ntools:\n  - Read\n  - Bash\n---\n\n"
+        "python3 $PLUGIN_ROOT/scripts/bootstrap-reviewer.py --agent security-reviewer\n"
+    )
+
+    bridge = tmp_path / "bridge-home"
+    result = translate_installed_agents_with_diagnostics(
+        discover_latest_plugins(cache_root),
+        bridge_home=bridge,
+    )
+    assert len(result.agents) == 1
+
+    agent = result.agents[0]
+    assert '$PLUGIN_ROOT' not in agent.developer_instructions
+    assert 'bootstrap-reviewer.py' in agent.developer_instructions
+
+    # Plugin resources should be collected
+    assert len(result.plugin_resources) == 1
+    resource = result.plugin_resources[0]
+    assert resource.marketplace == "market"
+    assert resource.plugin_name == "pirategoat-tools"
+    assert resource.target_dir_name == "scripts"
