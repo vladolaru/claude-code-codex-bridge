@@ -97,9 +97,8 @@ def _translate_one_command(
 
     description = str(parsed_frontmatter.get("description", "")).strip()
     if not description:
-        raise TranslationError(
-            f"Command missing required description frontmatter: {command_path}"
-        )
+        # Derive description from filename stem: "code-review" → "code review"
+        description = command_path.stem.replace("-", " ").replace("_", " ")
 
     # Derive skill name from filename stem (without .md)
     skill_name = command_path.stem

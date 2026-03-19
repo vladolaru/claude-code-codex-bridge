@@ -176,20 +176,45 @@ def test_translate_command_drops_allowed_tools_frontmatter(make_plugin_version):
     assert "allowed-tools" not in content
 
 
-def test_translate_command_requires_description(make_plugin_version):
-    """Commands without description frontmatter raise TranslationError."""
+def test_translate_command_derives_description_from_filename(make_plugin_version):
+    """Commands without description derive it from the filename stem."""
     cache_root, version_dir = make_plugin_version(
         "market", "tools", "1.0.0",
     )
     commands_dir = version_dir / "commands"
     commands_dir.mkdir()
-    (commands_dir / "bad.md").write_text(
-        "---\nname: bad\n---\n\nNo description.\n"
+    (commands_dir / "consolidate-ai-memory.md").write_text(
+        "---\nname: consolidate\n---\n\nConsolidate things.\n"
     )
 
     plugins = discover_latest_plugins(cache_root)
-    with pytest.raises(TranslationError, match="description"):
-        translate_installed_commands(plugins)
+    result = translate_installed_commands(plugins)
+    assert len(result.skills) == 1
+
+    skill_md = next(f for f in result.skills[0].files if f.relative_path == Path("SKILL.md"))
+    content = skill_md.content.decode()
+    assert "description: consolidate ai memory" in content
+
+
+def test_translate_command_without_frontmatter(make_plugin_version):
+    """Commands with no frontmatter at all are translated with derived description."""
+    cache_root, version_dir = make_plugin_version(
+        "market", "tools", "1.0.0",
+    )
+    commands_dir = version_dir / "commands"
+    commands_dir.mkdir()
+    (commands_dir / "log-experience.md").write_text(
+        "# Log Experience\n\nLog the experience.\n"
+    )
+
+    plugins = discover_latest_plugins(cache_root)
+    result = translate_installed_commands(plugins)
+    assert len(result.skills) == 1
+
+    skill_md = next(f for f in result.skills[0].files if f.relative_path == Path("SKILL.md"))
+    content = skill_md.content.decode()
+    assert "description: log experience" in content
+    assert "# Log Experience" in content
 
 
 def test_translate_command_rejects_symlinked_file(make_plugin_version, tmp_path: Path):
