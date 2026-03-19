@@ -187,6 +187,7 @@ class SkillTranslationResult:
 
     skills: tuple[GeneratedSkill, ...]
     diagnostics: tuple[SkillValidationDiagnostic, ...]
+    plugin_resources: tuple[VendoredPluginResource, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -877,6 +877,49 @@ def test_assign_skill_names_rejects_when_alt_suffix_exceeds_64():
         assign_skill_names((skill_a, skill_b))
 
 
+def test_skill_plugin_root_references_are_rewritten(make_plugin_version, tmp_path: Path):
+    """Skills referencing $PLUGIN_ROOT/scripts/ get paths rewritten."""
+    cache_root, version_dir = make_plugin_version(
+        "market", "pirategoat-tools", "1.0.0",
+        skill_names=("using-figma",),
+    )
+    # Create plugin-level scripts
+    scripts_dir = version_dir / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "figma-parse-nodes.py").write_text("print('parse')\n")
+
+    skill_dir = version_dir / "skills" / "using-figma"
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: using-figma\ndescription: Figma integration\n---\n\n"
+        'PLUGIN_ROOT="<skill base directory>/../.."\n'
+        'python3 "$PLUGIN_ROOT/scripts/figma-parse-nodes.py" input.json\n'
+    )
+
+    bridge = tmp_path / "bridge-home"
+    result = translate_installed_skills(
+        discover_latest_plugins(cache_root),
+        bridge_home=bridge,
+    )
+    assert len(result.skills) == 1
+
+    skill_md = next(
+        f for f in result.skills[0].files if f.relative_path == Path("SKILL.md")
+    )
+    content = skill_md.content.decode()
+    # The <skill base directory>/../.. pattern should be gone
+    assert '<skill base directory>/../..' not in content
+    # The rewritten path should reference the vendored location
+    assert 'figma-parse-nodes.py' in content
+
+    # Plugin resources should be collected
+    assert len(result.plugin_resources) == 1
+    resource = result.plugin_resources[0]
+    assert resource.marketplace == "market"
+    assert resource.plugin_name == "pirategoat-tools"
+    assert resource.target_dir_name == "scripts"
+    assert any(f.relative_path == Path("figma-parse-nodes.py") for f in resource.files)
+
+
 def _write_skill_directory(destination: Path, skill: GeneratedSkill) -> Path:
     """Materialize one generated skill tree for test assertions."""
     destination.mkdir(parents=True, exist_ok=True)

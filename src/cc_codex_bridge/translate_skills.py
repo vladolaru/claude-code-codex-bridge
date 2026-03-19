@@ -15,6 +15,7 @@ from cc_codex_bridge.model import (
     SkillTranslationResult,
     SkillValidationDiagnostic,
     TranslationError,
+    VendoredPluginResource,
 )
 from cc_codex_bridge.validate_skill import validate_skill_metadata
 from cc_codex_bridge.text import read_utf8_text
@@ -136,6 +137,8 @@ class _RawSkill:
 
 def translate_installed_skills(
     plugins: Iterable[InstalledPlugin],
+    *,
+    bridge_home: Path | None = None,
 ) -> SkillTranslationResult:
     """Translate installed Claude skills into self-contained Codex skills."""
     raw_skills: list[_RawSkill] = []
@@ -154,18 +157,22 @@ def translate_installed_skills(
 
     generated: list[GeneratedSkill] = []
     diagnostics: list[SkillValidationDiagnostic] = []
+    all_plugin_resources: list[VendoredPluginResource] = []
     for raw_skill in raw_skills:
-        skill, diagnostic = _build_generated_skill(
+        skill, diagnostic, resources = _build_generated_skill(
             raw_skill,
             raw_skill.skill_dir_name,
+            bridge_home=bridge_home,
         )
         generated.append(skill)
         if diagnostic is not None:
             diagnostics.append(diagnostic)
+        all_plugin_resources.extend(resources)
 
     return SkillTranslationResult(
         skills=tuple(sorted(generated, key=lambda item: item.install_dir_name)),
         diagnostics=tuple(diagnostics),
+        plugin_resources=tuple(all_plugin_resources),
     )
 
 
@@ -272,8 +279,13 @@ def _validate_generated_skill(
 def _build_generated_skill(
     raw_skill: _RawSkill,
     install_dir_name: str,
-) -> tuple[GeneratedSkill, SkillValidationDiagnostic | None]:
+    *,
+    bridge_home: Path | None = None,
+) -> tuple[GeneratedSkill, SkillValidationDiagnostic | None, tuple[VendoredPluginResource, ...]]:
     """Build the generated file tree for one installed Claude skill."""
+    from cc_codex_bridge.bridge_home import plugin_resource_dir
+    from cc_codex_bridge.vendor_plugin import detect_plugin_resource_dirs, rewrite_plugin_paths
+
     generated_files: dict[Path, tuple[bytes, int]] = {}
 
     _copy_skill_tree(raw_skill.skill_path, Path(), generated_files)
@@ -288,6 +300,40 @@ def _build_generated_skill(
         raw_skill.skill_path, skill_content,
     )
     rewritten = _rewrite_frontmatter_name(rewritten, install_dir_name)
+
+    # Detect plugin resource references and rewrite paths
+    plugin_resources: list[VendoredPluginResource] = []
+    if bridge_home is not None:
+        detected_dirs = detect_plugin_resource_dirs(rewritten)
+        if detected_dirs:
+            vendored_root = plugin_resource_dir(
+                raw_skill.marketplace, raw_skill.plugin_name, bridge_home=bridge_home,
+            )
+            rewritten = rewrite_plugin_paths(rewritten, vendored_root)
+
+            # Build VendoredPluginResource for each detected directory
+            for dir_name in sorted(detected_dirs):
+                source_dir = raw_skill.plugin_root / dir_name
+                if not source_dir.is_dir():
+                    continue  # Referenced dir doesn't exist at plugin root
+                resource_files: dict[Path, tuple[bytes, int]] = {}
+                _copy_tree(source_dir, Path(), resource_files)
+                files = tuple(
+                    GeneratedSkillFile(
+                        relative_path=path,
+                        content=resource_files[path][0],
+                        mode=resource_files[path][1],
+                    )
+                    for path in sorted(resource_files)
+                )
+                plugin_resources.append(VendoredPluginResource(
+                    marketplace=raw_skill.marketplace,
+                    plugin_name=raw_skill.plugin_name,
+                    source_dir=source_dir,
+                    target_dir_name=dir_name,
+                    files=files,
+                ))
+
     diagnostic = _validate_generated_skill(rewritten, install_dir_name, skill_md_path)
     generated_files[Path("SKILL.md")] = (
         rewritten.encode(),
@@ -316,7 +362,7 @@ def _build_generated_skill(
         codex_skill_name=install_dir_name,
         files=files,
     )
-    return skill, diagnostic
+    return skill, diagnostic, tuple(plugin_resources)
 
 
 def _resolve_relative_references(

@@ -174,6 +174,7 @@ def build_desired_state(
     project_skills: Iterable[GeneratedSkill] | None = None,
     global_agents: Iterable[GeneratedAgentFile] | None = None,
     project_agent_files: Iterable[tuple[Path, bytes]] | None = None,
+    plugin_resources: Iterable[VendoredPluginResource] | None = None,
 ) -> DesiredState:
     """Build the desired generated outputs for a project."""
     if shim_decision.action == "fail":
@@ -235,6 +236,7 @@ def build_desired_state(
         global_instructions=global_instructions,
         project_skills=tuple(project_skills or ()),
         global_agents=tuple(global_agents or ()),
+        plugin_resources=tuple(plugin_resources or ()),
     )
 
 
@@ -366,7 +368,8 @@ def build_project_desired_state(
         )
         project_agent_files.append((relpath, content.encode()))
 
-    plugin_skill_result = translate_installed_skills(result.plugins)
+    bridge_home_path = Path(bridge_home or resolve_bridge_home()).expanduser().resolve()
+    plugin_skill_result = translate_installed_skills(result.plugins, bridge_home=bridge_home_path)
     user_skill_result = translate_standalone_skills(result.user_skills, scope="user")
     project_skill_result = translate_standalone_skills(result.project_skills, scope="project")
 
@@ -410,6 +413,7 @@ def build_project_desired_state(
         + len(user_command_result.skills)
         + len(project_command_result.skills)
     )
+    plugin_resources = plugin_skill_result.plugin_resources
     desired_state = build_desired_state(
         result, shim_decision,
         all_global_skills, codex_home=codex_home,
@@ -417,6 +421,7 @@ def build_project_desired_state(
         project_skills=all_project_skills,
         global_agents=global_agents,
         project_agent_files=project_agent_files,
+        plugin_resources=plugin_resources,
     )
 
     return ProjectBuildResult(
