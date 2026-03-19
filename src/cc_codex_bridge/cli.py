@@ -352,11 +352,13 @@ def main(argv: list[str] | None = None) -> int:
                 if args.json:
                     print(format_status_json(
                         None, build.exclusion_report,
+                        command_count=build.command_count,
                         diagnostics=agent_diags, skill_diagnostics=skill_diags,
                     ))
                 else:
                     print(format_status_report(
                         None, build.exclusion_report,
+                        command_count=build.command_count,
                         diagnostics=agent_diags, skill_diagnostics=skill_diags,
                     ))
                 return 0
@@ -403,11 +405,13 @@ def main(argv: list[str] | None = None) -> int:
             if args.json:
                 print(format_status_json(
                     report, build.exclusion_report,
+                    command_count=build.command_count,
                     skill_diagnostics=skill_diags,
                 ))
             else:
                 print(format_status_report(
                     report, build.exclusion_report,
+                    command_count=build.command_count,
                     skill_diagnostics=skill_diags,
                 ))
             return 0
@@ -831,6 +835,7 @@ def format_status_report(
         f"VERSION: v{payload['version']}",
         f"STATUS: {payload['status']}",
         f"PENDING_CHANGES: {payload['pending_change_count']}",
+        f"TRANSLATED_COMMANDS: {payload['command_count']}",
         (
             "PROJECT_FILES: "
             f"create={len(project_files['create'])} "
@@ -847,7 +852,8 @@ def format_status_report(
             "EXCLUDED: "
             f"plugins={len(payload['excluded']['plugins'])} "
             f"skills={len(payload['excluded']['skills'])} "
-            f"agents={len(payload['excluded']['agents'])}"
+            f"agents={len(payload['excluded']['agents'])} "
+            f"commands={len(payload['excluded']['commands'])}"
         ),
     ]
     for diagnostic in payload["diagnostics"]:
@@ -872,6 +878,8 @@ def format_status_report(
         lines.append(f"EXCLUDED_SKILL: {skill_id}")
     for agent_id in payload["excluded"]["agents"]:
         lines.append(f"EXCLUDED_AGENT: {agent_id}")
+    for command_id in payload["excluded"]["commands"]:
+        lines.append(f"EXCLUDED_COMMAND: {command_id}")
     return "\n".join(lines)
 
 

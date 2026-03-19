@@ -1518,6 +1518,93 @@ def test_reconcile_bootstrap_reports_error_on_symlinked_agents_md(tmp_path: Path
     assert "Error:" in captured.err
 
 
+def test_status_reports_command_count(make_project, tmp_path: Path, capsys):
+    """status output includes command count."""
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "claude-home"
+    codex_home = tmp_path / "codex-home"
+
+    (claude_home / "plugins" / "cache").mkdir(parents=True)
+
+    # Create a user-level command (requires description frontmatter)
+    commands_dir = claude_home / "commands"
+    commands_dir.mkdir(parents=True)
+    (commands_dir / "review.md").write_text(
+        "---\ndescription: Review code\n---\n\nYou are a code reviewer.\n"
+    )
+
+    exit_code = cli.main([
+        "status",
+        "--project", str(project_root),
+        "--claude-home", str(claude_home),
+        "--codex-home", str(codex_home),
+    ])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "TRANSLATED_COMMANDS: 1" in captured.out
+
+
+def test_status_json_includes_command_count(make_project, tmp_path: Path, capsys):
+    """status --json includes command_count field."""
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "claude-home"
+    codex_home = tmp_path / "codex-home"
+
+    (claude_home / "plugins" / "cache").mkdir(parents=True)
+
+    # Create a user-level command (requires description frontmatter)
+    commands_dir = claude_home / "commands"
+    commands_dir.mkdir(parents=True)
+    (commands_dir / "review.md").write_text(
+        "---\ndescription: Review code\n---\n\nYou are a code reviewer.\n"
+    )
+
+    exit_code = cli.main([
+        "status",
+        "--json",
+        "--project", str(project_root),
+        "--claude-home", str(claude_home),
+        "--codex-home", str(codex_home),
+    ])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["command_count"] == 1
+
+
+def test_validate_reports_command_count(make_project, tmp_path: Path, capsys):
+    """validate output includes command count."""
+    project_root, _agents_md = make_project()
+    claude_home = tmp_path / "claude-home"
+
+    (claude_home / "plugins" / "cache").mkdir(parents=True)
+
+    # Create user-level and project-level commands (require description frontmatter)
+    user_commands = claude_home / "commands"
+    user_commands.mkdir(parents=True)
+    (user_commands / "review.md").write_text(
+        "---\ndescription: Review code\n---\n\nYou are a code reviewer.\n"
+    )
+
+    project_commands = project_root / ".claude" / "commands"
+    project_commands.mkdir(parents=True)
+    (project_commands / "test.md").write_text(
+        "---\ndescription: Run tests\n---\n\nRun the tests.\n"
+    )
+
+    exit_code = cli.main([
+        "validate",
+        "--project", str(project_root),
+        "--claude-home", str(claude_home),
+    ])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "TRANSLATED_COMMANDS: 2" in captured.out
+
+
 def test_cli_exclude_command_flag(make_project, make_plugin_version, tmp_path: Path, capsys):
     """--exclude-command filters commands from reconcile."""
     project_root, _agents_md = make_project()
