@@ -984,27 +984,6 @@ def _assert_path_contained(path: Path, root: Path, *, label: str) -> None:
         )
 
 
-def _assert_path_contained_in_roots(
-    path: Path,
-    roots: Iterable[Path],
-    *,
-    label: str,
-) -> None:
-    """Assert that the resolved path stays within at least one resolved root."""
-    resolved = path.resolve()
-    resolved_roots = tuple(dict.fromkeys(root.resolve() for root in roots))
-    for root_resolved in resolved_roots:
-        try:
-            resolved.relative_to(root_resolved)
-            return
-        except ValueError:
-            continue
-
-    formatted_roots = ", ".join(str(root) for root in resolved_roots)
-    raise ReconcileError(
-        f"{label} resolves outside expected roots: {resolved} is not under any of {formatted_roots}"
-    )
-
 
 def _atomic_write_file(path: Path, content: bytes, *, container: Path | None = None) -> None:
     """Write a file atomically via temp-file-then-rename."""
@@ -1098,31 +1077,20 @@ def _plan_mutations(
     project_changes = _compute_project_file_changes(desired, previous_state)
     project_skill_changes = _plan_project_skill_mutations(desired, previous_state)
 
-    # Load registry snapshots once and share between skill and agent planners.
-    current_snapshot = _load_registry_snapshot(desired.bridge_home / GLOBAL_REGISTRY_FILENAME)
-    previous_snapshot = current_snapshot
-    if previous_state is not None and previous_state.bridge_home != desired.bridge_home:
-        previous_snapshot = _load_registry_snapshot(
-            previous_state.bridge_home / GLOBAL_REGISTRY_FILENAME
-        )
+    snapshot = _load_registry_snapshot(desired.bridge_home / GLOBAL_REGISTRY_FILENAME)
 
-    skill_changes, updated_current, updated_previous = _plan_skill_mutations(
-        desired, previous_state, current_snapshot, previous_snapshot,
+    skill_changes, updated_registry = _plan_skill_mutations(
+        desired, previous_state, snapshot,
     )
-    agent_changes, updated_current, updated_previous = _plan_global_agent_mutations(
-        desired, previous_state, current_snapshot, previous_snapshot,
-        updated_current, updated_previous,
+    agent_changes, updated_registry = _plan_global_agent_mutations(
+        desired, previous_state, snapshot, updated_registry,
     )
 
-    # Build registry writes from the final accumulated state.
+    # Build registry write from the final accumulated state.
     registry_writes: list[_RegistryWrite] = []
-    current_write = _build_registry_write(current_snapshot, updated_current)
-    if current_write is not None:
-        registry_writes.append(current_write)
-    if previous_snapshot.path != current_snapshot.path:
-        previous_write = _build_registry_write(previous_snapshot, updated_previous)
-        if previous_write is not None:
-            registry_writes.append(previous_write)
+    registry_write = _build_registry_write(snapshot, updated_registry)
+    if registry_write is not None:
+        registry_writes.append(registry_write)
 
     global_changes = _plan_global_instructions_changes(desired)
     return _MutationPlan(
@@ -1238,13 +1206,12 @@ def _compute_project_file_changes(
 def _plan_skill_mutations(
     desired: DesiredState,
     previous_state: BridgeState | None,
-    current_snapshot: _RegistrySnapshot,
-    previous_snapshot: _RegistrySnapshot,
-) -> tuple[tuple[Change, ...], GlobalSkillRegistry, GlobalSkillRegistry]:
+    snapshot: _RegistrySnapshot,
+) -> tuple[tuple[Change, ...], GlobalSkillRegistry]:
     """Plan global-skill ownership and directory mutations.
 
-    Returns the change list plus the updated current and previous
-    registries for the caller to pass into the agent planner.
+    Returns the change list plus the updated registry for the caller
+    to pass into the agent planner.
     """
     desired_skills = {skill.install_dir_name: skill for skill in desired.skills}
     desired_hashes = {
@@ -1253,17 +1220,17 @@ def _plan_skill_mutations(
     }
     changes: list[Change] = []
 
-    updated_current = GlobalSkillRegistry(
-        skills=dict(current_snapshot.registry.skills),
+    updated_registry = GlobalSkillRegistry(
+        skills=dict(snapshot.registry.skills),
         projects=_ensure_project_in_list(
-            current_snapshot.registry.projects, desired.project_root
+            snapshot.registry.projects, desired.project_root
         ),
-        agents=dict(current_snapshot.registry.agents),
+        agents=dict(snapshot.registry.agents),
     )
     for install_dir_name in sorted(desired_skills):
         skill = desired_skills[install_dir_name]
         destination = desired.codex_home / "skills" / install_dir_name
-        existing_entry = updated_current.skills.get(install_dir_name)
+        existing_entry = updated_registry.skills.get(install_dir_name)
         desired_hash = desired_hashes[install_dir_name]
         registry_owned = existing_entry is not None
 
@@ -1294,7 +1261,7 @@ def _plan_skill_mutations(
         else:
             existing_owners = existing_entry.owners if existing_entry is not None else ()
 
-        updated_current.skills[install_dir_name] = GlobalSkillEntry(
+        updated_registry.skills[install_dir_name] = GlobalSkillEntry(
             content_hash=desired_hash,
             owners=_sorted_owner_set((*existing_owners, desired.project_root)),
         )
@@ -1306,55 +1273,28 @@ def _plan_skill_mutations(
             continue
         changes.append(Change("update", destination, resource_kind="skill"))
 
-    previously_owned_current = _owned_skill_names(
-        current_snapshot.registry,
+    previously_owned = _owned_skill_names(
+        snapshot.registry,
         desired.project_root,
     )
-    for install_dir_name in sorted(previously_owned_current - set(desired_skills)):
-        entry = updated_current.skills[install_dir_name]
+    for install_dir_name in sorted(previously_owned - set(desired_skills)):
+        entry = updated_registry.skills[install_dir_name]
         remaining_owners = tuple(
             owner for owner in entry.owners if owner != desired.project_root
         )
         if remaining_owners:
-            updated_current.skills[install_dir_name] = GlobalSkillEntry(
+            updated_registry.skills[install_dir_name] = GlobalSkillEntry(
                 content_hash=entry.content_hash,
                 owners=remaining_owners,
             )
             continue
 
-        del updated_current.skills[install_dir_name]
+        del updated_registry.skills[install_dir_name]
         stale_path = desired.codex_home / "skills" / install_dir_name
         if stale_path.exists():
             changes.append(Change("remove", stale_path, resource_kind="skill"))
 
-    # Build updated previous registry for skill ownership release
-    updated_previous = GlobalSkillRegistry(
-        skills=dict(previous_snapshot.registry.skills),
-        projects=tuple(
-            p for p in previous_snapshot.registry.projects
-            if p != desired.project_root
-        ),
-        agents=dict(previous_snapshot.registry.agents),
-    )
-    if previous_snapshot.path != current_snapshot.path:
-        for install_dir_name in sorted(_owned_skill_names(previous_snapshot.registry, desired.project_root)):
-            entry = updated_previous.skills[install_dir_name]
-            remaining_owners = tuple(
-                owner for owner in entry.owners if owner != desired.project_root
-            )
-            if remaining_owners:
-                updated_previous.skills[install_dir_name] = GlobalSkillEntry(
-                    content_hash=entry.content_hash,
-                    owners=remaining_owners,
-                )
-                continue
-
-            del updated_previous.skills[install_dir_name]
-            stale_path = previous_snapshot.path.parent / "skills" / install_dir_name
-            if stale_path.exists():
-                changes.append(Change("remove", stale_path, resource_kind="skill"))
-
-    return tuple(changes), updated_current, updated_previous
+    return tuple(changes), updated_registry
 
 
 def _plan_global_instructions_changes(desired: DesiredState) -> tuple[Change, ...]:
@@ -1384,15 +1324,13 @@ def _plan_global_instructions_changes(desired: DesiredState) -> tuple[Change, ..
 def _plan_global_agent_mutations(
     desired: DesiredState,
     previous_state: BridgeState | None,
-    current_snapshot: _RegistrySnapshot,
-    previous_snapshot: _RegistrySnapshot,
-    updated_current: GlobalSkillRegistry,
-    updated_previous: GlobalSkillRegistry,
-) -> tuple[tuple[Change, ...], GlobalSkillRegistry, GlobalSkillRegistry]:
+    snapshot: _RegistrySnapshot,
+    updated_registry: GlobalSkillRegistry,
+) -> tuple[tuple[Change, ...], GlobalSkillRegistry]:
     """Plan global agent file and registry mutations.
 
-    Receives the updated registries from the skill planner and continues
-    accumulating changes.  Returns the final updated registries.
+    Receives the updated registry from the skill planner and continues
+    accumulating changes.  Returns the final updated registry.
     """
     from cc_codex_bridge.render_agent_toml import render_agent_toml
 
@@ -1413,7 +1351,7 @@ def _plan_global_agent_mutations(
 
     for filename in sorted(desired_agents):
         destination = desired.codex_home / "agents" / filename
-        existing_entry = updated_current.agents.get(filename)
+        existing_entry = updated_registry.agents.get(filename)
         desired_hash = desired_hashes[filename]
         registry_owned = existing_entry is not None
 
@@ -1436,7 +1374,7 @@ def _plan_global_agent_mutations(
         else:
             existing_owners = existing_entry.owners if existing_entry is not None else ()
 
-        updated_current.agents[filename] = GlobalAgentEntry(
+        updated_registry.agents[filename] = GlobalAgentEntry(
             content_hash=desired_hash,
             owners=_sorted_owner_set((*existing_owners, desired.project_root)),
         )
@@ -1455,45 +1393,26 @@ def _plan_global_agent_mutations(
 
     # Detect stale agent files owned by this project
     previously_owned_agents = _owned_agent_filenames(
-        current_snapshot.registry, desired.project_root
+        snapshot.registry, desired.project_root
     )
     for filename in sorted(previously_owned_agents - set(desired_agents)):
-        entry = updated_current.agents[filename]
+        entry = updated_registry.agents[filename]
         remaining_owners = tuple(
             owner for owner in entry.owners if owner != desired.project_root
         )
         if remaining_owners:
-            updated_current.agents[filename] = GlobalAgentEntry(
+            updated_registry.agents[filename] = GlobalAgentEntry(
                 content_hash=entry.content_hash,
                 owners=remaining_owners,
             )
             continue
 
-        del updated_current.agents[filename]
+        del updated_registry.agents[filename]
         stale_path = desired.codex_home / "agents" / filename
         if stale_path.exists():
             changes.append(Change("remove", stale_path, resource_kind="agent"))
 
-    # Handle codex home migration for agents
-    if previous_snapshot.path != current_snapshot.path:
-        for filename in sorted(_owned_agent_filenames(previous_snapshot.registry, desired.project_root)):
-            entry = updated_previous.agents[filename]
-            remaining_owners = tuple(
-                owner for owner in entry.owners if owner != desired.project_root
-            )
-            if remaining_owners:
-                updated_previous.agents[filename] = GlobalAgentEntry(
-                    content_hash=entry.content_hash,
-                    owners=remaining_owners,
-                )
-                continue
-
-            del updated_previous.agents[filename]
-            stale_path = previous_snapshot.path.parent / "agents" / filename
-            if stale_path.exists():
-                changes.append(Change("remove", stale_path, resource_kind="agent"))
-
-    return tuple(changes), updated_current, updated_previous
+    return tuple(changes), updated_registry
 
 
 def _owned_agent_filenames(registry: GlobalSkillRegistry, project_root: Path) -> set[str]:
@@ -1589,15 +1508,11 @@ def _validate_mutation_targets(
     state_write_needed: bool,
 ) -> None:
     """Reject plans whose write or delete targets escape managed roots."""
-    allowed_global_roots = [desired.codex_home]
-    if previous_state is not None and previous_state.codex_home != desired.codex_home:
-        allowed_global_roots.append(previous_state.codex_home)
-
     for change in plan.changes:
         if change.resource_kind in {"skill", "agent", "global_instructions"}:
-            _assert_path_contained_in_roots(
+            _assert_path_contained(
                 change.path,
-                allowed_global_roots,
+                desired.codex_home,
                 label="Managed global target",
             )
             continue

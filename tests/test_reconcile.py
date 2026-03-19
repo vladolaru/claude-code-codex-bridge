@@ -371,40 +371,6 @@ def test_reconcile_updates_shared_agent_when_plugin_upgrades(
     )
 
 
-def test_reconcile_moves_managed_skills_when_codex_home_changes(
-    make_project,
-    make_plugin_version,
-    tmp_path: Path,
-):
-    """Changing Codex home installs skills to the new location and updates state."""
-    project_root, _agents_md = make_project()
-    cache_root, version_dir = make_plugin_version(
-        "market",
-        "prompt-engineer",
-        "1.0.0",
-        skill_names=("prompt-engineer",),
-    )
-    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
-        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
-    )
-    first_home = tmp_path / "codex-home-one"
-    second_home = tmp_path / "codex-home-two"
-
-    reconcile_desired_state(_build_desired(project_root, cache_root, first_home))
-    original_skill = first_home / "skills" / "prompt-engineer"
-    assert original_skill.exists()
-
-    reconcile_desired_state(_build_desired(project_root, cache_root, second_home))
-
-    # New skill installed at the new codex home
-    assert (second_home / "skills" / "prompt-engineer").exists()
-    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
-    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
-    state_path = state_dir / "state.json"
-    assert '"codex_home": "' + str(second_home.resolve()) + '"' in (
-        state_path
-    ).read_text()
-
 
 def test_diff_report_includes_unified_diff_for_updated_text_files(
     make_project,
@@ -1171,85 +1137,6 @@ def test_removing_one_global_agent_keeps_sibling(
     assert len(remaining) == 1
     assert "helper" in remaining[0].name
 
-
-def test_reconcile_codex_home_migration_preserves_other_owners_in_previous_registry(
-    make_project,
-    make_plugin_version,
-    tmp_path: Path,
-):
-    """Moving codex home preserves other projects' ownership in the previous registry."""
-    first_project, _ = make_project("project-a")
-    second_project, _ = make_project("project-b")
-    cache_root, version_dir = make_plugin_version(
-        "market",
-        "prompt-engineer",
-        "1.0.0",
-        skill_names=("prompt-engineer",),
-    )
-    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
-        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
-    )
-    first_home = tmp_path / "codex-home-one"
-    second_home = tmp_path / "codex-home-two"
-
-    reconcile_desired_state(_build_desired(first_project, cache_root, first_home))
-    reconcile_desired_state(_build_desired(second_project, cache_root, first_home))
-
-    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
-    original_registry = _read_global_registry(bridge_home)
-    assert sorted(
-        original_registry["skills"]["prompt-engineer"]["owners"]
-    ) == sorted([str(first_project), str(second_project)])
-
-    reconcile_desired_state(_build_desired(first_project, cache_root, second_home))
-
-    # Registry is a single file under bridge_home — after migration,
-    # first_project owns the skill in second_home and second_project
-    # still owns it in first_home.
-    updated_registry = _read_global_registry(bridge_home)
-    assert sorted(
-        updated_registry["skills"]["prompt-engineer"]["owners"]
-    ) == sorted([str(first_project), str(second_project)])
-    assert (first_home / "skills" / "prompt-engineer").exists()
-    assert (second_home / "skills" / "prompt-engineer").exists()
-
-
-def test_reconcile_codex_home_migration_preserves_projects_list_in_previous_registry(
-    make_project,
-    make_plugin_version,
-    tmp_path: Path,
-):
-    """Moving codex home preserves the projects list in the previous registry."""
-    first_project, _ = make_project("project-a")
-    second_project, _ = make_project("project-b")
-    cache_root, version_dir = make_plugin_version(
-        "market",
-        "prompt-engineer",
-        "1.0.0",
-        skill_names=("prompt-engineer",),
-    )
-    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
-        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
-    )
-    first_home = tmp_path / "codex-home-one"
-    second_home = tmp_path / "codex-home-two"
-
-    # Both projects register in the first home
-    reconcile_desired_state(_build_desired(first_project, cache_root, first_home))
-    reconcile_desired_state(_build_desired(second_project, cache_root, first_home))
-
-    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
-    original_registry = _read_global_registry(bridge_home)
-    assert str(first_project) in original_registry["projects"]
-    assert str(second_project) in original_registry["projects"]
-
-    # Migrate first_project to a new codex home
-    reconcile_desired_state(_build_desired(first_project, cache_root, second_home))
-
-    # Single registry under bridge_home — both projects still listed
-    updated_registry = _read_global_registry(bridge_home)
-    assert str(first_project) in updated_registry["projects"]
-    assert str(second_project) in updated_registry["projects"]
 
 
 def test_reconcile_rejects_traversal_paths_in_corrupted_state(

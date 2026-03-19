@@ -218,7 +218,6 @@ The global registry records:
 - stale managed outputs are removed when no longer desired
 - cleanup uses the codex_home recorded in bridge state, not the caller-supplied value, to ensure registry operations target the correct global state
 - project-local generated skill directories are removed as whole directories, not individual files, consistent with global skill directory ownership
-- if the configured Codex home changes, the current project's old registry claims are released from the previous Codex home during the same reconcile
 
 ## 7. Discovery Architecture
 
