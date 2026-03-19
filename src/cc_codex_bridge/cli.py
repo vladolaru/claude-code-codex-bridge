@@ -36,8 +36,8 @@ from cc_codex_bridge.model import (
     SkillValidationDiagnostic,
     TranslationError,
 )
+from cc_codex_bridge.bridge_home import resolve_bridge_home, project_state_dir
 from cc_codex_bridge.reconcile import (
-    STATE_RELATIVE_PATH,
     build_project_desired_state,
     diff_desired_state,
     format_change_report,
@@ -424,12 +424,14 @@ def main(argv: list[str] | None = None) -> int:
 
 def _handle_clean_command(args: argparse.Namespace) -> int:
     """Handle the clean command."""
+    bridge_home_path = resolve_bridge_home()
     try:
         project_root = resolve_project_root(args.project or Path.cwd()).root
     except (DiscoveryError, OSError, UnicodeError):
         # Discovery failed — try to resolve from bridge state instead
         candidate = Path(args.project or Path.cwd()).resolve()
-        state_path = candidate / STATE_RELATIVE_PATH
+        state_dir = project_state_dir(candidate, bridge_home=bridge_home_path)
+        state_path = state_dir / "state.json"
         if state_path.exists() and not state_path.is_symlink():
             project_root = candidate
         else:
@@ -443,6 +445,7 @@ def _handle_clean_command(args: argparse.Namespace) -> int:
         from cc_codex_bridge.reconcile import clean_project
         report = clean_project(
             project_root,
+            bridge_home=bridge_home_path,
             dry_run=args.dry_run,
         )
     except (ReconcileError, OSError, UnicodeError) as exc:

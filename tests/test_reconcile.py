@@ -9,12 +9,12 @@ from unittest.mock import patch
 import pytest
 
 import cc_codex_bridge.reconcile as reconcile_module
+from cc_codex_bridge.bridge_home import project_state_dir
 from cc_codex_bridge.claude_shim import plan_claude_shim
 from cc_codex_bridge.discover import discover
 from cc_codex_bridge.model import ReconcileError, TranslationError
 from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME, GlobalSkillRegistry
 from cc_codex_bridge.reconcile import (
-    STATE_RELATIVE_PATH,
     ReconcileReport,
     build_desired_state,
     diff_desired_state,
@@ -80,11 +80,14 @@ def test_reconcile_writes_project_and_codex_outputs(
     assert global_agent_toml.exists()
     agent_content = global_agent_toml.read_text()
     assert "architecture-reviewer" in agent_content
-    assert (project_root / STATE_RELATIVE_PATH).exists()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
+    assert state_path.exists()
     assert (
         codex_home / "skills" / "decision-critic" / "SKILL.md"
     ).read_text().startswith("---\nname: decision-critic\n")
-    state_payload = json.loads((project_root / STATE_RELATIVE_PATH).read_text())
+    state_payload = json.loads(state_path.read_text())
     assert "managed_codex_skill_dirs" not in state_payload
     registry_payload = _read_global_registry(codex_home)
     assert registry_payload["skills"]["decision-critic"]["owners"] == [
@@ -392,8 +395,11 @@ def test_reconcile_moves_managed_skills_when_codex_home_changes(
 
     assert not original_skill.exists()
     assert (second_home / "skills" / "prompt-engineer").exists()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
     assert '"codex_home": "' + str(second_home.resolve()) + '"' in (
-        project_root / STATE_RELATIVE_PATH
+        state_path
     ).read_text()
 
 
@@ -645,14 +651,17 @@ def test_reconcile_rejects_unexpected_managed_project_files_in_state(
     (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
         "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
     )
-    state_path = project_root / STATE_RELATIVE_PATH
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
     state_path.parent.mkdir(parents=True)
     state_path.write_text(
         json.dumps(
             {
-                "version": 5,
+                "version": 6,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
+                "bridge_home": str(bridge_home),
                 "managed_project_files": ["AGENTS.md", ".claude/settings.local.json"],
             },
             indent=2,
@@ -676,15 +685,18 @@ def test_reconcile_rejects_unexpected_managed_project_skill_dirs_in_state(
     """Corrupted state may not authorize touching arbitrary project skill directories."""
     project_root, _agents_md = make_project()
     cache_root, _version_dir = make_plugin_version("market", "prompt-engineer", "1.0.0")
-    state_path = project_root / STATE_RELATIVE_PATH
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
     state_path.parent.mkdir(parents=True)
     state_path.write_text(
         json.dumps(
             {
-                "version": 5,
+                "version": 6,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
-                "managed_project_files": [STATE_RELATIVE_PATH.as_posix()],
+                "bridge_home": str(bridge_home),
+                "managed_project_files": [],
                 "managed_project_skill_dirs": ["../../../bridge-victim-test"],
             },
             indent=2,
@@ -715,15 +727,18 @@ def test_reconcile_rejects_foreign_project_state(
     (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
         "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
     )
-    state_path = project_root / STATE_RELATIVE_PATH
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
     state_path.parent.mkdir(parents=True)
     state_path.write_text(
         json.dumps(
             {
-                "version": 5,
+                "version": 6,
                 "project_root": str(tmp_path / "different-project"),
                 "codex_home": str(tmp_path / "codex-home"),
-                "managed_project_files": [STATE_RELATIVE_PATH.as_posix()],
+                "bridge_home": str(bridge_home),
+                "managed_project_files": [],
             },
             indent=2,
             sort_keys=True,
@@ -753,9 +768,11 @@ def test_reconcile_rejects_symlinked_state_file(
     (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
         "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
     )
-    state_path = project_root / STATE_RELATIVE_PATH
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
     state_path.parent.mkdir(parents=True)
-    real_state = project_root / "real-state.json"
+    real_state = tmp_path / "real-state.json"
     real_state.write_text("{}\n")
     state_path.symlink_to(real_state)
 
@@ -1242,15 +1259,18 @@ def test_reconcile_rejects_traversal_paths_in_corrupted_state(
     """Corrupted state with parent traversal paths is rejected."""
     project_root, _agents_md = make_project()
     cache_root, _version_dir = make_plugin_version("market", "prompt-engineer", "1.0.0")
-    state_path = project_root / STATE_RELATIVE_PATH
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
     state_path.parent.mkdir(parents=True)
     state_path.write_text(
         json.dumps(
             {
-                "version": 5,
+                "version": 6,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
-                "managed_project_files": ["..", STATE_RELATIVE_PATH.as_posix()],
+                "bridge_home": str(bridge_home),
+                "managed_project_files": [".."],
             },
             indent=2,
             sort_keys=True,
@@ -1300,15 +1320,18 @@ def test_reconcile_rejects_absolute_paths_in_corrupted_state(
     """Corrupted state with absolute paths is rejected."""
     project_root, _agents_md = make_project()
     cache_root, _version_dir = make_plugin_version("market", "prompt-engineer", "1.0.0")
-    state_path = project_root / STATE_RELATIVE_PATH
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
     state_path.parent.mkdir(parents=True)
     state_path.write_text(
         json.dumps(
             {
-                "version": 5,
+                "version": 6,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
-                "managed_project_files": ["/etc/passwd", STATE_RELATIVE_PATH.as_posix()],
+                "bridge_home": str(bridge_home),
+                "managed_project_files": ["/etc/passwd"],
             },
             indent=2,
             sort_keys=True,
@@ -1330,15 +1353,18 @@ def test_reconcile_rejects_empty_paths_in_corrupted_state(
     """Corrupted state with empty managed path is rejected."""
     project_root, _agents_md = make_project()
     cache_root, _version_dir = make_plugin_version("market", "prompt-engineer", "1.0.0")
-    state_path = project_root / STATE_RELATIVE_PATH
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
     state_path.parent.mkdir(parents=True)
     state_path.write_text(
         json.dumps(
             {
-                "version": 5,
+                "version": 6,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
-                "managed_project_files": [".", STATE_RELATIVE_PATH.as_posix()],
+                "bridge_home": str(bridge_home),
+                "managed_project_files": ["."],
             },
             indent=2,
             sort_keys=True,
@@ -1887,10 +1913,12 @@ def test_clean_removes_all_managed_project_files(
 
     # Verify artifacts exist before clean
     assert (project_root / "CLAUDE.md").exists()
-    state_path = project_root / ".codex" / "claude-code-bridge-state.json"
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
     assert state_path.exists()
 
-    report = clean_project(project_root)
+    report = clean_project(project_root, bridge_home=bridge_home)
     assert report.applied is True
     assert len(report.changes) > 0
 
@@ -1919,7 +1947,8 @@ def test_clean_releases_last_owner_skill(
     skill_dir = codex_home / "skills" / "review"
     assert skill_dir.exists()
 
-    report = clean_project(project_root)
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    report = clean_project(project_root, bridge_home=bridge_home)
     assert report.applied is True
     assert not skill_dir.exists()
 
@@ -1952,7 +1981,8 @@ def test_clean_releases_shared_skill_preserves_for_other_owner(
     assert skill_dir.exists()
 
     # Clean project A only
-    report = clean_project(project_a)
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    report = clean_project(project_a, bridge_home=bridge_home)
     assert report.applied is True
 
     # Skill directory still exists — project B still owns it
@@ -1974,7 +2004,8 @@ def test_clean_no_state_is_noop(make_project, tmp_path: Path):
 
     from cc_codex_bridge.reconcile import clean_project
 
-    report = clean_project(project_root)
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    report = clean_project(project_root, bridge_home=bridge_home)
     assert report.applied is True
     assert len(report.changes) == 0
 
@@ -1995,7 +2026,8 @@ def test_clean_dry_run_no_side_effects(
     desired = _reconcile_once(project_root, cache_root, codex_home)
     reconcile_desired_state(desired)
 
-    report = clean_project(project_root, dry_run=True)
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    report = clean_project(project_root, bridge_home=bridge_home, dry_run=True)
     assert report.applied is False
     assert len(report.changes) > 0
 
@@ -2024,7 +2056,8 @@ def test_clean_preserves_bridge_toml(
     desired = _reconcile_once(project_root, cache_root, codex_home)
     reconcile_desired_state(desired)
 
-    clean_project(project_root)
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    clean_project(project_root, bridge_home=bridge_home)
 
     # bridge.toml survives
     assert bridge_toml.exists()
@@ -2048,7 +2081,8 @@ def test_clean_removes_claude_md_shim(
 
     assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
 
-    clean_project(project_root)
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    clean_project(project_root, bridge_home=bridge_home)
 
     assert not (project_root / "CLAUDE.md").exists()
 
@@ -2075,7 +2109,8 @@ def test_clean_preserves_preexisting_claude_md_shim(
     # Bridge preserved the existing CLAUDE.md (action=preserve, not create)
     assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
 
-    clean_project(project_root)
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    clean_project(project_root, bridge_home=bridge_home)
 
     # CLAUDE.md must survive clean — it was not created by the bridge
     assert (project_root / "CLAUDE.md").exists()
@@ -2099,7 +2134,8 @@ def test_clean_does_not_touch_global_agents_md(
     (codex_home / "AGENTS.md").parent.mkdir(parents=True, exist_ok=True)
     (codex_home / "AGENTS.md").write_text("# Global instructions\n")
 
-    clean_project(project_root)
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    clean_project(project_root, bridge_home=bridge_home)
 
     # Global AGENTS.md untouched
     assert (codex_home / "AGENTS.md").exists()
@@ -2228,7 +2264,8 @@ def test_clean_removes_project_from_registry_projects_list(
 
     # Clean project A
     from cc_codex_bridge.reconcile import clean_project
-    clean_project(project_a)
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    clean_project(project_a, bridge_home=bridge_home)
 
     # Project A removed, project B still present
     registry_data = _read_global_registry(codex_home)
@@ -2247,14 +2284,17 @@ def test_clean_uses_state_recorded_codex_home(make_project, tmp_path: Path):
     actual_codex.mkdir()
     wrong_codex = tmp_path / "wrong-codex"
     wrong_codex.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
 
     # Build state that records actual_codex as the codex_home
     state = BridgeState(
         project_root=project_root.resolve(),
         codex_home=actual_codex.resolve(),
-        managed_project_files=(STATE_RELATIVE_PATH.as_posix(),),
+        bridge_home=bridge_home.resolve(),
+        managed_project_files=(),
     )
-    state_path = project_root / STATE_RELATIVE_PATH
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(state.to_json())
 
@@ -2274,7 +2314,7 @@ def test_clean_uses_state_recorded_codex_home(make_project, tmp_path: Path):
     (skill_dir / "SKILL.md").write_text("content\n")
 
     # Clean with the wrong codex_home — should still clean the actual one
-    report = clean_project(project_root)
+    report = clean_project(project_root, bridge_home=bridge_home)
     assert report.applied is True
 
     # The actual codex registry should have the project removed
@@ -2287,35 +2327,42 @@ def test_clean_uses_state_recorded_codex_home(make_project, tmp_path: Path):
     assert not skill_dir.exists()
 
 
-def test_clean_dry_run_reports_state_file_removal(make_project, tmp_path: Path):
-    """clean --dry-run must report the state file in the removal set."""
+def test_clean_dry_run_reports_managed_file_removal(make_project, tmp_path: Path):
+    """clean --dry-run must report managed project files in the removal set."""
     from cc_codex_bridge.reconcile import clean_project
     from cc_codex_bridge.state import BridgeState
 
     project_root, _ = make_project()
     codex = tmp_path / "codex"
     codex.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
 
     # Create an empty registry so clean_project doesn't fail on missing registry
     registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
     (codex / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
 
+    # Create a managed CLAUDE.md so there's something to report
+    (project_root / "CLAUDE.md").write_text("@AGENTS.md\n")
+
     state = BridgeState(
         project_root=project_root.resolve(),
         codex_home=codex.resolve(),
-        managed_project_files=(STATE_RELATIVE_PATH.as_posix(),),
+        bridge_home=bridge_home.resolve(),
+        managed_project_files=("CLAUDE.md",),
     )
-    state_path = project_root / STATE_RELATIVE_PATH
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(state.to_json())
 
-    report = clean_project(project_root, dry_run=True)
+    report = clean_project(project_root, bridge_home=bridge_home, dry_run=True)
 
     removed_paths = {change.path for change in report.changes}
-    assert state_path in removed_paths, "dry-run must report state file removal"
+    assert (project_root / "CLAUDE.md") in removed_paths, "dry-run must report managed file removal"
 
-    # State file should still exist (dry-run)
+    # Everything should still exist (dry-run)
     assert state_path.exists()
+    assert (project_root / "CLAUDE.md").exists()
 
 
 def test_clean_removes_full_project_skill_directory(make_project, tmp_path: Path):
@@ -2326,6 +2373,7 @@ def test_clean_removes_full_project_skill_directory(make_project, tmp_path: Path
     project_root, _ = make_project()
     codex = tmp_path / "codex"
     codex.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
 
     # Create an empty registry so clean_project doesn't fail on missing registry
     registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
@@ -2339,16 +2387,16 @@ def test_clean_removes_full_project_skill_directory(make_project, tmp_path: Path
     state = BridgeState(
         project_root=project_root.resolve(),
         codex_home=codex.resolve(),
-        managed_project_files=(
-            STATE_RELATIVE_PATH.as_posix(),
-        ),
+        bridge_home=bridge_home.resolve(),
+        managed_project_files=(),
         managed_project_skill_dirs=("demo",),
     )
-    state_path = project_root / STATE_RELATIVE_PATH
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(state.to_json())
 
-    report = clean_project(project_root)
+    report = clean_project(project_root, bridge_home=bridge_home)
     assert report.applied is True
 
     # The entire skill directory should be gone, including extra.txt
@@ -2384,7 +2432,14 @@ def test_reconcile_rejects_symlinked_codex_ancestor(
 ):
     """Reconcile must refuse to write through a symlinked .codex directory."""
     project_root, _ = make_project()
-    cache_root, _ = make_plugin_version("market", "tools", "1.0.0", skill_names=("review",))
+    # Use a project-local agent so that a .codex/agents/*.toml file is generated
+    project_agent_dir = project_root / ".claude" / "agents"
+    project_agent_dir.mkdir(parents=True)
+    (project_agent_dir / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nPrompt body.\n"
+    )
+    cache_root = tmp_path / "claude-cache"
+    cache_root.mkdir(parents=True)
     codex_home = tmp_path / "codex_home"
     codex_home.mkdir()
 
@@ -2405,7 +2460,14 @@ def test_diff_rejects_symlinked_codex_ancestor(
 ):
     """Dry-run planning must fail when reconcile write targets resolve outside the project."""
     project_root, _ = make_project()
-    cache_root, _ = make_plugin_version("market", "tools", "1.0.0", skill_names=("review",))
+    # Use a project-local agent so that a .codex/agents/*.toml file is generated
+    project_agent_dir = project_root / ".claude" / "agents"
+    project_agent_dir.mkdir(parents=True)
+    (project_agent_dir / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nPrompt body.\n"
+    )
+    cache_root = tmp_path / "claude-cache"
+    cache_root.mkdir(parents=True)
     codex_home = tmp_path / "codex_home"
     codex_home.mkdir()
 
@@ -2447,34 +2509,45 @@ def test_reconcile_rejects_symlinked_global_skill_directory(
         diff_desired_state(desired)
 
 
-def test_clean_rejects_symlinked_codex_ancestor(make_project, tmp_path):
-    """clean must refuse to operate through a symlinked .codex directory."""
+def test_clean_rejects_symlinked_projects_dir_under_bridge_home(make_project, tmp_path):
+    """clean must refuse to operate when the projects dir under bridge home is a symlink."""
     from cc_codex_bridge.reconcile import clean_project
     from cc_codex_bridge.state import BridgeState
 
     project_root, _ = make_project()
     codex_home = tmp_path / "codex_home"
     codex_home.mkdir()
+    bridge_home = tmp_path / "bridge-home"
+    bridge_home.mkdir(parents=True)
 
-    # Set up a valid state file first (before the symlink)
-    state_path = project_root / ".codex" / "claude-code-bridge-state.json"
+    # Write state to the real location first
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    real_projects_dir = state_dir.parent  # bridge_home / "projects"
+
+    # Write the state file in the real location
+    state_path = state_dir / "state.json"
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state = BridgeState(
-        project_root=project_root,
-        codex_home=codex_home,
-        managed_project_files=("CLAUDE.md", ".codex/claude-code-bridge-state.json"),
+        project_root=project_root.resolve(),
+        codex_home=codex_home.resolve(),
+        bridge_home=bridge_home.resolve(),
+        managed_project_files=("CLAUDE.md",),
     )
     state_path.write_text(state.to_json())
 
-    # Now replace .codex with a symlink
-    import shutil
-    outside = tmp_path / "outside"
-    shutil.copytree(project_root / ".codex", outside)
-    shutil.rmtree(project_root / ".codex")
-    (project_root / ".codex").symlink_to(outside)
+    # Create a registry so clean doesn't fail on missing registry
+    registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
+    (codex_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
 
+    # Move the real projects dir outside and replace with a symlink
+    import shutil
+    outside = tmp_path / "outside-projects"
+    shutil.move(str(real_projects_dir), str(outside))
+    real_projects_dir.symlink_to(outside)
+
+    # The state path now resolves through a symlink to outside bridge_home
     with pytest.raises(ReconcileError, match="resolves outside"):
-        clean_project(project_root)
+        clean_project(project_root, bridge_home=bridge_home)
 
 
 def test_clean_rejects_unexpected_managed_project_skill_dirs_in_state(make_project, tmp_path: Path):
@@ -2485,19 +2558,22 @@ def test_clean_rejects_unexpected_managed_project_skill_dirs_in_state(make_proje
     project_root, _ = make_project()
     codex_home = tmp_path / "codex_home"
     codex_home.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
 
-    state_path = project_root / STATE_RELATIVE_PATH
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state = BridgeState(
         project_root=project_root.resolve(),
         codex_home=codex_home.resolve(),
-        managed_project_files=(STATE_RELATIVE_PATH.as_posix(),),
+        bridge_home=bridge_home.resolve(),
+        managed_project_files=(),
         managed_project_skill_dirs=("../../../bridge-victim-test",),
     )
     state_path.write_text(state.to_json())
 
     with pytest.raises(ReconcileError, match="unexpected managed project skill directories"):
-        clean_project(project_root)
+        clean_project(project_root, bridge_home=bridge_home)
 
 
 def test_clean_rejects_unexpected_managed_project_files_in_state(make_project, tmp_path: Path):
@@ -2513,21 +2589,23 @@ def test_clean_rejects_unexpected_managed_project_files_in_state(make_project, t
     project_root, agents_md = make_project()
     codex_home = tmp_path / "codex_home"
     codex_home.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
 
-    state_path = project_root / STATE_RELATIVE_PATH
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state = BridgeState(
         project_root=project_root.resolve(),
         codex_home=codex_home.resolve(),
+        bridge_home=bridge_home.resolve(),
         managed_project_files=(
-            STATE_RELATIVE_PATH.as_posix(),
             "AGENTS.md",  # NOT a valid managed path
         ),
     )
     state_path.write_text(state.to_json())
 
     with pytest.raises(ReconcileError, match="unexpected managed project files"):
-        clean_project(project_root)
+        clean_project(project_root, bridge_home=bridge_home)
 
     # AGENTS.md must survive
     assert agents_md.exists()
@@ -2556,16 +2634,19 @@ def test_clean_fails_when_global_registry_missing(
     codex_home = tmp_path / "codex-home"
 
     reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
-    assert (project_root / STATE_RELATIVE_PATH).exists()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
+    assert state_path.exists()
 
     # Delete the registry — simulates manual removal
     registry_path = codex_home / GLOBAL_REGISTRY_FILENAME
     registry_path.unlink()
 
     with pytest.raises(ReconcileError, match="global.*registry"):
-        clean_project(project_root)
+        clean_project(project_root, bridge_home=bridge_home)
     # State file must be preserved for retry
-    assert (project_root / STATE_RELATIVE_PATH).exists()
+    assert state_path.exists()
 
 
 def test_clean_fails_when_global_registry_corrupt(
@@ -2591,16 +2672,19 @@ def test_clean_fails_when_global_registry_corrupt(
     codex_home = tmp_path / "codex-home"
 
     reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
-    assert (project_root / STATE_RELATIVE_PATH).exists()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
+    assert state_path.exists()
 
     # Corrupt the registry — simulates partial write or disk error
     registry_path = codex_home / GLOBAL_REGISTRY_FILENAME
     registry_path.write_text("not valid json{{{")
 
     with pytest.raises(ReconcileError, match="global.*registry"):
-        clean_project(project_root)
+        clean_project(project_root, bridge_home=bridge_home)
     # State file must be preserved for retry
-    assert (project_root / STATE_RELATIVE_PATH).exists()
+    assert state_path.exists()
 
 
 def test_clean_handles_file_at_skill_path(make_project, make_plugin_version, tmp_path: Path):
@@ -2624,7 +2708,8 @@ def test_clean_handles_file_at_skill_path(make_project, make_plugin_version, tmp
     shutil.rmtree(skill_dir)
     skill_dir.write_text("not a directory")
 
-    report = clean_project(project_root)
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    report = clean_project(project_root, bridge_home=bridge_home)
     assert report.applied is True
     # The file should have been removed
     assert not skill_dir.exists()
@@ -2667,13 +2752,16 @@ def test_uninstall_has_errors_on_cleanup_failure(make_project, tmp_path: Path):
     project_root, _ = make_project()
     codex_home = tmp_path / "codex-home"
     codex_home.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
 
     # Set up a state file with corrupted managed paths
-    state_path = project_root / STATE_RELATIVE_PATH
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state = BridgeState(
         project_root=project_root.resolve(),
         codex_home=codex_home.resolve(),
+        bridge_home=bridge_home.resolve(),
         managed_project_files=("AGENTS.md",),  # invalid
     )
     state_path.write_text(state.to_json())
@@ -2683,7 +2771,7 @@ def test_uninstall_has_errors_on_cleanup_failure(make_project, tmp_path: Path):
     registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
     (codex_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
 
-    report = uninstall_all(codex_home=codex_home)
+    report = uninstall_all(codex_home=codex_home, bridge_home=bridge_home)
     assert report.has_errors is True
     # The project should be skipped, not cleaned
     assert report.projects[0].status == "skipped"
@@ -2727,12 +2815,15 @@ def test_uninstall_treats_no_state_as_error(
         "---\nname: test-skill\ndescription: Test\n---\n\nUse this.\n"
     )
     codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
     reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
 
     # Delete the state file — simulates manual removal
-    (project_root / STATE_RELATIVE_PATH).unlink()
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
+    state_path.unlink()
 
-    report = uninstall_all(codex_home=codex_home, dry_run=True)
+    report = uninstall_all(codex_home=codex_home, bridge_home=bridge_home, dry_run=True)
 
     assert report.has_errors is True
     assert any(r.status == "no_state" for r in report.projects)

@@ -11,6 +11,13 @@ import os
 from pathlib import Path
 
 from cc_codex_bridge import cli
+from cc_codex_bridge.bridge_home import project_state_dir
+
+
+def _bridge_state_path(project_root: Path, tmp_path: Path) -> Path:
+    """Compute the bridge-home state path for a project in test context."""
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    return project_state_dir(project_root, bridge_home=bridge_home) / "state.json"
 
 
 # ---------------------------------------------------------------------------
@@ -813,7 +820,7 @@ def test_clean_undoes_reconcile(make_project, tmp_path: Path):
 
     # Verify artifacts exist
     assert (project_root / "CLAUDE.md").exists()
-    assert (project_root / ".codex" / "claude-code-bridge-state.json").exists()
+    assert _bridge_state_path(project_root, tmp_path).exists()
     assert (project_root / ".codex" / "skills" / "run-tests" / "SKILL.md").exists()
     assert (codex_home / "skills" / "code-review" / "SKILL.md").exists()
     assert (codex_home / "skills" / "url-shorthand" / "SKILL.md").exists()
@@ -834,7 +841,7 @@ def test_clean_undoes_reconcile(make_project, tmp_path: Path):
 
     # All managed project files gone
     assert not (project_root / "CLAUDE.md").exists()
-    assert not (project_root / ".codex" / "claude-code-bridge-state.json").exists()
+    assert not _bridge_state_path(project_root, tmp_path).exists()
     assert not (project_root / ".codex" / "skills" / "run-tests").exists()
     # Project agent .toml files removed
     assert not project_agents_dir.exists() or len(list(project_agents_dir.glob("*.toml"))) == 0
@@ -881,7 +888,7 @@ def test_clean_dry_run_previews_without_side_effects(make_project, tmp_path: Pat
 
     # Everything still exists
     assert (project_root / "CLAUDE.md").exists()
-    assert (project_root / ".codex" / "claude-code-bridge-state.json").exists()
+    assert _bridge_state_path(project_root, tmp_path).exists()
     assert (codex_home / "skills" / "code-review" / "SKILL.md").exists()
     assert (codex_home / "skills" / "url-shorthand" / "SKILL.md").exists()
 
@@ -912,8 +919,8 @@ def test_uninstall_cleans_entire_machine(make_project, tmp_path: Path):
     (la_dir / "com.openai.codex-bridge.project-a.abc123.plist").write_bytes(b"<plist/>")
 
     # Verify everything exists
-    assert (project_a / ".codex" / "claude-code-bridge-state.json").exists()
-    assert (project_b / ".codex" / "claude-code-bridge-state.json").exists()
+    assert _bridge_state_path(project_a, tmp_path).exists()
+    assert _bridge_state_path(project_b, tmp_path).exists()
     assert (codex_home / "skills" / "code-review" / "SKILL.md").exists()
     assert (codex_home / "skills" / "url-shorthand" / "SKILL.md").exists()
     assert (codex_home / "AGENTS.md").exists()
@@ -927,9 +934,9 @@ def test_uninstall_cleans_entire_machine(make_project, tmp_path: Path):
     assert exit_code == 0
 
     # Both projects cleaned
-    assert not (project_a / ".codex" / "claude-code-bridge-state.json").exists()
+    assert not _bridge_state_path(project_a, tmp_path).exists()
     assert not (project_a / "CLAUDE.md").exists()
-    assert not (project_b / ".codex" / "claude-code-bridge-state.json").exists()
+    assert not _bridge_state_path(project_b, tmp_path).exists()
     assert not (project_b / "CLAUDE.md").exists()
 
     # Global artifacts removed
@@ -1026,7 +1033,7 @@ def test_uninstall_skips_vanished_project_cleans_rest(make_project, tmp_path: Pa
     assert exit_code == 0
 
     # Project B was cleaned
-    assert not (project_b / ".codex" / "claude-code-bridge-state.json").exists()
+    assert not _bridge_state_path(project_b, tmp_path).exists()
     assert not (project_b / "CLAUDE.md").exists()
 
     # Global skills fully removed (even skills owned by the vanished project)
@@ -1070,8 +1077,8 @@ def test_reconcile_all_reconciles_registered_projects(make_project, tmp_path: Pa
     assert exit_code == 0
 
     # Both projects have artifacts (state file confirms reconcile ran)
-    assert (project_a / ".codex" / "claude-code-bridge-state.json").exists()
-    assert (project_b / ".codex" / "claude-code-bridge-state.json").exists()
+    assert _bridge_state_path(project_a, tmp_path).exists()
+    assert _bridge_state_path(project_b, tmp_path).exists()
 
 
 def test_reconcile_all_handles_missing_project(make_project, tmp_path: Path):
@@ -1097,4 +1104,4 @@ def test_reconcile_all_handles_missing_project(make_project, tmp_path: Path):
     assert exit_code == 1
 
     # Project B was still reconciled successfully
-    assert (project_b / ".codex" / "claude-code-bridge-state.json").exists()
+    assert _bridge_state_path(project_b, tmp_path).exists()

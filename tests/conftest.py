@@ -11,6 +11,7 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+import cc_codex_bridge.bridge_home as bridge_home_module
 import cc_codex_bridge.discover as discover_module
 import cc_codex_bridge.install_launchagent as launchagent_module
 import cc_codex_bridge.reconcile as reconcile_module
@@ -86,6 +87,7 @@ def isolate_home_scoped_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         sandbox_home / ".claude" / "plugins" / "cache",
     )
     monkeypatch.setattr(reconcile_module, "DEFAULT_CODEX_HOME", sandbox_home / ".codex")
+    monkeypatch.setattr(bridge_home_module, "DEFAULT_BRIDGE_HOME", sandbox_home / ".cc-codex-bridge")
     monkeypatch.setattr(
         launchagent_module,
         "DEFAULT_LAUNCHAGENTS_DIR",

@@ -7,9 +7,10 @@ from pathlib import Path
 from cc_codex_bridge.bridge_home import resolve_bridge_home, project_state_dir
 
 
-def test_default_bridge_home():
+def test_default_bridge_home(tmp_path):
+    """Default bridge home uses the monkeypatched DEFAULT_BRIDGE_HOME."""
     home = resolve_bridge_home()
-    assert home == Path.home() / ".cc-codex-bridge"
+    assert home == tmp_path / "home" / ".cc-codex-bridge"
 
 
 def test_bridge_home_from_env(monkeypatch, tmp_path):

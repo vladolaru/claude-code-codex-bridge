@@ -18,6 +18,7 @@ def test_bridge_state_round_trips(tmp_path: Path):
     state = BridgeState(
         project_root=tmp_path / "project",
         codex_home=tmp_path / "codex-home",
+        bridge_home=tmp_path / "bridge-home",
         managed_project_files=("CLAUDE.md", ".codex/config.toml"),
     )
     path.write_text(state.to_json())
@@ -25,7 +26,7 @@ def test_bridge_state_round_trips(tmp_path: Path):
     loaded = BridgeState.from_path(path)
 
     assert loaded == state
-    assert json.loads(state.to_json())["version"] == 5
+    assert json.loads(state.to_json())["version"] == 6
 
 
 def test_bridge_state_handles_missing_invalid_and_unsupported_files(tmp_path: Path):
@@ -58,9 +59,10 @@ def test_bridge_state_rejects_invalid_schema_shapes(tmp_path: Path):
     invalid.write_text(
         json.dumps(
             {
-                "version": 5,
+                "version": 6,
                 "project_root": 1,
                 "codex_home": str(tmp_path / "codex-home"),
+                "bridge_home": str(tmp_path / "bridge-home"),
                 "managed_project_files": [123],
             }
         )
@@ -76,9 +78,10 @@ def test_bridge_state_rejects_non_absolute_paths(tmp_path: Path):
     invalid_paths.write_text(
         json.dumps(
             {
-                "version": 5,
+                "version": 6,
                 "project_root": "relative/project",
                 "codex_home": str(tmp_path / "codex-home"),
+                "bridge_home": str(tmp_path / "bridge-home"),
                 "managed_project_files": [],
             }
         )
@@ -93,6 +96,7 @@ def test_bridge_state_round_trips_with_project_skill_dirs(tmp_path):
     state = BridgeState(
         project_root=tmp_path / "project",
         codex_home=tmp_path / "codex",
+        bridge_home=tmp_path / "bridge",
         managed_project_files=(".codex/config.toml",),
         managed_project_skill_dirs=("helper", "review"),
     )

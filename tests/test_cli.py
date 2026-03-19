@@ -11,6 +11,13 @@ import plistlib
 import pytest
 
 from cc_codex_bridge import cli
+from cc_codex_bridge.bridge_home import project_state_dir
+
+
+def _bridge_state_path(project_root: Path, tmp_path: Path) -> Path:
+    """Compute the bridge-home state path for a project in test context."""
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    return project_state_dir(project_root, bridge_home=bridge_home) / "state.json"
 
 
 def test_validate_runs_against_isolated_project_and_cache(
@@ -923,7 +930,7 @@ def test_clean_command_succeeds(make_project, make_plugin_version, tmp_path: Pat
         "--codex-home", str(codex_home),
     ])
     assert exit_code == 0
-    assert (project_root / ".codex" / "claude-code-bridge-state.json").exists()
+    assert _bridge_state_path(project_root, tmp_path).exists()
 
     # Now clean
     exit_code = cli.main([
@@ -932,7 +939,7 @@ def test_clean_command_succeeds(make_project, make_plugin_version, tmp_path: Pat
         "--codex-home", str(codex_home),
     ])
     assert exit_code == 0
-    assert not (project_root / ".codex" / "claude-code-bridge-state.json").exists()
+    assert not _bridge_state_path(project_root, tmp_path).exists()
     assert not (project_root / "CLAUDE.md").exists()
 
 
@@ -960,7 +967,7 @@ def test_clean_dry_run_command(make_project, make_plugin_version, tmp_path: Path
     ])
     assert exit_code == 0
     # Artifacts still exist after dry-run
-    assert (project_root / ".codex" / "claude-code-bridge-state.json").exists()
+    assert _bridge_state_path(project_root, tmp_path).exists()
     assert (project_root / "CLAUDE.md").exists()
 
 
@@ -994,7 +1001,7 @@ def test_clean_succeeds_when_agents_md_missing(make_project, make_plugin_version
         "--codex-home", str(codex_home),
     ])
     assert exit_code == 0
-    assert (project_root / ".codex" / "claude-code-bridge-state.json").exists()
+    assert _bridge_state_path(project_root, tmp_path).exists()
 
     # Remove AGENTS.md to simulate a partially broken project
     agents_md.unlink()
@@ -1006,7 +1013,7 @@ def test_clean_succeeds_when_agents_md_missing(make_project, make_plugin_version
         "--codex-home", str(codex_home),
     ])
     assert exit_code == 0
-    assert not (project_root / ".codex" / "claude-code-bridge-state.json").exists()
+    assert not _bridge_state_path(project_root, tmp_path).exists()
 
 
 def test_uninstall_command_succeeds(make_project, make_plugin_version, tmp_path: Path):
@@ -1037,7 +1044,7 @@ def test_uninstall_command_succeeds(make_project, make_plugin_version, tmp_path:
 
     # Project artifacts gone
     for project in (project_a, project_b):
-        assert not (project / ".codex" / "claude-code-bridge-state.json").exists()
+        assert not _bridge_state_path(project, tmp_path).exists()
         assert not (project / "CLAUDE.md").exists()
 
     # Global artifacts gone
@@ -1074,7 +1081,7 @@ def test_uninstall_skips_missing_project(make_project, make_plugin_version, tmp_
     assert exit_code == 0
 
     # Project B was cleaned
-    assert not (project_b / ".codex" / "claude-code-bridge-state.json").exists()
+    assert not _bridge_state_path(project_b, tmp_path).exists()
     # Global skills removed (force-cleaned even though project A was skipped)
     assert not (codex_home / "skills" / "review").exists()
 
@@ -1082,19 +1089,20 @@ def test_uninstall_skips_missing_project(make_project, make_plugin_version, tmp_
 def test_uninstall_exits_nonzero_on_cleanup_error(make_project, tmp_path: Path, capsys):
     """uninstall returns exit code 1 when a project cleanup fails."""
     from cc_codex_bridge.state import BridgeState
-    from cc_codex_bridge.reconcile import STATE_RELATIVE_PATH
     from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME, GlobalSkillRegistry
 
     project_root, _ = make_project()
     codex_home = tmp_path / "codex-home"
     codex_home.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
 
     # Set up state with a corrupted managed path
-    state_path = project_root / STATE_RELATIVE_PATH
+    state_path = _bridge_state_path(project_root, tmp_path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state = BridgeState(
         project_root=project_root.resolve(),
         codex_home=codex_home.resolve(),
+        bridge_home=bridge_home.resolve(),
         managed_project_files=("AGENTS.md",),  # invalid
     )
     state_path.write_text(state.to_json())

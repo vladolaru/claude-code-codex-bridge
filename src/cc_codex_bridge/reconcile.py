@@ -9,6 +9,7 @@ import shutil
 from typing import Iterable
 from uuid import uuid4
 
+from cc_codex_bridge.bridge_home import resolve_bridge_home, project_state_dir
 from cc_codex_bridge.model import (
     ClaudeShimDecision,
     DiscoveryResult,
@@ -29,7 +30,6 @@ from cc_codex_bridge.text import read_utf8_text
 
 
 DEFAULT_CODEX_HOME = Path.home() / ".codex"
-STATE_RELATIVE_PATH = Path(".codex") / "claude-code-bridge-state.json"
 AGENTS_RELATIVE_ROOT = Path(".codex") / "agents"
 
 GLOBAL_INSTRUCTIONS_SENTINEL = "\n<!-- managed by cc-codex-bridge -->\n"
@@ -46,6 +46,7 @@ class DesiredState:
 
     project_root: Path
     codex_home: Path
+    bridge_home: Path
     project_files: tuple[tuple[Path, bytes], ...]
     preserved_project_files: tuple[Path, ...]
     skills: tuple[GeneratedSkill, ...]
@@ -166,6 +167,7 @@ def build_desired_state(
     skills: Iterable[GeneratedSkill],
     *,
     codex_home: str | Path | None = None,
+    bridge_home: str | Path | None = None,
     extra_project_files: Iterable[tuple[Path, bytes]] | None = None,
     project_skills: Iterable[GeneratedSkill] | None = None,
     global_agents: Iterable[GeneratedAgentFile] | None = None,
@@ -177,6 +179,7 @@ def build_desired_state(
 
     project_root = discovery.project.root.resolve()
     codex_home_path = Path(codex_home or DEFAULT_CODEX_HOME).expanduser().resolve()
+    bridge_home_path = Path(bridge_home or resolve_bridge_home()).expanduser().resolve()
     project_files: list[tuple[Path, bytes]] = []
     preserved_project_files: list[Path] = []
     skills_tuple = tuple(skills)
@@ -218,13 +221,15 @@ def build_desired_state(
             discovery.user_claude_md + GLOBAL_INSTRUCTIONS_SENTINEL
         ).encode()
 
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home_path)
     return DesiredState(
         project_root=project_root,
         codex_home=codex_home_path,
+        bridge_home=bridge_home_path,
         project_files=tuple(project_files),
         preserved_project_files=tuple(sorted(set(preserved_project_files), key=str)),
         skills=skills_tuple,
-        state_path=project_root / STATE_RELATIVE_PATH,
+        state_path=state_dir / "state.json",
         global_instructions=global_instructions,
         project_skills=tuple(project_skills or ()),
         global_agents=tuple(global_agents or ()),
@@ -249,6 +254,7 @@ def build_project_desired_state(
     project_root: str | Path | None = None,
     *,
     codex_home: str | Path | None = None,
+    bridge_home: str | Path | None = None,
     claude_home: str | Path | None = None,
     cache_dir: str | Path | None = None,
     exclude_plugins: Iterable[str] = (),
@@ -405,6 +411,7 @@ def build_project_desired_state(
     desired_state = build_desired_state(
         result, shim_decision,
         all_global_skills, codex_home=codex_home,
+        bridge_home=bridge_home,
         project_skills=all_project_skills,
         global_agents=global_agents,
         project_agent_files=project_agent_files,
@@ -471,6 +478,7 @@ def reconcile_desired_state(desired: DesiredState) -> ReconcileReport:
 def clean_project(
     project_root: str | Path,
     *,
+    bridge_home: str | Path | None = None,
     dry_run: bool = False,
 ) -> ReconcileReport:
     """Remove all bridge-generated artifacts from one project.
@@ -480,12 +488,14 @@ def clean_project(
     state file.  Returns a report of what was (or would be) removed.
     """
     project_root_path = Path(project_root).expanduser().resolve()
-    state_path = project_root_path / STATE_RELATIVE_PATH
+    bridge_home_path = Path(bridge_home or resolve_bridge_home()).expanduser().resolve()
+    state_dir = project_state_dir(project_root_path, bridge_home=bridge_home_path)
+    state_path = state_dir / "state.json"
 
     if state_path.is_symlink():
         raise ReconcileError(f"Refusing to use symlinked bridge state file: {state_path}")
-    # Verify state file resolves within the project root (catches symlinked ancestors)
-    _assert_path_contained(state_path, project_root_path, label="Bridge state file")
+    # Verify state file resolves within bridge home (catches symlinked ancestors)
+    _assert_path_contained(state_path, bridge_home_path, label="Bridge state file")
     previous_state = BridgeState.from_path(state_path)
     if previous_state is None:
         return ReconcileReport(changes=(), applied=True)
@@ -639,8 +649,9 @@ def clean_project(
             container=codex_home_path,
         )
 
-    # Remove the state file last
+    # Remove the state file last, then clean up its parent if empty
     state_path.unlink(missing_ok=True)
+    _cleanup_empty_parents(state_path.parent, bridge_home_path)
 
     return ReconcileReport(changes=tuple(changes), applied=True)
 
@@ -672,6 +683,7 @@ class ReconcileAllReport:
 def reconcile_all(
     *,
     codex_home: str | Path | None = None,
+    bridge_home: str | Path | None = None,
     dry_run: bool = False,
 ) -> ReconcileAllReport:
     """Reconcile all registered projects."""
@@ -702,6 +714,7 @@ def reconcile_all(
             build = build_project_desired_state(
                 project_root,
                 codex_home=codex_home_path,
+                bridge_home=bridge_home,
             )
             if build.shim_decision.action == "bootstrap":
                 if not dry_run:
@@ -710,6 +723,7 @@ def reconcile_all(
                     build = build_project_desired_state(
                         project_root,
                         codex_home=codex_home_path,
+                        bridge_home=bridge_home,
                     )
                 else:
                     errors.append(ReconcileAllError(
@@ -746,6 +760,7 @@ def reconcile_all(
 def uninstall_all(
     *,
     codex_home: str | Path | None = None,
+    bridge_home: str | Path | None = None,
     launchagents_dir: str | Path | None = None,
     dry_run: bool = False,
 ) -> UninstallReport:
@@ -757,6 +772,7 @@ def uninstall_all(
     from cc_codex_bridge.install_launchagent import find_bridge_launchagents
 
     codex_home_path = Path(codex_home or DEFAULT_CODEX_HOME).expanduser().resolve()
+    bridge_home_path = Path(bridge_home or resolve_bridge_home()).expanduser().resolve()
     registry_path = codex_home_path / GLOBAL_REGISTRY_FILENAME
 
     # Step 1: Discover project roots from the registry
@@ -777,7 +793,8 @@ def uninstall_all(
             ))
             continue
 
-        state_path = root / STATE_RELATIVE_PATH
+        state_dir = project_state_dir(root, bridge_home=bridge_home_path)
+        state_path = state_dir / "state.json"
         if not state_path.exists():
             project_results.append(UninstallProjectResult(
                 root=root,
@@ -787,7 +804,7 @@ def uninstall_all(
             continue
 
         try:
-            report = clean_project(root, dry_run=dry_run)
+            report = clean_project(root, bridge_home=bridge_home_path, dry_run=dry_run)
             project_results.append(UninstallProjectResult(
                 root=root,
                 status="cleaned",
@@ -861,6 +878,14 @@ def uninstall_all(
         # Remove LaunchAgent plists
         for removal in launchagent_removals:
             removal.path.unlink(missing_ok=True)
+
+        # Remove bridge home directory if empty
+        if bridge_home_path.exists():
+            _cleanup_empty_parents(bridge_home_path / "projects", bridge_home_path)
+            try:
+                bridge_home_path.rmdir()
+            except OSError:
+                pass  # Not empty — other state may remain
 
     return UninstallReport(
         projects=tuple(project_results),
@@ -938,7 +963,8 @@ def _apply_changes(
         )
 
     state_bytes = _build_state_record(desired, previously_managed).to_json().encode()
-    _atomic_write_file(desired.state_path, state_bytes, container=desired.project_root)
+    desired.state_path.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write_file(desired.state_path, state_bytes, container=desired.bridge_home)
 
 
 def _assert_path_contained(path: Path, root: Path, *, label: str) -> None:
@@ -1201,8 +1227,6 @@ def _compute_project_file_changes(
     }
 
     for relative in sorted(managed_project_files - desired_project_paths):
-        if relative == STATE_RELATIVE_PATH.as_posix():
-            continue
         path = desired.project_root / relative
         if path.exists():
             changes.append(Change("remove", path))
@@ -1586,7 +1610,7 @@ def _validate_mutation_targets(
         )
 
     if state_write_needed:
-        _assert_path_contained(desired.state_path, desired.project_root, label="Write target")
+        _assert_path_contained(desired.state_path, desired.bridge_home, label="Write target")
 
 
 def _load_registry_snapshot(path: Path) -> _RegistrySnapshot:
@@ -1646,7 +1670,6 @@ def _build_state_record(
     managed_project_paths = {
         *(_project_relative(desired, path) for path, _ in desired.project_files),
         *(rel for rel in preserved_relatives if rel in previously_managed),
-        STATE_RELATIVE_PATH.as_posix(),
     }
     managed_project_files = tuple(sorted(managed_project_paths))
     managed_project_skill_dirs = tuple(
@@ -1661,6 +1684,7 @@ def _build_state_record(
     return BridgeState(
         project_root=desired.project_root,
         codex_home=desired.codex_home,
+        bridge_home=desired.bridge_home,
         managed_project_files=managed_project_files,
         managed_project_skill_dirs=managed_project_skill_dirs,
     )
@@ -1694,7 +1718,6 @@ def _is_allowed_managed_project_relative(relative: str) -> bool:
 
     allowed_exact = {
         "CLAUDE.md",
-        STATE_RELATIVE_PATH.as_posix(),
     }
     normalized_text = normalized.as_posix()
     if normalized_text in allowed_exact:
