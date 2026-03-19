@@ -17,6 +17,7 @@ from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME, GlobalSkillRegist
 from cc_codex_bridge.reconcile import (
     ReconcileReport,
     build_desired_state,
+    build_project_desired_state,
     diff_desired_state,
     format_change_report,
     format_diff_report,
@@ -3112,3 +3113,108 @@ def _snapshot_tree(root: Path) -> dict[str, tuple[str, str | bytes]]:
             snapshot[relative] = ("file", path.read_bytes())
 
     return snapshot
+
+
+def test_status_detects_stale_vendored_resources(
+    make_plugin_version, make_project, tmp_path,
+):
+    """status/dry-run detects when vendored plugin resources are stale on disk."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "tools", "1.0.0",
+        agent_names=("reviewer",),
+    )
+    # Agent references $PLUGIN_ROOT/scripts/ so scripts get vendored
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\ntools:\n  - Read\n---\n\n"
+        "python3 $PLUGIN_ROOT/scripts/run.py\n"
+    )
+    scripts_dir = version_dir / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "run.py").write_text("print('v1')\n")
+
+    bridge_home = tmp_path / "bridge"
+    codex_home = tmp_path / "codex"
+    build = build_project_desired_state(
+        project_root, cache_dir=cache_root,
+        bridge_home=bridge_home, codex_home=codex_home,
+    )
+    assert build.desired_state is not None
+
+    # First reconcile — creates everything
+    report1 = reconcile_desired_state(build.desired_state)
+    assert report1.applied
+    vendored_script = bridge_home / "plugins" / "market-tools" / "scripts" / "run.py"
+    assert vendored_script.read_text() == "print('v1')\n"
+
+    # Second reconcile — no changes (idempotent)
+    build2 = build_project_desired_state(
+        project_root, cache_dir=cache_root,
+        bridge_home=bridge_home, codex_home=codex_home,
+    )
+    report2 = diff_desired_state(build2.desired_state)
+    resource_changes = [c for c in report2.changes if c.resource_kind == "plugin_resource"]
+    assert resource_changes == [], "Idempotent reconcile should have no resource changes"
+
+    # Tamper with vendored file to simulate stale content
+    vendored_script.write_text("print('STALE')\n")
+
+    # Now status should detect the stale resource
+    build3 = build_project_desired_state(
+        project_root, cache_dir=cache_root,
+        bridge_home=bridge_home, codex_home=codex_home,
+    )
+    report3 = diff_desired_state(build3.desired_state)
+    resource_changes = [c for c in report3.changes if c.resource_kind == "plugin_resource"]
+    assert len(resource_changes) == 1
+    assert resource_changes[0].kind == "update"
+
+    # Reconcile should fix it
+    report4 = reconcile_desired_state(build3.desired_state)
+    assert report4.applied
+    assert vendored_script.read_text() == "print('v1')\n"
+
+
+def test_status_detects_missing_vendored_resources(
+    make_plugin_version, make_project, tmp_path,
+):
+    """status/dry-run detects when vendored plugin resources are missing from disk."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "tools", "1.0.0",
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\ntools:\n  - Read\n---\n\n"
+        "python3 $PLUGIN_ROOT/scripts/run.py\n"
+    )
+    scripts_dir = version_dir / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "run.py").write_text("print('v1')\n")
+
+    bridge_home = tmp_path / "bridge"
+    codex_home = tmp_path / "codex"
+    build = build_project_desired_state(
+        project_root, cache_dir=cache_root,
+        bridge_home=bridge_home, codex_home=codex_home,
+    )
+    reconcile_desired_state(build.desired_state)
+
+    # Delete the vendored dir to simulate P2 scenario (another project cleaned it)
+    import shutil
+    shutil.rmtree(bridge_home / "plugins" / "market-tools" / "scripts")
+
+    # Status should detect the missing resource
+    build2 = build_project_desired_state(
+        project_root, cache_dir=cache_root,
+        bridge_home=bridge_home, codex_home=codex_home,
+    )
+    report = diff_desired_state(build2.desired_state)
+    resource_changes = [c for c in report.changes if c.resource_kind == "plugin_resource"]
+    assert len(resource_changes) == 1
+    assert resource_changes[0].kind == "create"
+
+    # Reconcile should recreate it
+    report2 = reconcile_desired_state(build2.desired_state)
+    assert report2.applied
+    assert (bridge_home / "plugins" / "market-tools" / "scripts" / "run.py").exists()

@@ -945,6 +945,10 @@ def _apply_changes(
     skills_by_name = {skill.install_dir_name: skill for skill in desired.skills}
     project_skills_by_name = {skill.install_dir_name: skill for skill in desired.project_skills}
     agents_by_filename = {agent.install_filename: agent for agent in desired.global_agents}
+    plugin_resources_by_path: dict[Path, VendoredPluginResource] = {
+        desired.bridge_home / "plugins" / f"{r.marketplace}-{r.plugin_name}" / r.target_dir_name: r
+        for r in desired.plugin_resources
+    }
 
     for change in plan.changes:
         if change.resource_kind == "global_instructions":
@@ -986,29 +990,24 @@ def _apply_changes(
             elif change.kind == "remove":
                 change.path.unlink(missing_ok=True)
             continue
+        if change.resource_kind == "plugin_resource":
+            if change.kind in ("create", "update"):
+                if change.path.exists():
+                    shutil.rmtree(change.path)
+                change.path.mkdir(parents=True, exist_ok=True)
+                resource = plugin_resources_by_path[change.path]
+                for f in resource.files:
+                    file_path = change.path / f.relative_path
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_bytes(f.content)
+                    file_path.chmod(f.mode)
+            continue
         else:
             if change.kind in ("create", "update"):
                 _atomic_write_file(change.path, desired_map[change.path], container=desired.project_root)
             elif change.kind == "remove":
                 change.path.unlink(missing_ok=True)
                 _cleanup_empty_parents(change.path.parent, desired.project_root / ".codex")
-
-    # Write vendored plugin resources
-    for resource in desired.plugin_resources:
-        resource_dir = (
-            desired.bridge_home
-            / "plugins"
-            / f"{resource.marketplace}-{resource.plugin_name}"
-            / resource.target_dir_name
-        )
-        if resource_dir.exists():
-            shutil.rmtree(resource_dir)
-        resource_dir.mkdir(parents=True, exist_ok=True)
-        for f in resource.files:
-            file_path = resource_dir / f.relative_path
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.write_bytes(f.content)
-            file_path.chmod(f.mode)
 
     for registry_write in plan.registry_writes:
         _atomic_write_file(
@@ -1147,10 +1146,12 @@ def _plan_mutations(
         registry_writes.append(registry_write)
 
     global_changes = _plan_global_instructions_changes(desired)
+    plugin_resource_changes = _plan_plugin_resource_mutations(desired)
     return _MutationPlan(
         changes=tuple((
             *project_changes, *project_skill_changes,
             *skill_changes, *agent_changes, *global_changes,
+            *plugin_resource_changes,
         )),
         registry_writes=tuple(registry_writes),
     )
@@ -1375,6 +1376,54 @@ def _plan_global_instructions_changes(desired: DesiredState) -> tuple[Change, ..
     return (Change("update", path, resource_kind="global_instructions"),)
 
 
+def _plan_plugin_resource_mutations(desired: DesiredState) -> tuple[Change, ...]:
+    """Plan vendored plugin resource directory mutations.
+
+    Compares desired vendored resources against on-disk state using
+    directory-snapshot comparison.  This ensures stale or missing
+    vendored files are detected and reported by status/dry-run.
+    """
+    changes: list[Change] = []
+
+    for resource in desired.plugin_resources:
+        resource_dir = (
+            desired.bridge_home
+            / "plugins"
+            / f"{resource.marketplace}-{resource.plugin_name}"
+            / resource.target_dir_name
+        )
+
+        if not resource_dir.exists():
+            changes.append(Change("create", resource_dir, resource_kind="plugin_resource"))
+            continue
+
+        if not _directory_matches_resource(resource_dir, resource):
+            changes.append(Change("update", resource_dir, resource_kind="plugin_resource"))
+
+    return tuple(changes)
+
+
+def _directory_matches_resource(path: Path, resource: VendoredPluginResource) -> bool:
+    """Check whether an installed vendored resource directory matches the desired tree."""
+    expected_files = {f.relative_path: f for f in resource.files}
+    actual_files = {
+        item.relative_to(path): item
+        for item in path.rglob("*")
+        if item.is_file()
+    }
+    if set(actual_files) != set(expected_files):
+        return False
+
+    for relative_path, actual_path in actual_files.items():
+        expected = expected_files[relative_path]
+        if actual_path.read_bytes() != expected.content:
+            return False
+        if (actual_path.stat().st_mode & 0o777) != expected.mode:
+            return False
+
+    return True
+
+
 def _plan_global_agent_mutations(
     desired: DesiredState,
     previous_state: BridgeState | None,
@@ -1568,6 +1617,13 @@ def _validate_mutation_targets(
                 change.path,
                 desired.codex_home,
                 label="Managed global target",
+            )
+            continue
+        if change.resource_kind == "plugin_resource":
+            _assert_path_contained(
+                change.path,
+                desired.bridge_home,
+                label="Managed plugin resource target",
             )
             continue
         _assert_path_contained(change.path, desired.project_root, label="Managed project target")
