@@ -3453,3 +3453,140 @@ def test_reconcile_combines_hash_for_multiple_resource_dirs(
     entry = registry.plugin_resources["market-tools"]
     assert entry.content_hash.startswith("sha256:")
     assert project_root.resolve() in entry.owners
+
+
+def test_reconcile_releases_stale_plugin_resources(
+    make_plugin_version, make_project, tmp_path,
+):
+    """Plugin resources are released when a plugin is no longer used."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "tools", "1.0.0",
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\ntools:\n  - Read\n---\n\n"
+        "python3 $PLUGIN_ROOT/scripts/run.py\n"
+    )
+    scripts_dir = version_dir / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "run.py").write_text("print('hello')\n")
+
+    bridge_home = tmp_path / "bridge"
+    codex_home = tmp_path / "codex"
+
+    # First reconcile: plugin is active, resources are vendored
+    build1 = build_project_desired_state(
+        project_root, cache_dir=cache_root,
+        bridge_home=bridge_home, codex_home=codex_home,
+    )
+    assert build1.desired_state is not None
+    reconcile_desired_state(build1.desired_state)
+
+    # Verify the vendored dir exists and registry has the entry
+    vendored_dir = bridge_home / "plugins" / "market-tools"
+    assert vendored_dir.exists()
+    registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    assert registry is not None
+    assert "market-tools" in registry.plugin_resources
+
+    # Second reconcile: exclude the plugin so resources are no longer desired
+    build2 = build_project_desired_state(
+        project_root, cache_dir=cache_root,
+        bridge_home=bridge_home, codex_home=codex_home,
+        exclude_plugins=("market/tools",),
+    )
+    assert build2.desired_state is not None
+    report = reconcile_desired_state(build2.desired_state)
+
+    # Verify the vendored dir is removed and registry entry is gone
+    assert not vendored_dir.exists()
+    registry2 = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    assert registry2 is not None
+    assert "market-tools" not in registry2.plugin_resources
+
+    # A remove change should have been recorded
+    remove_changes = [c for c in report.changes if c.kind == "remove" and c.resource_kind == "plugin_resource"]
+    assert len(remove_changes) == 1
+
+
+def test_reconcile_releases_stale_plugin_resources_preserves_shared_dirs(
+    make_plugin_version, make_project, tmp_path,
+):
+    """Stale plugin resources are released but shared dirs survive."""
+    project_a, _ = make_project("project-a")
+    project_b, _ = make_project("project-b")
+    cache_root, version_dir = make_plugin_version(
+        "market", "tools", "1.0.0",
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\ntools:\n  - Read\n---\n\n"
+        "python3 $PLUGIN_ROOT/scripts/run.py\n"
+    )
+    scripts_dir = version_dir / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "run.py").write_text("print('shared')\n")
+
+    bridge_home = tmp_path / "bridge"
+    codex_home = tmp_path / "codex"
+
+    # Reconcile both projects with the plugin
+    build_a1 = build_project_desired_state(
+        project_a, cache_dir=cache_root,
+        bridge_home=bridge_home, codex_home=codex_home,
+    )
+    assert build_a1.desired_state is not None
+    reconcile_desired_state(build_a1.desired_state)
+
+    build_b1 = build_project_desired_state(
+        project_b, cache_dir=cache_root,
+        bridge_home=bridge_home, codex_home=codex_home,
+    )
+    assert build_b1.desired_state is not None
+    reconcile_desired_state(build_b1.desired_state)
+
+    # Both projects own the resource
+    vendored_dir = bridge_home / "plugins" / "market-tools"
+    assert vendored_dir.exists()
+    registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    assert registry is not None
+    assert len(registry.plugin_resources["market-tools"].owners) == 2
+
+    # Reconcile project A WITHOUT the plugin (exclude it)
+    build_a2 = build_project_desired_state(
+        project_a, cache_dir=cache_root,
+        bridge_home=bridge_home, codex_home=codex_home,
+        exclude_plugins=("market/tools",),
+    )
+    assert build_a2.desired_state is not None
+    report_a2 = reconcile_desired_state(build_a2.desired_state)
+
+    # Dir still exists because project B still owns it
+    assert vendored_dir.exists()
+    registry2 = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    assert registry2 is not None
+    assert "market-tools" in registry2.plugin_resources
+    entry2 = registry2.plugin_resources["market-tools"]
+    assert len(entry2.owners) == 1
+    assert project_b.resolve() in entry2.owners
+    # No remove change since the dir is still needed
+    remove_changes_a = [c for c in report_a2.changes if c.kind == "remove" and c.resource_kind == "plugin_resource"]
+    assert len(remove_changes_a) == 0
+
+    # Reconcile project B WITHOUT the plugin
+    build_b2 = build_project_desired_state(
+        project_b, cache_dir=cache_root,
+        bridge_home=bridge_home, codex_home=codex_home,
+        exclude_plugins=("market/tools",),
+    )
+    assert build_b2.desired_state is not None
+    report_b2 = reconcile_desired_state(build_b2.desired_state)
+
+    # Now the dir should be removed
+    assert not vendored_dir.exists()
+    registry3 = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    assert registry3 is not None
+    assert "market-tools" not in registry3.plugin_resources
+    remove_changes_b = [c for c in report_b2.changes if c.kind == "remove" and c.resource_kind == "plugin_resource"]
+    assert len(remove_changes_b) == 1

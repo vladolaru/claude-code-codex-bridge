@@ -1019,6 +1019,9 @@ def _apply_changes(
                     file_path.parent.mkdir(parents=True, exist_ok=True)
                     file_path.write_bytes(f.content)
                     file_path.chmod(f.mode)
+            elif change.kind == "remove":
+                if change.path.exists():
+                    shutil.rmtree(change.path)
             continue
         else:
             if change.kind in ("create", "update"):
@@ -1458,6 +1461,27 @@ def _plan_plugin_resource_mutations(
         if not _directory_matches_resource(resource_dir, resource):
             changes.append(Change("update", resource_dir, resource_kind="plugin_resource"))
 
+    # Detect stale plugin resource dirs owned by this project
+    previously_owned = _owned_plugin_resource_dirs(
+        snapshot.registry, desired.project_root,
+    )
+    for dir_name in sorted(previously_owned - set(desired_by_dir)):
+        entry = updated_registry.plugin_resources[dir_name]
+        remaining_owners = tuple(
+            owner for owner in entry.owners if owner != desired.project_root
+        )
+        if remaining_owners:
+            updated_registry.plugin_resources[dir_name] = GlobalPluginResourceEntry(
+                content_hash=entry.content_hash,
+                owners=remaining_owners,
+            )
+            continue
+
+        del updated_registry.plugin_resources[dir_name]
+        stale_path = desired.bridge_home / "plugins" / dir_name
+        if stale_path.exists():
+            changes.append(Change("remove", stale_path, resource_kind="plugin_resource"))
+
     return tuple(changes), updated_registry
 
 
@@ -1581,6 +1605,15 @@ def _owned_agent_filenames(registry: GlobalSkillRegistry, project_root: Path) ->
     return {
         filename
         for filename, entry in registry.agents.items()
+        if project_root in entry.owners
+    }
+
+
+def _owned_plugin_resource_dirs(registry: GlobalSkillRegistry, project_root: Path) -> set[str]:
+    """Return the plugin resource dir names currently claimed by one project."""
+    return {
+        dir_name
+        for dir_name, entry in registry.plugin_resources.items()
         if project_root in entry.owners
     }
 
