@@ -374,7 +374,7 @@ def build_project_desired_state(
     project_skill_result = translate_standalone_skills(result.project_skills, scope="project")
 
     # Translate commands into skills
-    plugin_command_result = translate_installed_commands(result.plugins)
+    plugin_command_result = translate_installed_commands(result.plugins, bridge_home=bridge_home_path)
     user_command_result = translate_standalone_cmds(result.user_commands, scope="user")
     project_command_result = translate_standalone_cmds(result.project_commands, scope="project")
 
@@ -419,6 +419,9 @@ def build_project_desired_state(
         key = (resource.marketplace, resource.plugin_name, resource.target_dir_name)
         all_plugin_resources[key] = resource
     for resource in agent_result.plugin_resources:
+        key = (resource.marketplace, resource.plugin_name, resource.target_dir_name)
+        all_plugin_resources[key] = resource
+    for resource in plugin_command_result.plugin_resources:
         key = (resource.marketplace, resource.plugin_name, resource.target_dir_name)
         all_plugin_resources[key] = resource
     plugin_resources = tuple(sorted(

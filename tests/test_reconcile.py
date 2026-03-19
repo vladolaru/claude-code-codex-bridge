@@ -3047,6 +3047,40 @@ def _build_desired_with_project_skills(
     )
 
 
+def test_reconcile_collects_command_plugin_resources(
+    make_plugin_version, make_project, tmp_path,
+):
+    """Command-derived skills contribute plugin resources to DesiredState."""
+    from cc_codex_bridge.reconcile import build_project_desired_state
+
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "tools", "1.0.0",
+    )
+    commands_dir = version_dir / "commands"
+    commands_dir.mkdir()
+    (commands_dir / "optimize.md").write_text(
+        "---\ndescription: Optimize\n---\n\n"
+        'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/optimize.py"\n'
+    )
+    scripts_dir = version_dir / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "optimize.py").write_text("print('optimize')\n")
+
+    bridge_home = tmp_path / "bridge"
+    build = build_project_desired_state(
+        project_root,
+        cache_dir=cache_root,
+        bridge_home=bridge_home,
+    )
+    assert build.desired_state is not None
+    resource_dirs = {
+        (r.marketplace, r.plugin_name, r.target_dir_name)
+        for r in build.desired_state.plugin_resources
+    }
+    assert ("market", "tools", "scripts") in resource_dirs
+
+
 def _read_global_registry(bridge_home: Path) -> dict[str, object]:
     """Read the global registry JSON payload for assertions."""
     return json.loads((bridge_home / GLOBAL_REGISTRY_FILENAME).read_text())
