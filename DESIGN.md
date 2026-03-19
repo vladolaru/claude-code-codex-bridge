@@ -108,7 +108,7 @@ The runtime is a deterministic pipeline:
 10. translate standalone user and project agents into `GeneratedAgentFile` objects
 11. translate plugin and user skills into `GeneratedSkill` trees (global registry)
 12. translate project skills into project-local `GeneratedSkill` trees
-13. translate plugin commands into command-derived `GeneratedSkill` trees (global registry)
+13. translate plugin commands into command-derived `GeneratedSkill` trees (global registry), with plugin resource vendoring when `bridge_home` is provided
 14. translate standalone user commands into command-derived `GeneratedSkill` trees (global registry)
 15. translate project commands into command-derived project-local `GeneratedSkill` trees
 16. merge all agents, render project-local agent `.toml` files to `.codex/agents/`, and collect global agents for `~/.codex/agents/`
@@ -455,14 +455,23 @@ Dropped command frontmatter (not carried to generated output):
 - `argument-hint`
 - `allowed-tools`
 
+Command-derived Codex skills use a `cmd-` name prefix (e.g., `code-review.md` → `cmd-code-review`) to prevent namespace collisions with native skills. The `cmd-` prefix is applied during translation to the `install_dir_name`, `original_skill_name`, and `codex_skill_name` fields. The existing `-alt` suffix collision resolution in `assign_skill_names()` still applies as a safety net for any remaining name collisions after the prefix is applied.
+
 Variable replacement rules (applied deterministically to the command body):
 
 - `$ARGUMENTS`, `$ARGUMENTS[N]`, `$N` → `<use any user-provided details; otherwise infer from context>`
-- `${CLAUDE_PLUGIN_ROOT}` → resolved absolute path from `InstalledPlugin.source_path` (plugin commands only; standalone commands leave it as-is)
+- `${CLAUDE_PLUGIN_ROOT}` → when `bridge_home` is provided, replaced with the vendored root path under `~/.cc-codex-bridge/plugins/` instead of the raw plugin cache path; without `bridge_home`, falls back to the resolved absolute path from `InstalledPlugin.source_path` (plugin commands only; standalone commands leave it as-is)
+
+Plugin resource vendoring:
+
+- when `bridge_home` is provided, `$PLUGIN_ROOT` patterns in command bodies are detected and rewritten to absolute vendored locations using the same engine as skill/agent vendoring (`detect_plugin_resource_dirs()`, `rewrite_plugin_paths()`)
+- `${CLAUDE_PLUGIN_ROOT}` references (already replaced with the vendored root path) are scanned for directory references and those directories are vendored
+- transitive dependency detection applies to vendored command scripts (same as skills/agents)
+- runtime discovery blocks are removed and replaced with direct absolute paths, consistent with skill vendoring
 
 Generated SKILL.md structure:
 
-- frontmatter: `name` (from command filename stem) and `description` (from command frontmatter)
+- frontmatter: `name` (from command filename stem, with `cmd-` prefix) and `description` (from command frontmatter)
 - body: command body with variable replacements applied
 - provenance marker appended at end: `<!-- translated from Claude Code command -->`
 
@@ -678,7 +687,7 @@ Current runtime module responsibilities:
 - `vendor_plugin.py`
   - plugin resource path detection and rewriting for `$PLUGIN_ROOT` references, transitive dependency detection for vendored scripts
 - `translate_commands.py`
-  - Claude command translation to command-derived `GeneratedSkill` objects, variable replacement, and provenance marking
+  - Claude command translation to command-derived `GeneratedSkill` objects with `cmd-` name prefix, variable replacement, provenance marking, and plugin resource vendoring support (when `bridge_home` is provided)
 - `reconcile.py`
   - desired-state modeling, diffing, atomic apply, report formatting
   - shared project build pipeline via `build_project_desired_state()`
@@ -705,7 +714,7 @@ The suite currently verifies:
 - `CLAUDE.md` shim safety
 - agent translation, `.toml` file rendering, sandbox mode derivation, and global agent registry tracking
 - skill translation, relocation rewriting, vendoring, and standalone skill translation
-- command translation, variable replacement, provenance marking, and standalone command translation
+- command translation, `cmd-` name prefix, variable replacement, provenance marking, plugin resource vendoring through command translation, and standalone command translation
 - exclusion filtering for plugins and standalone sources with part-count disambiguation
 - reconcile idempotence, stale cleanup, ownership safety, diff reporting, and global instructions bridging
 - CLI command behavior including multi-source integration
@@ -732,6 +741,7 @@ These are current implemented simplifications, not necessarily permanent design 
 - frontmatter parsing uses safe YAML loading for frontmatter blocks plus strict
   post-parse validation of supported runtime shapes
 - exclusion ids are exact-match identifiers, not wildcard/glob patterns
+- command-derived skills use the `cmd-` prefix convention to separate them from native skills in the shared Codex skill namespace
 - LaunchAgent scheduling is supported; watcher mode is not
 
 Any change to these constraints should update this file.
