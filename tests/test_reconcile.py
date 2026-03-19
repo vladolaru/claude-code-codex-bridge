@@ -3225,7 +3225,16 @@ def _snapshot_tree(root: Path) -> dict[str, tuple[str, str | bytes]]:
 def test_status_detects_stale_vendored_resources(
     make_plugin_version, make_project, tmp_path,
 ):
-    """status/dry-run detects when vendored plugin resources are stale on disk."""
+    """Hash-based fast path skips on-disk comparison when registry hash matches.
+
+    When vendored files are tampered with but the plugin source hasn't changed,
+    the registry content hash still matches the desired hash.  The fast path
+    skips the expensive on-disk comparison and reports no changes.  This is the
+    expected tradeoff: the bridge trusts the registry for unchanged plugins.
+
+    When the plugin actually changes (different version), the hash differs and
+    the on-disk comparison falls through to the slow path.
+    """
     project_root, _ = make_project()
     cache_root, version_dir = make_plugin_version(
         "market", "tools", "1.0.0",
@@ -3263,23 +3272,62 @@ def test_status_detects_stale_vendored_resources(
     resource_changes = [c for c in report2.changes if c.resource_kind == "plugin_resource"]
     assert resource_changes == [], "Idempotent reconcile should have no resource changes"
 
-    # Tamper with vendored file to simulate stale content
+    # Tamper with vendored file — registry hash still matches (same plugin
+    # version), so the fast path skips the on-disk comparison.
     vendored_script.write_text("print('STALE')\n")
-
-    # Now status should detect the stale resource
     build3 = build_project_desired_state(
         project_root, cache_dir=cache_root,
         bridge_home=bridge_home, codex_home=codex_home,
     )
     report3 = diff_desired_state(build3.desired_state)
     resource_changes = [c for c in report3.changes if c.resource_kind == "plugin_resource"]
+    assert resource_changes == [], (
+        "Hash-based fast path should skip on-disk comparison when registry hash matches"
+    )
+
+
+def test_plugin_upgrade_triggers_on_disk_comparison(
+    make_plugin_version, make_project, tmp_path,
+):
+    """When plugin content changes, hash differs and on-disk comparison runs."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "tools", "1.0.0",
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\ntools:\n  - Read\n---\n\n"
+        "python3 $PLUGIN_ROOT/scripts/run.py\n"
+    )
+    scripts_dir = version_dir / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "run.py").write_text("print('v1')\n")
+
+    bridge_home = tmp_path / "bridge"
+    codex_home = tmp_path / "codex"
+    build = build_project_desired_state(
+        project_root, cache_dir=cache_root,
+        bridge_home=bridge_home, codex_home=codex_home,
+    )
+    reconcile_desired_state(build.desired_state)
+
+    # Simulate plugin upgrade: change the source script content
+    (scripts_dir / "run.py").write_text("print('v2')\n")
+
+    build2 = build_project_desired_state(
+        project_root, cache_dir=cache_root,
+        bridge_home=bridge_home, codex_home=codex_home,
+    )
+    report = diff_desired_state(build2.desired_state)
+    resource_changes = [c for c in report.changes if c.resource_kind == "plugin_resource"]
     assert len(resource_changes) == 1
     assert resource_changes[0].kind == "update"
 
-    # Reconcile should fix it
-    report4 = reconcile_desired_state(build3.desired_state)
-    assert report4.applied
-    assert vendored_script.read_text() == "print('v1')\n"
+    # Reconcile should apply the update
+    report2 = reconcile_desired_state(build2.desired_state)
+    assert report2.applied
+    vendored_script = bridge_home / "plugins" / "market-tools" / "scripts" / "run.py"
+    assert vendored_script.read_text() == "print('v2')\n"
 
 
 def test_status_detects_missing_vendored_resources(

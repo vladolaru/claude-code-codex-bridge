@@ -1445,21 +1445,39 @@ def _plan_plugin_resource_mutations(
             owners=_sorted_owner_set((*existing_owners, desired.project_root)),
         )
 
-    # Plan on-disk mutations per individual resource subdirectory
-    for resource in desired.plugin_resources:
-        resource_dir = (
-            desired.bridge_home
-            / "plugins"
-            / f"{resource.marketplace}-{resource.plugin_name}"
-            / resource.target_dir_name
+    # Plan on-disk mutations per plugin dir, using hash-based fast path
+    for dir_name in sorted(desired_by_dir):
+        resources = desired_by_dir[dir_name]
+        desired_hash = desired_hashes[dir_name]
+        existing_entry = snapshot.registry.plugin_resources.get(dir_name)
+
+        # Hash-based fast path: if registry hash matches desired hash,
+        # all subdirs can skip the expensive on-disk comparison (the
+        # combined hash covers all subdirs under this parent).
+        hash_matches = (
+            existing_entry is not None
+            and existing_entry.content_hash == desired_hash
         )
 
-        if not resource_dir.exists():
-            changes.append(Change("create", resource_dir, resource_kind="plugin_resource"))
-            continue
+        for resource in resources:
+            resource_dir = (
+                desired.bridge_home
+                / "plugins"
+                / dir_name
+                / resource.target_dir_name
+            )
 
-        if not _directory_matches_resource(resource_dir, resource):
-            changes.append(Change("update", resource_dir, resource_kind="plugin_resource"))
+            if not resource_dir.exists():
+                changes.append(Change("create", resource_dir, resource_kind="plugin_resource"))
+                continue
+
+            # Fast path: registry hash matches — content unchanged, skip on-disk read
+            if hash_matches:
+                continue
+
+            # Slow path: hash differs or no registry entry — check on-disk
+            if not _directory_matches_resource(resource_dir, resource):
+                changes.append(Change("update", resource_dir, resource_kind="plugin_resource"))
 
     # Detect stale plugin resource dirs owned by this project
     previously_owned = _owned_plugin_resource_dirs(
