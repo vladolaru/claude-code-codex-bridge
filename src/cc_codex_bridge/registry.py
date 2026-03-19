@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Iterable
 
-from cc_codex_bridge.model import GeneratedSkill, GeneratedSkillFile, ReconcileError
+from cc_codex_bridge.model import GeneratedSkill, GeneratedSkillFile, ReconcileError, VendoredPluginResource
 from cc_codex_bridge.text import read_utf8_text
 
 
@@ -33,17 +33,28 @@ class GlobalAgentEntry:
 
 
 @dataclass(frozen=True)
+class GlobalPluginResourceEntry:
+    """One vendored plugin resource directory ownership record."""
+
+    content_hash: str
+    owners: tuple[Path, ...]
+
+
+@dataclass(frozen=True)
 class GlobalSkillRegistry:
-    """Validated global generated-skill and agent ownership registry."""
+    """Validated global generated-skill, agent, and plugin resource ownership registry."""
 
     skills: dict[str, GlobalSkillEntry]
     projects: tuple[Path, ...] = ()
     agents: dict[str, GlobalAgentEntry] = None  # type: ignore[assignment]
+    plugin_resources: dict[str, GlobalPluginResourceEntry] = None  # type: ignore[assignment]
     version: int = GLOBAL_REGISTRY_VERSION
 
     def __post_init__(self) -> None:
         if self.agents is None:
             object.__setattr__(self, "agents", {})
+        if self.plugin_resources is None:
+            object.__setattr__(self, "plugin_resources", {})
 
     @classmethod
     def from_path(cls, path: Path) -> "GlobalSkillRegistry | None":
@@ -118,10 +129,32 @@ class GlobalSkillRegistry:
                 owners=agent_owners,
             )
 
+        raw_plugin_resources = data.get("plugin_resources", {})
+        if not isinstance(raw_plugin_resources, dict):
+            raise ReconcileError(f"Invalid global skill registry file: {path}")
+
+        plugin_resources: dict[str, GlobalPluginResourceEntry] = {}
+        for resource_dir_name, raw_resource_entry in raw_plugin_resources.items():
+            normalized_dir_name = _require_plugin_resource_dir_name(resource_dir_name, path)
+            if not isinstance(raw_resource_entry, dict):
+                raise ReconcileError(f"Invalid global skill registry file: {path}")
+            resource_content_hash = _require_content_hash(raw_resource_entry, path)
+            resource_owners = tuple(
+                sorted(
+                    _read_owner_path_list(raw_resource_entry, "owners", path),
+                    key=str,
+                )
+            )
+            plugin_resources[normalized_dir_name] = GlobalPluginResourceEntry(
+                content_hash=resource_content_hash,
+                owners=resource_owners,
+            )
+
         return cls(
             skills=skills,
             projects=tuple(sorted(projects, key=str)),
             agents=agents,
+            plugin_resources=plugin_resources,
             version=GLOBAL_REGISTRY_VERSION,
         )
 
@@ -135,6 +168,13 @@ class GlobalSkillRegistry:
                     "owners": [str(owner) for owner in sorted(entry.owners, key=str)],
                 }
                 for agent_filename, entry in sorted(self.agents.items())
+            },
+            "plugin_resources": {
+                dir_name: {
+                    "content_hash": entry.content_hash,
+                    "owners": [str(owner) for owner in sorted(entry.owners, key=str)],
+                }
+                for dir_name, entry in sorted(self.plugin_resources.items())
             },
             "projects": sorted(str(p) for p in self.projects),
             "skills": {
@@ -175,6 +215,11 @@ def hash_generated_skill_files(files: Iterable[GeneratedSkillFile]) -> str:
         digest.update(len(generated_file.content).to_bytes(8, "big"))
         digest.update(generated_file.content)
     return f"sha256:{digest.hexdigest()}"
+
+
+def hash_vendored_plugin_resource(resource: VendoredPluginResource) -> str:
+    """Return the deterministic content hash for one vendored plugin resource."""
+    return hash_generated_skill_files(resource.files)
 
 
 def _require_content_hash(data: dict[str, object], path: Path) -> str:
@@ -229,6 +274,22 @@ def _require_agent_filename(value: str, path: Path) -> str:
         raise ReconcileError(f"Invalid global skill registry file: {path}")
 
     if not candidate.endswith(".toml"):
+        raise ReconcileError(f"Invalid global skill registry file: {path}")
+
+    return candidate
+
+
+def _require_plugin_resource_dir_name(value: str, path: Path) -> str:
+    """Validate one vendored plugin resource directory name."""
+    candidate = value.strip()
+    if not candidate:
+        raise ReconcileError(f"Invalid global skill registry file: {path}")
+
+    normalized = Path(candidate)
+    if normalized.is_absolute() or candidate != normalized.name or candidate in {".", ".."}:
+        raise ReconcileError(f"Invalid global skill registry file: {path}")
+
+    if candidate.endswith(".toml"):
         raise ReconcileError(f"Invalid global skill registry file: {path}")
 
     return candidate

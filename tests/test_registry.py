@@ -11,6 +11,7 @@ from cc_codex_bridge.model import ReconcileError
 from cc_codex_bridge.registry import (
     GLOBAL_REGISTRY_FILENAME,
     GlobalAgentEntry,
+    GlobalPluginResourceEntry,
     GlobalSkillRegistry,
     hash_agent_file,
 )
@@ -107,3 +108,77 @@ def test_hash_agent_file_is_deterministic():
     # Different content produces different hash
     different = hash_agent_file('name = "other"\n')
     assert different != hash1
+
+
+def test_registry_round_trips_plugin_resources(tmp_path: Path):
+    """Plugin resource entries survive serialization."""
+    registry = GlobalSkillRegistry(
+        skills={},
+        plugin_resources={
+            "market-tools": GlobalPluginResourceEntry(
+                content_hash="sha256:abc123",
+                owners=(Path("/project-a"),),
+            ),
+        },
+    )
+    path = tmp_path / GLOBAL_REGISTRY_FILENAME
+    path.write_text(registry.to_json())
+    loaded = GlobalSkillRegistry.from_path(path)
+    assert loaded is not None
+    assert "market-tools" in loaded.plugin_resources
+    assert loaded.plugin_resources["market-tools"].content_hash == "sha256:abc123"
+    assert loaded.plugin_resources["market-tools"].owners == (Path("/project-a"),)
+
+
+def test_registry_missing_plugin_resources_key_treated_as_empty(tmp_path: Path):
+    """A version 1 registry file without a plugin_resources key loads with empty dict."""
+    path = tmp_path / GLOBAL_REGISTRY_FILENAME
+    path.write_text(json.dumps({"version": 1, "skills": {}}, indent=2) + "\n")
+
+    loaded = GlobalSkillRegistry.from_path(path)
+    assert loaded is not None
+    assert loaded.plugin_resources == {}
+
+
+def test_registry_plugin_resources_default_is_empty_dict():
+    """Plugin resources defaults to empty dict when not provided."""
+    registry = GlobalSkillRegistry(skills={})
+    assert registry.plugin_resources == {}
+
+
+def test_registry_rejects_invalid_plugin_resource_dir_name(tmp_path: Path):
+    """Plugin resource dir names with path traversal or absolute paths are rejected."""
+    path = tmp_path / GLOBAL_REGISTRY_FILENAME
+    data = {
+        "version": 1,
+        "skills": {},
+        "plugin_resources": {
+            "/absolute/path": {
+                "content_hash": "sha256:abc123",
+                "owners": ["/project-a"],
+            },
+        },
+    }
+    path.write_text(json.dumps(data, indent=2) + "\n")
+
+    with pytest.raises(ReconcileError):
+        GlobalSkillRegistry.from_path(path)
+
+
+def test_registry_rejects_plugin_resource_dir_name_with_toml_suffix(tmp_path: Path):
+    """Plugin resource dir names must not end in .toml (they are directories, not files)."""
+    path = tmp_path / GLOBAL_REGISTRY_FILENAME
+    data = {
+        "version": 1,
+        "skills": {},
+        "plugin_resources": {
+            "bad-name.toml": {
+                "content_hash": "sha256:abc123",
+                "owners": ["/project-a"],
+            },
+        },
+    }
+    path.write_text(json.dumps(data, indent=2) + "\n")
+
+    with pytest.raises(ReconcileError):
+        GlobalSkillRegistry.from_path(path)
