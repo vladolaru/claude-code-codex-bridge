@@ -1,19 +1,52 @@
-"""Plugin resource detection and path rewriting.
+"""Plugin resource detection, vendoring, and path rewriting.
 
 Detects references to plugin-level resources ($PLUGIN_ROOT/scripts/,
 <skill base directory>/../.., etc.) in skill and agent content, and
 rewrites them to absolute paths pointing at vendored copies under
 the bridge home directory.
+
+Also provides ``read_plugin_dir_files()``, the canonical file-walking
+helper for reading plugin resource directories into ``GeneratedSkillFile``
+tuples.  Both skill and agent translation paths use this helper.
 """
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from cc_codex_bridge.model import GeneratedSkillFile
+from cc_codex_bridge.model import GeneratedSkillFile, TranslationError
+
+_IGNORED_NAMES = frozenset({".DS_Store", "__pycache__"})
+
+
+def read_plugin_dir_files(source_dir: Path) -> tuple[GeneratedSkillFile, ...]:
+    """Read all files from a plugin directory into GeneratedSkillFile objects.
+
+    Filters out noise files (.DS_Store, __pycache__, .pyc) and rejects
+    symlinked files and directories.  This is the canonical file-walking
+    helper for plugin resource vendoring — both skill and agent translation
+    paths use it.
+    """
+    entries: list[GeneratedSkillFile] = []
+    for path in sorted(source_dir.rglob("*")):
+        if path.is_symlink():
+            kind = "directory" if path.is_dir() else "file"
+            raise TranslationError(
+                f"Refusing to follow symlinked {kind}: {path}"
+            )
+        if path.is_dir():
+            continue
+        if any(part in _IGNORED_NAMES for part in path.parts):
+            continue
+        if path.suffix == ".pyc":
+            continue
+        entries.append(GeneratedSkillFile(
+            relative_path=path.relative_to(source_dir),
+            content=path.read_bytes(),
+            mode=path.stat().st_mode & 0o777,
+        ))
+    return tuple(entries)
 
 
 # Patterns that reference plugin-level directories.

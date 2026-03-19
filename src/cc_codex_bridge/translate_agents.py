@@ -11,7 +11,6 @@ from cc_codex_bridge.model import (
     AgentTranslationDiagnostic,
     AgentTranslationResult,
     GeneratedAgentFile,
-    GeneratedSkillFile,
     InstalledPlugin,
     TranslationError,
     VendoredPluginResource,
@@ -188,6 +187,7 @@ def translate_installed_agents_with_diagnostics(
     from cc_codex_bridge.vendor_plugin import (
         detect_plugin_resource_dirs,
         detect_transitive_plugin_dirs,
+        read_plugin_dir_files,
         rewrite_plugin_paths,
     )
 
@@ -239,23 +239,12 @@ def translate_installed_agents_with_diagnostics(
                         source_dir = plugin.source_path / dir_name
                         if not source_dir.is_dir():
                             continue
-                        file_entries: list[GeneratedSkillFile] = []
-                        for path in sorted(source_dir.rglob("*")):
-                            if path.is_dir():
-                                continue
-                            if path.name in {".DS_Store", "__pycache__"} or path.suffix == ".pyc":
-                                continue
-                            file_entries.append(GeneratedSkillFile(
-                                relative_path=path.relative_to(source_dir),
-                                content=path.read_bytes(),
-                                mode=path.stat().st_mode & 0o777,
-                            ))
                         agent_plugin_resources.append(VendoredPluginResource(
                             marketplace=plugin.marketplace,
                             plugin_name=plugin.plugin_name,
                             source_dir=source_dir,
                             target_dir_name=dir_name,
-                            files=tuple(file_entries),
+                            files=read_plugin_dir_files(source_dir),
                         ))
 
                     # Detect transitive dependencies: vendored scripts may
@@ -272,23 +261,12 @@ def translate_installed_agents_with_diagnostics(
                     }
                     for dir_name in sorted(transitive_dirs - already_vendored):
                         source_dir = plugin.source_path / dir_name
-                        file_entries_t: list[GeneratedSkillFile] = []
-                        for path in sorted(source_dir.rglob("*")):
-                            if path.is_dir():
-                                continue
-                            if path.name in {".DS_Store", "__pycache__"} or path.suffix == ".pyc":
-                                continue
-                            file_entries_t.append(GeneratedSkillFile(
-                                relative_path=path.relative_to(source_dir),
-                                content=path.read_bytes(),
-                                mode=path.stat().st_mode & 0o777,
-                            ))
                         agent_plugin_resources.append(VendoredPluginResource(
                             marketplace=plugin.marketplace,
                             plugin_name=plugin.plugin_name,
                             source_dir=source_dir,
                             target_dir_name=dir_name,
-                            files=tuple(file_entries_t),
+                            files=read_plugin_dir_files(source_dir),
                         ))
 
                     all_plugin_resources.extend(agent_plugin_resources)

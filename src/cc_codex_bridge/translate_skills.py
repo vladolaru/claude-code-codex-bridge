@@ -284,7 +284,12 @@ def _build_generated_skill(
 ) -> tuple[GeneratedSkill, SkillValidationDiagnostic | None, tuple[VendoredPluginResource, ...]]:
     """Build the generated file tree for one installed Claude skill."""
     from cc_codex_bridge.bridge_home import plugin_resource_dir
-    from cc_codex_bridge.vendor_plugin import detect_plugin_resource_dirs, rewrite_plugin_paths
+    from cc_codex_bridge.vendor_plugin import (
+        detect_plugin_resource_dirs,
+        detect_transitive_plugin_dirs,
+        read_plugin_dir_files,
+        rewrite_plugin_paths,
+    )
 
     generated_files: dict[Path, tuple[bytes, int]] = {}
 
@@ -304,8 +309,6 @@ def _build_generated_skill(
     # Detect plugin resource references and rewrite paths
     plugin_resources: list[VendoredPluginResource] = []
     if bridge_home is not None:
-        from cc_codex_bridge.vendor_plugin import detect_transitive_plugin_dirs
-
         detected_dirs = detect_plugin_resource_dirs(rewritten)
         if detected_dirs:
             vendored_root = plugin_resource_dir(
@@ -318,22 +321,12 @@ def _build_generated_skill(
                 source_dir = raw_skill.plugin_root / dir_name
                 if not source_dir.is_dir():
                     continue  # Referenced dir doesn't exist at plugin root
-                resource_files: dict[Path, tuple[bytes, int]] = {}
-                _copy_tree(source_dir, Path(), resource_files)
-                files = tuple(
-                    GeneratedSkillFile(
-                        relative_path=path,
-                        content=resource_files[path][0],
-                        mode=resource_files[path][1],
-                    )
-                    for path in sorted(resource_files)
-                )
                 plugin_resources.append(VendoredPluginResource(
                     marketplace=raw_skill.marketplace,
                     plugin_name=raw_skill.plugin_name,
                     source_dir=source_dir,
                     target_dir_name=dir_name,
-                    files=files,
+                    files=read_plugin_dir_files(source_dir),
                 ))
 
             # Detect transitive dependencies: vendored scripts may reference
@@ -345,22 +338,12 @@ def _build_generated_skill(
             already_vendored = {r.target_dir_name for r in plugin_resources}
             for dir_name in sorted(transitive_dirs - already_vendored):
                 source_dir = raw_skill.plugin_root / dir_name
-                resource_files_t: dict[Path, tuple[bytes, int]] = {}
-                _copy_tree(source_dir, Path(), resource_files_t)
-                files_t = tuple(
-                    GeneratedSkillFile(
-                        relative_path=path,
-                        content=resource_files_t[path][0],
-                        mode=resource_files_t[path][1],
-                    )
-                    for path in sorted(resource_files_t)
-                )
                 plugin_resources.append(VendoredPluginResource(
                     marketplace=raw_skill.marketplace,
                     plugin_name=raw_skill.plugin_name,
                     source_dir=source_dir,
                     target_dir_name=dir_name,
-                    files=files_t,
+                    files=read_plugin_dir_files(source_dir),
                 ))
 
     diagnostic = _validate_generated_skill(rewritten, install_dir_name, skill_md_path)
