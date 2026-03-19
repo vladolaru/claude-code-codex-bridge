@@ -396,3 +396,25 @@ def test_translate_command_discovery_block_removed(make_plugin_version, tmp_path
     assert 'find ~/.claude' not in content
     assert '/tmp/.tools-root' not in content
     assert 'run.py' in content
+
+
+def test_translate_command_without_bridge_home_uses_raw_path(make_plugin_version):
+    """Without bridge_home, ${CLAUDE_PLUGIN_ROOT} uses raw plugin cache path (backward compat)."""
+    cache_root, version_dir = make_plugin_version(
+        "market", "tools", "1.0.0",
+    )
+    commands_dir = version_dir / "commands"
+    commands_dir.mkdir()
+    (commands_dir / "review.md").write_text(
+        "---\ndescription: Run review\n---\n\n"
+        'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pipeline.py"\n'
+    )
+
+    plugins = discover_latest_plugins(cache_root)
+    result = translate_installed_commands(plugins)  # no bridge_home
+    skill_md = next(f for f in result.skills[0].files if f.relative_path == Path("SKILL.md"))
+    content = skill_md.content.decode()
+
+    # Without bridge_home, falls back to raw plugin path
+    assert str(version_dir.resolve()) in content
+    assert result.plugin_resources == ()
