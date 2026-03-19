@@ -546,3 +546,68 @@ def test_discover_latest_plugins_returns_all_when_no_filter(make_plugin_version)
 
     names = {p.plugin_name for p in plugins}
     assert names == {"alpha", "beta"}
+
+
+# ---------------------------------------------------------------------------
+# Command discovery
+# ---------------------------------------------------------------------------
+
+
+def test_discover_plugin_commands(make_plugin_version):
+    """Plugin commands are discovered from the commands/ directory."""
+    cache_root, version_dir = make_plugin_version(
+        "market", "pirategoat-tools", "1.0.0",
+    )
+    commands_dir = version_dir / "commands"
+    commands_dir.mkdir()
+    (commands_dir / "code-review.md").write_text(
+        "---\ndescription: Review code\n---\nDo review.\n"
+    )
+    (commands_dir / "pr-update.md").write_text(
+        "---\ndescription: Update PR\n---\nUpdate.\n"
+    )
+    (commands_dir / "notes.txt").write_text("not a command")
+
+    plugins = discover_latest_plugins(cache_root)
+    assert len(plugins) == 1
+    assert len(plugins[0].commands) == 2
+    assert plugins[0].commands[0].name == "code-review.md"
+    assert plugins[0].commands[1].name == "pr-update.md"
+
+
+def test_discover_plugin_with_no_commands_directory(make_plugin_version):
+    """Plugins without a commands/ directory return empty commands tuple."""
+    cache_root, _ = make_plugin_version(
+        "market", "some-plugin", "1.0.0",
+        skill_names=("my-skill",),
+    )
+    plugins = discover_latest_plugins(cache_root)
+    assert len(plugins) == 1
+    assert plugins[0].commands == ()
+
+
+def test_discover_user_commands(tmp_path: Path):
+    """User-level commands are discovered from ~/.claude/commands/."""
+    from cc_codex_bridge.discover import discover_user_commands
+    claude_home = tmp_path / "claude-home"
+    commands_dir = claude_home / "commands"
+    commands_dir.mkdir(parents=True)
+    (commands_dir / "my-cmd.md").write_text("---\ndescription: test\n---\n")
+    (commands_dir / "other.txt").write_text("not a command")
+
+    result = discover_user_commands(claude_home)
+    assert len(result) == 1
+    assert result[0].name == "my-cmd.md"
+
+
+def test_discover_project_commands(tmp_path: Path):
+    """Project-level commands are discovered from .claude/commands/."""
+    from cc_codex_bridge.discover import discover_project_commands
+    project_root = tmp_path / "project"
+    commands_dir = project_root / ".claude" / "commands"
+    commands_dir.mkdir(parents=True)
+    (commands_dir / "build.md").write_text("---\ndescription: build\n---\n")
+
+    result = discover_project_commands(project_root)
+    assert len(result) == 1
+    assert result[0].name == "build.md"

@@ -127,6 +127,7 @@ class InstalledPlugin:
     source_path: Path
     skills: tuple[Path, ...]
     agents: tuple[Path, ...]
+    commands: tuple[Path, ...]
 
 
 @dataclass(frozen=True)
@@ -137,8 +138,10 @@ class DiscoveryResult:
     plugins: tuple[InstalledPlugin, ...]
     user_skills: tuple[Path, ...] = ()
     user_agents: tuple[Path, ...] = ()
+    user_commands: tuple[Path, ...] = ()
     project_skills: tuple[Path, ...] = ()
     project_agents: tuple[Path, ...] = ()
+    project_commands: tuple[Path, ...] = ()
     user_claude_md: str | None = None
 
 

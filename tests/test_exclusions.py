@@ -87,6 +87,7 @@ def test_apply_sync_exclusions_filters_plugins_skills_and_agents(tmp_path: Path)
             tmp_path / "source-alpha" / "agents" / "reviewer.md",
             tmp_path / "source-alpha" / "agents" / "helper.md",
         ),
+        commands=(),
     )
     plugin_beta = InstalledPlugin(
         marketplace="market",
@@ -97,6 +98,7 @@ def test_apply_sync_exclusions_filters_plugins_skills_and_agents(tmp_path: Path)
         source_path=tmp_path / "source-beta",
         skills=(tmp_path / "source-beta" / "skills" / "tooling",),
         agents=(tmp_path / "source-beta" / "agents" / "auditor.md",),
+        commands=(),
     )
     discovery = DiscoveryResult(
         project=ProjectContext(
@@ -241,6 +243,7 @@ def test_bare_name_exclusion_also_matches_plugin_skills(tmp_path: Path):
             tmp_path / "source-alpha" / "skills" / "other-tool",
         ),
         agents=(),
+        commands=(),
     )
     discovery = DiscoveryResult(
         project=ProjectContext(
@@ -271,6 +274,7 @@ def test_bare_name_exclusion_also_matches_plugin_agents(tmp_path: Path):
             tmp_path / "source-alpha" / "agents" / "reviewer.md",
             tmp_path / "source-alpha" / "agents" / "helper.md",
         ),
+        commands=(),
     )
     discovery = DiscoveryResult(
         project=ProjectContext(

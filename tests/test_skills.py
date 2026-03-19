@@ -423,6 +423,7 @@ def test_skill_translation_rejects_symlinked_resource_directory(tmp_path):
         source_path=version_dir,
         skills=(skill_dir,),
         agents=(),
+        commands=(),
     )
 
     with pytest.raises(TranslationError, match="symlink"):
@@ -458,6 +459,7 @@ def test_skill_translation_rejects_symlinked_file_in_resource_dir(tmp_path):
         source_path=version_dir,
         skills=(skill_dir,),
         agents=(),
+        commands=(),
     )
 
     with pytest.raises(TranslationError, match="symlinked file"):
@@ -493,6 +495,7 @@ def test_skill_translation_rejects_symlinked_subdir_in_resource_dir(tmp_path):
         source_path=version_dir,
         skills=(skill_dir,),
         agents=(),
+        commands=(),
     )
 
     with pytest.raises(TranslationError, match="symlinked"):
@@ -524,6 +527,7 @@ def test_skill_translation_rejects_symlinked_top_level_file(tmp_path):
         source_path=version_dir,
         skills=(skill_dir,),
         agents=(),
+        commands=(),
     )
 
     with pytest.raises(TranslationError, match="symlinked file"):

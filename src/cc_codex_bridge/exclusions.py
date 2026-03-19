@@ -143,6 +143,7 @@ def apply_sync_exclusions(
                 source_path=plugin.source_path,
                 skills=tuple(kept_skills),
                 agents=tuple(kept_agents),
+                commands=plugin.commands,
             )
         )
 
@@ -183,8 +184,10 @@ def apply_sync_exclusions(
         plugins=tuple(filtered_plugins),
         user_skills=tuple(kept_user_skills),
         user_agents=tuple(kept_user_agents),
+        user_commands=discovery.user_commands,
         project_skills=tuple(kept_project_skills),
         project_agents=tuple(kept_project_agents),
+        project_commands=discovery.project_commands,
         user_claude_md=discovery.user_claude_md,
     )
     report = ExclusionReport(

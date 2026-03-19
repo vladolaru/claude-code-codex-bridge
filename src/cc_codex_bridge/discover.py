@@ -150,8 +150,10 @@ def discover(
         plugins=plugins,
         user_skills=discover_user_skills(claude_home),
         user_agents=discover_user_agents(claude_home),
+        user_commands=discover_user_commands(claude_home),
         project_skills=discover_project_skills(project.root),
         project_agents=discover_project_agents(project.root),
+        project_commands=discover_project_commands(project.root),
         user_claude_md=discover_user_claude_md(claude_home),
     )
 
@@ -195,6 +197,7 @@ def discover_latest_plugins(
                 source_path=latest.resolved_path,
                 skills=tuple(_discover_skills(latest.resolved_path)),
                 agents=tuple(_discover_agents(latest.resolved_path)),
+                commands=tuple(_discover_commands(latest.resolved_path)),
             )
         )
 
@@ -253,6 +256,29 @@ def discover_project_agents(project_root: Path) -> tuple[Path, ...]:
     ))
 
 
+def discover_user_commands(claude_home: str | Path | None = None) -> tuple[Path, ...]:
+    """Discover user-level commands from ~/.claude/commands/."""
+    home = Path(claude_home or DEFAULT_CLAUDE_HOME).expanduser().resolve()
+    commands_dir = home / "commands"
+    if not commands_dir.is_dir():
+        return ()
+    return tuple(sorted(
+        path for path in commands_dir.iterdir()
+        if path.is_file() and path.suffix == ".md"
+    ))
+
+
+def discover_project_commands(project_root: Path) -> tuple[Path, ...]:
+    """Discover project-level commands from .claude/commands/."""
+    commands_dir = project_root / ".claude" / "commands"
+    if not commands_dir.is_dir():
+        return ()
+    return tuple(sorted(
+        path for path in commands_dir.iterdir()
+        if path.is_file() and path.suffix == ".md"
+    ))
+
+
 def discover_user_claude_md(claude_home: str | Path | None = None) -> str | None:
     """Read user-level CLAUDE.md content if present."""
     home = Path(claude_home or DEFAULT_CLAUDE_HOME).expanduser().resolve()
@@ -306,6 +332,17 @@ def _discover_agents(plugin_path: Path) -> list[Path]:
 
     return sorted(
         path for path in agents_dir.iterdir() if path.is_file() and path.suffix == ".md"
+    )
+
+
+def _discover_commands(plugin_path: Path) -> list[Path]:
+    """Return top-level command markdown files for a plugin."""
+    commands_dir = plugin_path / "commands"
+    if not commands_dir.is_dir():
+        return []
+
+    return sorted(
+        path for path in commands_dir.iterdir() if path.is_file() and path.suffix == ".md"
     )
 
 
