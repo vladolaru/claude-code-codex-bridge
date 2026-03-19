@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-03-19
+
 ### Added
 
 - Plugin resource ownership tracking in the global registry with multi-project ownership and content hash fast path. Vendored plugin resource directories are now shared safely across projects and removed only when no project claims them.
