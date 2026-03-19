@@ -521,7 +521,7 @@ Supported kinds in current reporting:
 ### Reconcile flow
 
 1. load previous state if present
-2. load the current global registry (skills and agents) from bridge home
+2. load the current global registry (skills, agents, and plugin resources) from bridge home
 3. compute desired project file changes (shim, project-local agent `.toml` files)
 4. compute desired project skill directory mutations using directory-snapshot comparison
 5. compute desired generated-skill claims and reconcile changes from registry ownership plus on-disk content hashes
