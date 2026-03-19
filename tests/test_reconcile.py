@@ -3218,3 +3218,131 @@ def test_status_detects_missing_vendored_resources(
     report2 = reconcile_desired_state(build2.desired_state)
     assert report2.applied
     assert (bridge_home / "plugins" / "market-tools" / "scripts" / "run.py").exists()
+
+
+def test_reconcile_tracks_vendored_plugin_resource_ownership_in_registry(
+    make_plugin_version, make_project, tmp_path,
+):
+    """Reconcile records vendored plugin resource ownership in the global registry."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "tools", "1.0.0",
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\ntools:\n  - Read\n---\n\n"
+        "python3 $PLUGIN_ROOT/scripts/run.py\n"
+    )
+    scripts_dir = version_dir / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "run.py").write_text("print('hello')\n")
+
+    bridge_home = tmp_path / "bridge"
+    codex_home = tmp_path / "codex"
+    build = build_project_desired_state(
+        project_root, cache_dir=cache_root,
+        bridge_home=bridge_home, codex_home=codex_home,
+    )
+    assert build.desired_state is not None
+    reconcile_desired_state(build.desired_state)
+
+    # Verify the registry has the plugin resource entry
+    registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    assert registry is not None
+    assert "market-tools" in registry.plugin_resources
+    entry = registry.plugin_resources["market-tools"]
+    assert entry.content_hash.startswith("sha256:")
+    assert project_root.resolve() in entry.owners
+
+
+def test_reconcile_shares_vendored_plugin_resource_ownership_across_projects(
+    make_plugin_version, make_project, tmp_path,
+):
+    """Two projects using the same plugin both appear as owners in the registry."""
+    first_project, _ = make_project("project-a")
+    second_project, _ = make_project("project-b")
+    cache_root, version_dir = make_plugin_version(
+        "market", "tools", "1.0.0",
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\ntools:\n  - Read\n---\n\n"
+        "python3 $PLUGIN_ROOT/scripts/run.py\n"
+    )
+    scripts_dir = version_dir / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "run.py").write_text("print('shared')\n")
+
+    bridge_home = tmp_path / "bridge"
+    codex_home = tmp_path / "codex"
+
+    # Reconcile first project
+    build1 = build_project_desired_state(
+        first_project, cache_dir=cache_root,
+        bridge_home=bridge_home, codex_home=codex_home,
+    )
+    assert build1.desired_state is not None
+    reconcile_desired_state(build1.desired_state)
+
+    # Reconcile second project
+    build2 = build_project_desired_state(
+        second_project, cache_dir=cache_root,
+        bridge_home=bridge_home, codex_home=codex_home,
+    )
+    assert build2.desired_state is not None
+    reconcile_desired_state(build2.desired_state)
+
+    # Verify both projects are owners in the registry
+    registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    assert registry is not None
+    assert "market-tools" in registry.plugin_resources
+    entry = registry.plugin_resources["market-tools"]
+    assert entry.content_hash.startswith("sha256:")
+    owners = [str(o) for o in entry.owners]
+    assert str(first_project.resolve()) in owners
+    assert str(second_project.resolve()) in owners
+
+
+def test_reconcile_combines_hash_for_multiple_resource_dirs(
+    make_plugin_version, make_project, tmp_path,
+):
+    """Plugin with multiple vendored subdirs gets a combined hash per parent dir."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "tools", "1.0.0",
+        skill_names=("analyzer",),
+        agent_names=("reviewer",),
+    )
+    # Agent references scripts/ dir
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\ntools:\n  - Read\n---\n\n"
+        "python3 $PLUGIN_ROOT/scripts/run.py\n"
+    )
+    # Skill references data/ dir
+    (version_dir / "skills" / "analyzer" / "SKILL.md").write_text(
+        "---\nname: analyzer\ndescription: Analyze\n---\n\n"
+        "Use data at `{{data}}/config.json`.\n"
+    )
+    scripts_dir = version_dir / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "run.py").write_text("print('script')\n")
+    data_dir = version_dir / "data"
+    data_dir.mkdir()
+    (data_dir / "config.json").write_text('{"key": "value"}\n')
+
+    bridge_home = tmp_path / "bridge"
+    codex_home = tmp_path / "codex"
+    build = build_project_desired_state(
+        project_root, cache_dir=cache_root,
+        bridge_home=bridge_home, codex_home=codex_home,
+    )
+    assert build.desired_state is not None
+    reconcile_desired_state(build.desired_state)
+
+    # The registry should have one entry for "market-tools" with a combined hash
+    registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    assert registry is not None
+    assert "market-tools" in registry.plugin_resources
+    entry = registry.plugin_resources["market-tools"]
+    assert entry.content_hash.startswith("sha256:")
+    assert project_root.resolve() in entry.owners

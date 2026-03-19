@@ -21,10 +21,12 @@ from cc_codex_bridge.model import (
 from cc_codex_bridge.registry import (
     GLOBAL_REGISTRY_FILENAME,
     GlobalAgentEntry,
+    GlobalPluginResourceEntry,
     GlobalSkillEntry,
     GlobalSkillRegistry,
     hash_agent_file,
     hash_generated_skill,
+    hash_generated_skill_files,
 )
 from cc_codex_bridge.state import BridgeState
 from cc_codex_bridge.text import read_utf8_text
@@ -1138,6 +1140,9 @@ def _plan_mutations(
     agent_changes, updated_registry = _plan_global_agent_mutations(
         desired, previous_state, snapshot, updated_registry,
     )
+    plugin_resource_changes, updated_registry = _plan_plugin_resource_mutations(
+        desired, snapshot, updated_registry,
+    )
 
     # Build registry write from the final accumulated state.
     registry_writes: list[_RegistryWrite] = []
@@ -1146,7 +1151,6 @@ def _plan_mutations(
         registry_writes.append(registry_write)
 
     global_changes = _plan_global_instructions_changes(desired)
-    plugin_resource_changes = _plan_plugin_resource_mutations(desired)
     return _MutationPlan(
         changes=tuple((
             *project_changes, *project_skill_changes,
@@ -1281,6 +1285,7 @@ def _plan_skill_mutations(
             snapshot.registry.projects, desired.project_root
         ),
         agents=dict(snapshot.registry.agents),
+        plugin_resources=dict(snapshot.registry.plugin_resources),
     )
     for install_dir_name in sorted(desired_skills):
         skill = desired_skills[install_dir_name]
@@ -1376,15 +1381,52 @@ def _plan_global_instructions_changes(desired: DesiredState) -> tuple[Change, ..
     return (Change("update", path, resource_kind="global_instructions"),)
 
 
-def _plan_plugin_resource_mutations(desired: DesiredState) -> tuple[Change, ...]:
-    """Plan vendored plugin resource directory mutations.
+def _plan_plugin_resource_mutations(
+    desired: DesiredState,
+    snapshot: _RegistrySnapshot,
+    updated_registry: GlobalSkillRegistry,
+) -> tuple[tuple[Change, ...], GlobalSkillRegistry]:
+    """Plan vendored plugin resource directory mutations and registry ownership.
 
     Compares desired vendored resources against on-disk state using
-    directory-snapshot comparison.  This ensures stale or missing
-    vendored files are detected and reported by status/dry-run.
+    directory-snapshot comparison.  Also updates the global registry to
+    track which projects own each vendored plugin resource directory,
+    matching the ownership model used for global skills and agents.
     """
     changes: list[Change] = []
 
+    # Group resources by plugin dir name for combined hashing
+    desired_by_dir: dict[str, list[VendoredPluginResource]] = {}
+    for resource in desired.plugin_resources:
+        dir_name = f"{resource.marketplace}-{resource.plugin_name}"
+        desired_by_dir.setdefault(dir_name, []).append(resource)
+
+    # Compute combined hash per dir
+    desired_hashes: dict[str, str] = {}
+    for dir_name, resources in desired_by_dir.items():
+        all_files = tuple(
+            f
+            for r in sorted(resources, key=lambda r: r.target_dir_name)
+            for f in r.files
+        )
+        desired_hashes[dir_name] = hash_generated_skill_files(all_files)
+
+    # Update registry entries for each plugin dir
+    for dir_name in sorted(desired_by_dir):
+        existing_entry = updated_registry.plugin_resources.get(dir_name)
+        desired_hash = desired_hashes[dir_name]
+
+        if existing_entry is not None:
+            existing_owners = existing_entry.owners
+        else:
+            existing_owners = ()
+
+        updated_registry.plugin_resources[dir_name] = GlobalPluginResourceEntry(
+            content_hash=desired_hash,
+            owners=_sorted_owner_set((*existing_owners, desired.project_root)),
+        )
+
+    # Plan on-disk mutations per individual resource subdirectory
     for resource in desired.plugin_resources:
         resource_dir = (
             desired.bridge_home
@@ -1400,7 +1442,7 @@ def _plan_plugin_resource_mutations(desired: DesiredState) -> tuple[Change, ...]
         if not _directory_matches_resource(resource_dir, resource):
             changes.append(Change("update", resource_dir, resource_kind="plugin_resource"))
 
-    return tuple(changes)
+    return tuple(changes), updated_registry
 
 
 def _directory_matches_resource(path: Path, resource: VendoredPluginResource) -> bool:
