@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cc_codex_bridge.bridge_home import resolve_bridge_home, project_state_dir
+from cc_codex_bridge.bridge_home import resolve_bridge_home, project_state_dir, plugin_resource_dir
 
 
 def test_default_bridge_home(tmp_path):
@@ -41,3 +41,15 @@ def test_project_state_dir_under_bridge_home(tmp_path):
     bridge = tmp_path / "bridge"
     d = project_state_dir(tmp_path / "my-project", bridge_home=bridge)
     assert str(d).startswith(str(bridge / "projects"))
+
+
+def test_plugin_resource_dir_structure(tmp_path):
+    d = plugin_resource_dir("market", "pirategoat-tools", bridge_home=tmp_path / "bridge")
+    assert d == tmp_path / "bridge" / "plugins" / "market-pirategoat-tools"
+
+
+def test_plugin_resource_dir_different_plugins(tmp_path):
+    bridge = tmp_path / "bridge"
+    d1 = plugin_resource_dir("market", "tools-a", bridge_home=bridge)
+    d2 = plugin_resource_dir("market", "tools-b", bridge_home=bridge)
+    assert d1 != d2

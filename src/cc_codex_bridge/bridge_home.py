@@ -27,3 +27,13 @@ def project_state_dir(project_root: Path, *, bridge_home: Path) -> Path:
     resolved = str(project_root.resolve())
     digest = hashlib.sha256(resolved.encode()).hexdigest()[:16]
     return bridge_home / "projects" / digest
+
+
+def plugin_resource_dir(
+    marketplace: str,
+    plugin_name: str,
+    *,
+    bridge_home: Path,
+) -> Path:
+    """Return the plugin resource directory under bridge home."""
+    return bridge_home / "plugins" / f"{marketplace}-{plugin_name}"
