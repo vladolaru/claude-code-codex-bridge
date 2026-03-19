@@ -147,17 +147,20 @@ def _translate_one_command(
         # Detect dirs referenced via ${CLAUDE_PLUGIN_ROOT} (now replaced
         # with vendored_root in the body)
         detected_claude_root_dirs: set[str] = set()
+        detected_claude_root_files: list[str] = []
         vendored_root_str = str(vendored_root)
-        for candidate in sorted(
-            d.name for d in plugin_root.iterdir() if d.is_dir()
-        ):
-            if f"{vendored_root_str}/{candidate}" in transformed_body:
-                detected_claude_root_dirs.add(candidate)
+        for entry in sorted(plugin_root.iterdir(), key=lambda e: e.name):
+            if entry.name.startswith("."):
+                continue
+            if entry.is_dir() and f"{vendored_root_str}/{entry.name}" in transformed_body:
+                detected_claude_root_dirs.add(entry.name)
+            elif entry.is_file() and f"{vendored_root_str}/{entry.name}" in transformed_body:
+                detected_claude_root_files.append(entry.name)
 
         # Union of all detected dirs
         all_detected = detected_plugin_root_dirs | detected_claude_root_dirs
 
-        # Build VendoredPluginResource for each
+        # Build VendoredPluginResource for each detected directory
         for dir_name in sorted(all_detected):
             source_dir = plugin_root / dir_name
             if not source_dir.is_dir():
@@ -170,6 +173,31 @@ def _translate_one_command(
                 target_dir_name=dir_name,
                 files=files,
             ))
+
+        # Vendor root-level files into a _root resource directory and
+        # rewrite their paths to point there
+        if detected_claude_root_files:
+            root_files: list[GeneratedSkillFile] = []
+            for filename in sorted(detected_claude_root_files):
+                source_file = plugin_root / filename
+                root_files.append(GeneratedSkillFile(
+                    relative_path=Path(filename),
+                    content=source_file.read_bytes(),
+                    mode=source_file.stat().st_mode & 0o777,
+                ))
+            plugin_resources.append(VendoredPluginResource(
+                marketplace=marketplace,
+                plugin_name=plugin_name,
+                source_dir=plugin_root,
+                target_dir_name="_root",
+                files=tuple(root_files),
+            ))
+            # Rewrite paths: vendored_root/file.py → vendored_root/_root/file.py
+            for filename in detected_claude_root_files:
+                transformed_body = transformed_body.replace(
+                    f"{vendored_root_str}/{filename}",
+                    f"{vendored_root_str}/_root/{filename}",
+                )
 
         # Transitive deps
         if plugin_resources:

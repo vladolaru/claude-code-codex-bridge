@@ -418,3 +418,35 @@ def test_translate_command_without_bridge_home_uses_raw_path(make_plugin_version
     # Without bridge_home, falls back to raw plugin path
     assert str(version_dir.resolve()) in content
     assert result.plugin_resources == ()
+
+
+def test_translate_command_vendors_root_level_files(make_plugin_version, tmp_path):
+    """Root-level plugin files referenced via ${CLAUDE_PLUGIN_ROOT} are vendored."""
+    cache_root, version_dir = make_plugin_version(
+        "market", "tools", "1.0.0",
+    )
+    commands_dir = version_dir / "commands"
+    commands_dir.mkdir()
+    (commands_dir / "run.md").write_text(
+        "---\ndescription: Run tool\n---\n\n"
+        'python3 "${CLAUDE_PLUGIN_ROOT}/run.py" --help\n'
+    )
+    # Root-level file (not inside a subdirectory)
+    (version_dir / "run.py").write_text("print('hello')\n")
+
+    bridge = tmp_path / "bridge-home"
+    plugins = discover_latest_plugins(cache_root)
+    result = translate_installed_commands(plugins, bridge_home=bridge)
+    skill_md = next(f for f in result.skills[0].files if f.relative_path == Path("SKILL.md"))
+    content = skill_md.content.decode()
+
+    # Path should point to vendored _root dir
+    vendored_root = str(bridge / "plugins" / "market-tools")
+    assert f"{vendored_root}/_root/run.py" in content
+    # Raw cache path should not be present
+    assert str(version_dir.resolve()) not in content
+
+    # A _root resource should be created
+    root_resources = [r for r in result.plugin_resources if r.target_dir_name == "_root"]
+    assert len(root_resources) == 1
+    assert any(f.relative_path == Path("run.py") for f in root_resources[0].files)
