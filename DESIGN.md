@@ -53,6 +53,7 @@ These are derived artifacts and must not become hand-maintained sources:
 - `~/.codex/skills/*`
 - `~/.cc-codex-bridge/projects/<hash>/state.json`
 - `~/.cc-codex-bridge/registry.json`
+- `~/.cc-codex-bridge/plugins/<marketplace>-<plugin>/`
 
 ### Authority rule
 
@@ -152,6 +153,11 @@ These are internal state files stored under `~/.cc-codex-bridge/` (configurable 
   - tracks managed project files, managed project skill directory names, bridge home, codex home, and version
 - `~/.cc-codex-bridge/registry.json`
   - global generated-skill and agent ownership registry keyed by install directory name (skills) and filename (agents)
+- `~/.cc-codex-bridge/plugins/<marketplace>-<plugin>/<dir>/`
+  - vendored copies of plugin-level resource directories (e.g., `scripts/`, `agents/`)
+  - written during reconciliation when skills or agents reference `$PLUGIN_ROOT` paths
+  - paths in skill and agent content are rewritten to absolute vendored locations
+  - transitive dependencies (e.g., scripts referencing `agents/shared/`) are detected and vendored automatically
 
 ### Local-only rule
 
@@ -181,7 +187,8 @@ The project state file (at `~/.cc-codex-bridge/projects/<hash>/state.json`) reco
 - bridge home path
 - managed project-relative file paths (including agent `.toml` files under `.codex/agents/`)
 - managed project skill directory names (tracked separately for directory-snapshot comparison)
-- state version (currently 6)
+- managed vendored plugin directory names (tracked for cleanup)
+- state version (currently 7)
 
 The global registry records:
 
@@ -336,6 +343,13 @@ Unsupported Claude tools are hard diagnostics. They invalidate agent generation 
 
 Installed-agent translation checks for duplicate `install_filename` values as well as duplicate `agent_name` values, consistent with standalone agent translation.
 
+Plugin resource vendoring:
+
+- agent `developer_instructions` referencing `$PLUGIN_ROOT/scripts/` or similar patterns gets paths rewritten to absolute vendored locations under `~/.cc-codex-bridge/plugins/`
+- referenced plugin directories are copied as `VendoredPluginResource` objects
+- the same detection and rewriting rules apply as for skill translation (section 8.4)
+- transitive dependencies (e.g., scripts referencing `agents/shared/` via `os.path.join`) are detected and vendored automatically
+
 After merging all scopes (plugin, user, project), `validate_merged_agents()` checks uniqueness of both `agent_name` and `install_filename` across the full merged set. Per-scope checks provide early detection with better error messages; the post-merge check is the global invariant that prevents cross-scope collisions from producing silently corrupt output.
 
 Frontmatter parsing is shared through `src/cc_codex_bridge/frontmatter.py`.
@@ -389,6 +403,14 @@ Current skill rules:
 - generated `SKILL.md` has its `name:` rewritten to match the generated install directory name
 - skill trees are materialized as complete directory snapshots
 - symlinked resource directories, symlinked files (including `SKILL.md`), and symlinked subdirectories within resource directories are all rejected during translation — no symlinks anywhere in copied skill content
+
+Plugin resource vendoring:
+
+- skill content referencing `$PLUGIN_ROOT/scripts/` or `<skill base directory>/../..` patterns gets paths rewritten to absolute vendored locations under `~/.cc-codex-bridge/plugins/`
+- referenced plugin directories are copied as `VendoredPluginResource` objects
+- transitive dependencies (e.g., scripts referencing `agents/shared/` via `os.path.join`) are detected and vendored automatically
+- detection covers `$PLUGIN_ROOT`, `${PLUGIN_ROOT}`, and `<skill base directory>/../..` forms
+- the multi-line runtime discovery block (`cat /tmp/...`, `find ~/.claude ...`) is removed and replaced with direct absolute paths
 
 Current relocation behavior:
 
@@ -468,6 +490,7 @@ Reconcile lives in `src/cc_codex_bridge/reconcile.py`.
 - generated skills (global registry, installed to `~/.codex/skills/`)
 - global agents (global registry, installed as `.toml` files to `~/.codex/agents/`)
 - global instructions content (for `~/.codex/AGENTS.md`)
+- vendored plugin resources (bridge-internal, written to `~/.cc-codex-bridge/plugins/`)
 - path to the state file (under bridge home)
 
 ### Diff model
@@ -495,10 +518,11 @@ Supported kinds in current reporting:
 7. compute desired global instructions changes for `~/.codex/AGENTS.md`
 8. validate ownership constraints
 9. write project file and skill directory changes directly
-10. write global agent files and instructions file if needed
-11. write updated global registry file (a single file tracks both skills and agents)
-12. write the state file under bridge home
-13. remove stale managed outputs whose last owner released them
+10. write vendored plugin resource directories under bridge home
+11. write global agent files and instructions file if needed
+12. write updated global registry file (a single file tracks both skills and agents)
+13. write the state file under bridge home
+14. remove stale managed outputs whose last owner released them
 
 `diff_desired_state()` additionally reports state file create/update changes that `reconcile_desired_state()` would perform, ensuring `status` and `reconcile --dry-run` show the same pending changes as a real reconcile.
 
@@ -625,7 +649,7 @@ Per-project LaunchAgent plists are no longer generated. The legacy `build_launch
 Current runtime module responsibilities:
 
 - `bridge_home.py`
-  - bridge home directory resolution (`~/.cc-codex-bridge/`, configurable via `$CC_BRIDGE_HOME`) and project-specific state path computation
+  - bridge home directory resolution (`~/.cc-codex-bridge/`, configurable via `$CC_BRIDGE_HOME`), project-specific state path computation, and plugin resource path computation
 - `cli.py`
   - argument parsing, command dispatch, summary/error reporting
 - `discover.py`
@@ -651,6 +675,8 @@ Current runtime module responsibilities:
   - global generated-skill and agent ownership registry serialization, deterministic skill and agent content hashing
 - `translate_skills.py`
   - Codex skill translation for plugins and standalone sources, plus relative-reference resolution, vendoring helpers, and collision-free name assignment via `assign_skill_names()`
+- `vendor_plugin.py`
+  - plugin resource path detection and rewriting for `$PLUGIN_ROOT` references, transitive dependency detection for vendored scripts
 - `translate_commands.py`
   - Claude command translation to command-derived `GeneratedSkill` objects, variable replacement, and provenance marking
 - `reconcile.py`
@@ -660,7 +686,7 @@ Current runtime module responsibilities:
   - multi-project reconcile via `reconcile_all()`
   - machine-level uninstall via `uninstall_all()`
 - `state.py`
-  - project-local managed-state serialization and validation
+  - project-local managed-state serialization and validation, including managed vendored plugin directory tracking
 - `install_launchagent.py`
   - LaunchAgent label generation, plist rendering, plist installation
   - bridge LaunchAgent plist discovery via `find_bridge_launchagents()`
@@ -685,6 +711,9 @@ The suite currently verifies:
 - CLI command behavior including multi-source integration
 - end-to-end multi-source scenario testing with all discovery scopes
 - LaunchAgent rendering and installation (global plist model)
+- plugin resource detection, path rewriting, and transitive dependency detection
+- plugin resource vendoring through skill and agent translation pipelines
+- plugin resource cleanup in clean and uninstall commands
 - project-level clean and machine-level uninstall
 - multi-project reconcile-all with missing project error handling
 - global registry projects list round-tripping and backwards compatibility
