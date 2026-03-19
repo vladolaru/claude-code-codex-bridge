@@ -14,6 +14,7 @@ from cc_codex_bridge.model import (
     SkillTranslationResult,
     SkillValidationDiagnostic,
     TranslationError,
+    VendoredPluginResource,
 )
 from cc_codex_bridge.validate_skill import validate_skill_metadata
 
@@ -29,26 +30,32 @@ POSITIONAL_ARG_RE = re.compile(r"(?<!\{)\$(\d+)\b")
 
 def translate_installed_commands(
     plugins: Iterable[InstalledPlugin],
+    *,
+    bridge_home: Path | None = None,
 ) -> SkillTranslationResult:
     """Translate installed Claude plugin commands into Codex skills."""
     generated: list[GeneratedSkill] = []
     diagnostics: list[SkillValidationDiagnostic] = []
+    all_plugin_resources: list[VendoredPluginResource] = []
 
     for plugin in plugins:
         for command_path in plugin.commands:
-            skill, diagnostic = _translate_one_command(
+            skill, diagnostic, resources = _translate_one_command(
                 command_path,
                 marketplace=plugin.marketplace,
                 plugin_name=plugin.plugin_name,
                 plugin_root=plugin.source_path,
+                bridge_home=bridge_home,
             )
             generated.append(skill)
             if diagnostic is not None:
                 diagnostics.append(diagnostic)
+            all_plugin_resources.extend(resources)
 
     return SkillTranslationResult(
         skills=tuple(sorted(generated, key=lambda s: s.install_dir_name)),
         diagnostics=tuple(diagnostics),
+        plugin_resources=tuple(all_plugin_resources),
     )
 
 
@@ -62,7 +69,7 @@ def translate_standalone_commands(
     diagnostics: list[SkillValidationDiagnostic] = []
 
     for command_path in command_paths:
-        skill, diagnostic = _translate_one_command(
+        skill, diagnostic, _resources = _translate_one_command(
             command_path,
             marketplace=f"_{scope}",
             plugin_name="personal" if scope == "user" else "local",
@@ -84,8 +91,17 @@ def _translate_one_command(
     marketplace: str,
     plugin_name: str,
     plugin_root: Path | None,
-) -> tuple[GeneratedSkill, SkillValidationDiagnostic | None]:
+    bridge_home: Path | None = None,
+) -> tuple[GeneratedSkill, SkillValidationDiagnostic | None, tuple[VendoredPluginResource, ...]]:
     """Translate one command markdown file into a GeneratedSkill."""
+    from cc_codex_bridge.bridge_home import plugin_resource_dir
+    from cc_codex_bridge.vendor_plugin import (
+        detect_plugin_resource_dirs,
+        detect_transitive_plugin_dirs,
+        read_plugin_dir_files,
+        rewrite_plugin_paths,
+    )
+
     if command_path.is_symlink():
         raise TranslationError(
             f"Refusing to follow symlinked command file: {command_path}"
@@ -104,8 +120,76 @@ def _translate_one_command(
     skill_name = f"cmd-{command_path.stem}"
     install_dir_name = skill_name
 
+    # Compute vendored root when bridge_home is provided
+    vendored_root: Path | None = None
+    if bridge_home is not None and plugin_root is not None:
+        vendored_root = plugin_resource_dir(
+            marketplace, plugin_name, bridge_home=bridge_home,
+        )
+
     # Apply variable replacements to the body
-    transformed_body = _replace_variables(body, plugin_root)
+    transformed_body = _replace_variables(
+        body, plugin_root, vendored_root=vendored_root,
+    )
+
+    # Detect and rewrite $PLUGIN_ROOT patterns, collect vendored resources
+    plugin_resources: list[VendoredPluginResource] = []
+    if bridge_home is not None and plugin_root is not None:
+        assert vendored_root is not None  # guaranteed by the branch above
+
+        # Detect and rewrite $PLUGIN_ROOT patterns
+        detected_plugin_root_dirs = detect_plugin_resource_dirs(transformed_body)
+        if detected_plugin_root_dirs:
+            transformed_body = rewrite_plugin_paths(
+                transformed_body, vendored_root,
+            )
+
+        # Detect dirs referenced via ${CLAUDE_PLUGIN_ROOT} (now replaced
+        # with vendored_root in the body)
+        detected_claude_root_dirs: set[str] = set()
+        vendored_root_str = str(vendored_root)
+        for candidate in sorted(
+            d.name for d in plugin_root.iterdir() if d.is_dir()
+        ):
+            if f"{vendored_root_str}/{candidate}" in transformed_body:
+                detected_claude_root_dirs.add(candidate)
+
+        # Union of all detected dirs
+        all_detected = detected_plugin_root_dirs | detected_claude_root_dirs
+
+        # Build VendoredPluginResource for each
+        for dir_name in sorted(all_detected):
+            source_dir = plugin_root / dir_name
+            if not source_dir.is_dir():
+                continue
+            files = read_plugin_dir_files(source_dir)
+            plugin_resources.append(VendoredPluginResource(
+                marketplace=marketplace,
+                plugin_name=plugin_name,
+                source_dir=source_dir,
+                target_dir_name=dir_name,
+                files=files,
+            ))
+
+        # Transitive deps
+        if plugin_resources:
+            vendored_files = tuple(
+                f for r in plugin_resources for f in r.files
+            )
+            transitive_dirs = detect_transitive_plugin_dirs(
+                vendored_files, plugin_root,
+            )
+            already = {r.target_dir_name for r in plugin_resources}
+            for dir_name in sorted(transitive_dirs - already):
+                source_dir = plugin_root / dir_name
+                files = read_plugin_dir_files(source_dir)
+                plugin_resources.append(VendoredPluginResource(
+                    marketplace=marketplace,
+                    plugin_name=plugin_name,
+                    source_dir=source_dir,
+                    target_dir_name=dir_name,
+                    files=files,
+                ))
 
     # Build SKILL.md content: only name + description in frontmatter
     skill_md_content = (
@@ -154,18 +238,26 @@ def _translate_one_command(
         codex_skill_name=install_dir_name,
         files=files,
     )
-    return skill, diagnostic
+    return skill, diagnostic, tuple(plugin_resources)
 
 
-def _replace_variables(body: str, plugin_root: Path | None) -> str:
+def _replace_variables(
+    body: str,
+    plugin_root: Path | None,
+    *,
+    vendored_root: Path | None = None,
+) -> str:
     """Apply deterministic variable replacements to a command body."""
     result = body
 
     # Replace ${CLAUDE_PLUGIN_ROOT} first (before positional args touch $ signs)
     if plugin_root is not None:
-        result = result.replace(
-            "${CLAUDE_PLUGIN_ROOT}", str(plugin_root.resolve())
+        replacement = (
+            str(vendored_root)
+            if vendored_root is not None
+            else str(plugin_root.resolve())
         )
+        result = result.replace("${CLAUDE_PLUGIN_ROOT}", replacement)
 
     # Replace $ARGUMENTS and $ARGUMENTS[N]
     result = ARGUMENTS_RE.sub(ARGUMENTS_REPLACEMENT, result)

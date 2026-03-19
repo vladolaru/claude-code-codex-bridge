@@ -319,3 +319,80 @@ def test_translate_standalone_command_has_cmd_prefix(tmp_path):
     result = translate_standalone_commands((commands_dir / "optimize.md",), scope="user")
     assert len(result.skills) == 1
     assert result.skills[0].install_dir_name == "cmd-optimize"
+
+
+def test_translate_command_claude_plugin_root_uses_vendored_path(make_plugin_version, tmp_path):
+    """${CLAUDE_PLUGIN_ROOT} points to vendored location when bridge_home is provided."""
+    cache_root, version_dir = make_plugin_version("market", "tools", "1.0.0")
+    commands_dir = version_dir / "commands"
+    commands_dir.mkdir()
+    (commands_dir / "review.md").write_text(
+        "---\ndescription: Run review\n---\n\n"
+        'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pipeline.py"\n'
+    )
+    scripts_dir = version_dir / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "pipeline.py").write_text("print('review')\n")
+
+    bridge = tmp_path / "bridge-home"
+    plugins = discover_latest_plugins(cache_root)
+    result = translate_installed_commands(plugins, bridge_home=bridge)
+    skill_md = next(f for f in result.skills[0].files if f.relative_path == Path("SKILL.md"))
+    content = skill_md.content.decode()
+
+    assert str(version_dir.resolve()) not in content
+    assert str(bridge / "plugins" / "market-tools") in content
+    assert len(result.plugin_resources) == 1
+    assert result.plugin_resources[0].target_dir_name == "scripts"
+
+
+def test_translate_command_plugin_root_variable_rewritten(make_plugin_version, tmp_path):
+    """$PLUGIN_ROOT in commands is rewritten to vendored path."""
+    cache_root, version_dir = make_plugin_version("market", "context-a8c", "1.0.0")
+    commands_dir = version_dir / "commands"
+    commands_dir.mkdir()
+    (commands_dir / "digest.md").write_text(
+        "---\ndescription: Generate digest\n---\n\n"
+        "$PLUGIN_ROOT/scripts/migrate-config.sh\n"
+    )
+    scripts_dir = version_dir / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "migrate-config.sh").write_text("#!/bin/sh\necho migrate\n")
+
+    bridge = tmp_path / "bridge-home"
+    plugins = discover_latest_plugins(cache_root)
+    result = translate_installed_commands(plugins, bridge_home=bridge)
+    skill_md = next(f for f in result.skills[0].files if f.relative_path == Path("SKILL.md"))
+    content = skill_md.content.decode()
+
+    assert '$PLUGIN_ROOT' not in content
+    assert str(bridge / "plugins" / "market-context-a8c") in content
+    assert len(result.plugin_resources) >= 1
+
+
+def test_translate_command_discovery_block_removed(make_plugin_version, tmp_path):
+    """The runtime discovery block is removed from command content."""
+    cache_root, version_dir = make_plugin_version("market", "tools", "1.0.0")
+    commands_dir = version_dir / "commands"
+    commands_dir.mkdir()
+    (commands_dir / "run.md").write_text(
+        "---\ndescription: Run tool\n---\n\n"
+        "PLUGIN_ROOT=$(cat /tmp/.tools-root 2>/dev/null)\n"
+        '[ -z "$PLUGIN_ROOT" ] || [ ! -d "$PLUGIN_ROOT/scripts" ] && '
+        'PLUGIN_ROOT=$(find ~/.claude -path "*/tools/*/scripts/run.py" '
+        "-type f 2>/dev/null | sort | tail -1 | xargs dirname | xargs dirname)\n"
+        "python3 $PLUGIN_ROOT/scripts/run.py\n"
+    )
+    scripts_dir = version_dir / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "run.py").write_text("print('run')\n")
+
+    bridge = tmp_path / "bridge-home"
+    plugins = discover_latest_plugins(cache_root)
+    result = translate_installed_commands(plugins, bridge_home=bridge)
+    skill_md = next(f for f in result.skills[0].files if f.relative_path == Path("SKILL.md"))
+    content = skill_md.content.decode()
+
+    assert 'find ~/.claude' not in content
+    assert '/tmp/.tools-root' not in content
+    assert 'run.py' in content
