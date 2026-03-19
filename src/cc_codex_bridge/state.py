@@ -10,7 +10,7 @@ from cc_codex_bridge.model import ReconcileError
 from cc_codex_bridge.text import read_utf8_text
 
 
-STATE_VERSION = 7
+STATE_VERSION = 8
 
 
 @dataclass(frozen=True)
@@ -22,7 +22,6 @@ class BridgeState:
     bridge_home: Path
     managed_project_files: tuple[str, ...]
     managed_project_skill_dirs: tuple[str, ...] = ()
-    managed_plugin_dirs: tuple[str, ...] = ()
     version: int = STATE_VERSION
 
     @classmethod
@@ -49,7 +48,6 @@ class BridgeState:
             bridge_home=_read_absolute_path(data, "bridge_home", path),
             managed_project_files=tuple(_read_string_list(data, "managed_project_files", path)),
             managed_project_skill_dirs=tuple(_read_string_list(data, "managed_project_skill_dirs", path)),
-            managed_plugin_dirs=tuple(_read_string_list(data, "managed_plugin_dirs", path)),
             version=STATE_VERSION,
         )
 
@@ -62,7 +60,6 @@ class BridgeState:
             "bridge_home": str(self.bridge_home),
             "managed_project_files": list(self.managed_project_files),
             "managed_project_skill_dirs": list(self.managed_project_skill_dirs),
-            "managed_plugin_dirs": list(self.managed_plugin_dirs),
         }
         return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 

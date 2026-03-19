@@ -620,6 +620,27 @@ def clean_project(
                 changes.append(Change("remove", agent_path, resource_kind="agent"))
         registry_changed = True
 
+    # Release plugin resource ownership claims
+    updated_plugin_resources = dict(registry.plugin_resources)
+    for plugin_dir_name in sorted(registry.plugin_resources):
+        entry = registry.plugin_resources[plugin_dir_name]
+        if project_root_path not in entry.owners:
+            continue
+        remaining_owners = tuple(
+            owner for owner in entry.owners if owner != project_root_path
+        )
+        if remaining_owners:
+            updated_plugin_resources[plugin_dir_name] = GlobalPluginResourceEntry(
+                content_hash=entry.content_hash,
+                owners=remaining_owners,
+            )
+        else:
+            del updated_plugin_resources[plugin_dir_name]
+            plugin_dir = bridge_home_path / "plugins" / plugin_dir_name
+            if plugin_dir.exists():
+                changes.append(Change("remove", plugin_dir, resource_kind="plugin_resource"))
+        registry_changed = True
+
     # Remove project from the projects list
     updated_projects = tuple(
         p for p in registry.projects if p != project_root_path
@@ -632,15 +653,10 @@ def clean_project(
             skills=updated_skills,
             projects=updated_projects,
             agents=updated_agents,
+            plugin_resources=updated_plugin_resources,
         )
     else:
         updated_registry = None
-
-    # Remove managed plugin resource directories
-    for plugin_dir_name in sorted(previous_state.managed_plugin_dirs):
-        plugin_dir = bridge_home_path / "plugins" / plugin_dir_name
-        if plugin_dir.exists() and not plugin_dir.is_symlink():
-            changes.append(Change("remove", plugin_dir, resource_kind="plugin_resource"))
 
     # Verify project-local clean targets resolve within project_root
     for change in changes:
@@ -1749,17 +1765,12 @@ def _build_state_record(
             for skill in desired.project_skills
         )
     )
-    managed_plugin_dirs = tuple(sorted(set(
-        f"{resource.marketplace}-{resource.plugin_name}"
-        for resource in desired.plugin_resources
-    )))
     return BridgeState(
         project_root=desired.project_root,
         codex_home=desired.codex_home,
         bridge_home=desired.bridge_home,
         managed_project_files=managed_project_files,
         managed_project_skill_dirs=managed_project_skill_dirs,
-        managed_plugin_dirs=managed_plugin_dirs,
     )
 
 

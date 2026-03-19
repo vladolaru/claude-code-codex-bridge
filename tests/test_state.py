@@ -26,7 +26,7 @@ def test_bridge_state_round_trips(tmp_path: Path):
     loaded = BridgeState.from_path(path)
 
     assert loaded == state
-    assert json.loads(state.to_json())["version"] == 7
+    assert json.loads(state.to_json())["version"] == 8
 
 
 def test_bridge_state_handles_missing_invalid_and_unsupported_files(tmp_path: Path):
@@ -59,7 +59,7 @@ def test_bridge_state_rejects_invalid_schema_shapes(tmp_path: Path):
     invalid.write_text(
         json.dumps(
             {
-                "version": 7,
+                "version": 8,
                 "project_root": 1,
                 "codex_home": str(tmp_path / "codex-home"),
                 "bridge_home": str(tmp_path / "bridge-home"),
@@ -78,7 +78,7 @@ def test_bridge_state_rejects_non_absolute_paths(tmp_path: Path):
     invalid_paths.write_text(
         json.dumps(
             {
-                "version": 7,
+                "version": 8,
                 "project_root": "relative/project",
                 "codex_home": str(tmp_path / "codex-home"),
                 "bridge_home": str(tmp_path / "bridge-home"),
@@ -105,22 +105,6 @@ def test_bridge_state_round_trips_with_project_skill_dirs(tmp_path):
     loaded = BridgeState.from_path(path)
     assert loaded == state
     assert loaded.managed_project_skill_dirs == ("helper", "review")
-
-
-def test_bridge_state_round_trips_with_plugin_dirs(tmp_path):
-    """BridgeState v7 with managed_plugin_dirs round-trips correctly."""
-    state = BridgeState(
-        project_root=tmp_path / "project",
-        codex_home=tmp_path / "codex",
-        bridge_home=tmp_path / "bridge",
-        managed_project_files=("CLAUDE.md",),
-        managed_plugin_dirs=("market-pirategoat-tools", "market-other-plugin"),
-    )
-    path = tmp_path / "state.json"
-    path.write_text(state.to_json())
-    loaded = BridgeState.from_path(path)
-    assert loaded == state
-    assert loaded.managed_plugin_dirs == ("market-pirategoat-tools", "market-other-plugin")
 
 
 def test_global_skill_registry_round_trips(tmp_path: Path):
