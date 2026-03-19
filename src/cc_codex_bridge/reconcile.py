@@ -631,6 +631,12 @@ def clean_project(
     else:
         updated_registry = None
 
+    # Remove managed plugin resource directories
+    for plugin_dir_name in sorted(previous_state.managed_plugin_dirs):
+        plugin_dir = bridge_home_path / "plugins" / plugin_dir_name
+        if plugin_dir.exists() and not plugin_dir.is_symlink():
+            changes.append(Change("remove", plugin_dir, resource_kind="plugin_resource"))
+
     # Verify project-local clean targets resolve within project_root
     for change in changes:
         if change.path == state_path:
@@ -638,6 +644,9 @@ def clean_project(
         if change.resource_kind in ("skill", "agent"):
             # Global skills and agents live under codex_home, not project_root
             _assert_path_contained(change.path, codex_home_path, label="Clean target")
+        elif change.resource_kind == "plugin_resource":
+            # Plugin resources live under bridge_home, not project_root
+            _assert_path_contained(change.path, bridge_home_path, label="Clean target")
         else:
             _assert_path_contained(change.path, project_root_path, label="Clean target")
 
@@ -655,6 +664,8 @@ def clean_project(
                 change.path.unlink()
         elif change.resource_kind == "agent":
             change.path.unlink(missing_ok=True)
+        elif change.resource_kind == "plugin_resource":
+            shutil.rmtree(change.path)
         else:
             change.path.unlink(missing_ok=True)
             _cleanup_empty_parents(change.path.parent, project_root_path / ".codex")
@@ -897,6 +908,11 @@ def uninstall_all(
         # Remove LaunchAgent plists
         for removal in launchagent_removals:
             removal.path.unlink(missing_ok=True)
+
+        # Remove vendored plugin resources
+        plugins_dir = bridge_home_path / "plugins"
+        if plugins_dir.exists():
+            shutil.rmtree(plugins_dir)
 
         # Remove bridge home directory if empty
         if bridge_home_path.exists():
@@ -1632,12 +1648,17 @@ def _build_state_record(
             for skill in desired.project_skills
         )
     )
+    managed_plugin_dirs = tuple(sorted(set(
+        f"{resource.marketplace}-{resource.plugin_name}"
+        for resource in desired.plugin_resources
+    )))
     return BridgeState(
         project_root=desired.project_root,
         codex_home=desired.codex_home,
         bridge_home=desired.bridge_home,
         managed_project_files=managed_project_files,
         managed_project_skill_dirs=managed_project_skill_dirs,
+        managed_plugin_dirs=managed_plugin_dirs,
     )
 
 

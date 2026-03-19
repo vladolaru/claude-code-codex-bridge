@@ -627,7 +627,7 @@ def test_reconcile_rejects_unexpected_managed_project_files_in_state(
     state_path.write_text(
         json.dumps(
             {
-                "version": 6,
+                "version": 7,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
                 "bridge_home": str(bridge_home),
@@ -661,7 +661,7 @@ def test_reconcile_rejects_unexpected_managed_project_skill_dirs_in_state(
     state_path.write_text(
         json.dumps(
             {
-                "version": 6,
+                "version": 7,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
                 "bridge_home": str(bridge_home),
@@ -703,7 +703,7 @@ def test_reconcile_rejects_foreign_project_state(
     state_path.write_text(
         json.dumps(
             {
-                "version": 6,
+                "version": 7,
                 "project_root": str(tmp_path / "different-project"),
                 "codex_home": str(tmp_path / "codex-home"),
                 "bridge_home": str(bridge_home),
@@ -1154,7 +1154,7 @@ def test_reconcile_rejects_traversal_paths_in_corrupted_state(
     state_path.write_text(
         json.dumps(
             {
-                "version": 6,
+                "version": 7,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
                 "bridge_home": str(bridge_home),
@@ -1215,7 +1215,7 @@ def test_reconcile_rejects_absolute_paths_in_corrupted_state(
     state_path.write_text(
         json.dumps(
             {
-                "version": 6,
+                "version": 7,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
                 "bridge_home": str(bridge_home),
@@ -1248,7 +1248,7 @@ def test_reconcile_rejects_empty_paths_in_corrupted_state(
     state_path.write_text(
         json.dumps(
             {
-                "version": 6,
+                "version": 7,
                 "project_root": str(project_root),
                 "codex_home": str(tmp_path / "codex-home"),
                 "bridge_home": str(bridge_home),
@@ -2722,6 +2722,201 @@ def test_uninstall_treats_no_state_as_error(
 
     assert report.has_errors is True
     assert any(r.status == "no_state" for r in report.projects)
+
+
+def test_clean_removes_plugin_resources(make_project, tmp_path: Path):
+    """clean_project removes vendored plugin directories."""
+    from cc_codex_bridge.reconcile import clean_project
+    from cc_codex_bridge.state import BridgeState
+
+    project_root, _ = make_project()
+    codex = tmp_path / "codex"
+    codex.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+
+    # Create an empty registry in bridge_home
+    bridge_home.mkdir(parents=True, exist_ok=True)
+    registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
+    (bridge_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
+
+    # Create vendored plugin resources
+    plugin_dir = bridge_home / "plugins" / "market-pirategoat-tools"
+    scripts_dir = plugin_dir / "scripts"
+    scripts_dir.mkdir(parents=True)
+    (scripts_dir / "bootstrap.py").write_text("print('bootstrap')")
+
+    state = BridgeState(
+        project_root=project_root.resolve(),
+        codex_home=codex.resolve(),
+        bridge_home=bridge_home.resolve(),
+        managed_project_files=(),
+        managed_plugin_dirs=("market-pirategoat-tools",),
+    )
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(state.to_json())
+
+    report = clean_project(project_root, bridge_home=bridge_home)
+    assert report.applied is True
+    assert not plugin_dir.exists()
+    assert any(c.resource_kind == "plugin_resource" for c in report.changes)
+
+
+def test_clean_dry_run_reports_plugin_resource_removal(make_project, tmp_path: Path):
+    """clean --dry-run reports plugin resource directories but does not remove them."""
+    from cc_codex_bridge.reconcile import clean_project
+    from cc_codex_bridge.state import BridgeState
+
+    project_root, _ = make_project()
+    codex = tmp_path / "codex"
+    codex.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+
+    bridge_home.mkdir(parents=True, exist_ok=True)
+    registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
+    (bridge_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
+
+    plugin_dir = bridge_home / "plugins" / "market-pirategoat-tools"
+    scripts_dir = plugin_dir / "scripts"
+    scripts_dir.mkdir(parents=True)
+    (scripts_dir / "bootstrap.py").write_text("print('bootstrap')")
+
+    state = BridgeState(
+        project_root=project_root.resolve(),
+        codex_home=codex.resolve(),
+        bridge_home=bridge_home.resolve(),
+        managed_project_files=(),
+        managed_plugin_dirs=("market-pirategoat-tools",),
+    )
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(state.to_json())
+
+    report = clean_project(project_root, bridge_home=bridge_home, dry_run=True)
+    assert report.applied is False
+    assert any(c.resource_kind == "plugin_resource" for c in report.changes)
+    # Plugin dir should still exist after dry-run
+    assert plugin_dir.exists()
+
+
+def test_clean_skips_nonexistent_plugin_dirs(make_project, tmp_path: Path):
+    """clean_project silently skips managed plugin dirs that no longer exist on disk."""
+    from cc_codex_bridge.reconcile import clean_project
+    from cc_codex_bridge.state import BridgeState
+
+    project_root, _ = make_project()
+    codex = tmp_path / "codex"
+    codex.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+
+    bridge_home.mkdir(parents=True, exist_ok=True)
+    registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
+    (bridge_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
+
+    # State claims a plugin dir that does not exist on disk
+    state = BridgeState(
+        project_root=project_root.resolve(),
+        codex_home=codex.resolve(),
+        bridge_home=bridge_home.resolve(),
+        managed_project_files=(),
+        managed_plugin_dirs=("market-gone-plugin",),
+    )
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(state.to_json())
+
+    report = clean_project(project_root, bridge_home=bridge_home)
+    assert report.applied is True
+    # No plugin_resource changes since the dir was already missing
+    assert not any(c.resource_kind == "plugin_resource" for c in report.changes)
+
+
+def test_uninstall_removes_plugins_dir(make_project, tmp_path: Path):
+    """uninstall_all removes the entire plugins/ directory."""
+    from cc_codex_bridge.reconcile import uninstall_all
+    from cc_codex_bridge.state import BridgeState
+
+    project_root, _ = make_project()
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+
+    # Create vendored plugin resources
+    plugins_dir = bridge_home / "plugins" / "market-tools"
+    plugins_dir.mkdir(parents=True)
+    (plugins_dir / "script.py").write_text("x=1")
+
+    # Create state and registry
+    bridge_home.mkdir(parents=True, exist_ok=True)
+    registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
+    (bridge_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
+
+    state = BridgeState(
+        project_root=project_root.resolve(),
+        codex_home=codex_home.resolve(),
+        bridge_home=bridge_home.resolve(),
+        managed_project_files=(),
+        managed_plugin_dirs=("market-tools",),
+    )
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(state.to_json())
+
+    report = uninstall_all(bridge_home=bridge_home, codex_home=codex_home)
+    assert report.applied is True
+    assert not (bridge_home / "plugins").exists()
+
+
+def test_reconcile_records_managed_plugin_dirs_in_state(
+    make_project, make_plugin_version, tmp_path: Path,
+):
+    """Reconcile writes managed_plugin_dirs to state when plugin resources are present."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "pirategoat-tools",
+        "1.2.3",
+        skill_names=("decision-critic",),
+    )
+    (version_dir / "skills" / "decision-critic" / "SKILL.md").write_text(
+        "---\nname: decision-critic\ndescription: Criticize\n---\n\nUse this skill.\n"
+    )
+
+    # Create a scripts directory in the plugin that will be vendored
+    scripts_dir = version_dir / "scripts"
+    scripts_dir.mkdir(parents=True)
+    (scripts_dir / "helper.py").write_text("print('helper')")
+
+    # Create SKILL.md that references the scripts
+    (version_dir / "skills" / "decision-critic" / "SKILL.md").write_text(
+        "---\nname: decision-critic\ndescription: Criticize\n---\n\n"
+        "Run the script at `{{scripts}}/helper.py`.\n"
+    )
+
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+
+    # Use the full pipeline to get plugin resources detected
+    from cc_codex_bridge.reconcile import build_project_desired_state, reconcile_desired_state
+    build = build_project_desired_state(
+        project_root,
+        codex_home=codex_home,
+        bridge_home=bridge_home,
+    )
+    if build.desired_state is not None:
+        reconcile_desired_state(build.desired_state)
+
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_path = state_dir / "state.json"
+    if state_path.exists():
+        payload = json.loads(state_path.read_text())
+        # managed_plugin_dirs field should be present in state
+        assert "managed_plugin_dirs" in payload
+        assert isinstance(payload["managed_plugin_dirs"], list)
 
 
 def _reconcile_once(project_root, cache_root, codex_home):
