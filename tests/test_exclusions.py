@@ -289,3 +289,150 @@ def test_bare_name_exclusion_also_matches_plugin_agents(tmp_path: Path):
     assert len(filtered.plugins) == 1
     assert tuple(p.name for p in filtered.plugins[0].agents) == ("helper.md",)
     assert "market/alpha/reviewer.md" in report.agents
+
+
+# --- Command exclusion tests ---
+
+
+def test_exclude_plugin_commands_by_3_part_id(tmp_path: Path):
+    """Plugin commands can be excluded by 3-part id."""
+    plugin = InstalledPlugin(
+        marketplace="market",
+        plugin_name="tools",
+        version_text="1.0.0",
+        version=SemVer.parse("1.0.0"),
+        installed_path=tmp_path / "installed-tools",
+        source_path=tmp_path / "source-tools",
+        skills=(),
+        agents=(),
+        commands=(
+            tmp_path / "source-tools" / "commands" / "review.md",
+            tmp_path / "source-tools" / "commands" / "update.md",
+        ),
+    )
+    discovery = DiscoveryResult(
+        project=ProjectContext(
+            root=tmp_path / "project",
+            agents_md_path=tmp_path / "project" / "AGENTS.md",
+        ),
+        plugins=(plugin,),
+    )
+    exclusions = SyncExclusions(commands=("market/tools/review.md",))
+    filtered, report = apply_sync_exclusions(discovery, exclusions)
+
+    assert len(filtered.plugins[0].commands) == 1
+    assert filtered.plugins[0].commands[0].name == "update.md"
+    assert "market/tools/review.md" in report.commands
+
+
+def test_exclude_commands_by_bare_name(tmp_path: Path):
+    """Commands can be excluded by bare filename (matches all scopes)."""
+    plugin = InstalledPlugin(
+        marketplace="market",
+        plugin_name="tools",
+        version_text="1.0.0",
+        version=SemVer.parse("1.0.0"),
+        installed_path=tmp_path / "installed-tools",
+        source_path=tmp_path / "source-tools",
+        skills=(),
+        agents=(),
+        commands=(
+            tmp_path / "source-tools" / "commands" / "review.md",
+            tmp_path / "source-tools" / "commands" / "update.md",
+        ),
+    )
+    discovery = DiscoveryResult(
+        project=ProjectContext(
+            root=tmp_path / "project",
+            agents_md_path=tmp_path / "project" / "AGENTS.md",
+        ),
+        plugins=(plugin,),
+        user_commands=(tmp_path / "user-commands" / "review.md",),
+        project_commands=(tmp_path / "project-commands" / "review.md",),
+    )
+    exclusions = SyncExclusions(commands=("review.md",))
+    filtered, report = apply_sync_exclusions(discovery, exclusions)
+
+    # Plugin command excluded
+    assert len(filtered.plugins[0].commands) == 1
+    assert filtered.plugins[0].commands[0].name == "update.md"
+    # Standalone user and project commands excluded
+    assert len(filtered.user_commands) == 0
+    assert len(filtered.project_commands) == 0
+    assert "market/tools/review.md" in report.commands
+    assert "user/review.md" in report.commands
+    assert "project/review.md" in report.commands
+
+
+def test_exclude_standalone_command_by_scope(tmp_path: Path):
+    """A 2-part command exclusion matches only the specified scope."""
+    discovery = DiscoveryResult(
+        project=ProjectContext(
+            root=tmp_path / "project",
+            agents_md_path=tmp_path / "project" / "AGENTS.md",
+        ),
+        plugins=(),
+        user_commands=(tmp_path / "user-commands" / "deploy.md",),
+        project_commands=(tmp_path / "project-commands" / "deploy.md",),
+    )
+    exclusions = SyncExclusions(commands=("user/deploy.md",))
+    filtered, report = apply_sync_exclusions(discovery, exclusions)
+
+    assert len(filtered.user_commands) == 0
+    assert len(filtered.project_commands) == 1
+    assert "user/deploy.md" in report.commands
+
+
+def test_command_exclusion_normalizes_md_extension():
+    """Command exclusion IDs auto-append .md like agent IDs."""
+    exclusions = SyncExclusions(commands=("review",))
+    # Normalization happens at SyncExclusions construction via the caller;
+    # test through load_project_exclusions to verify the full path.
+    from cc_codex_bridge.exclusions import _normalize_id_list
+    normalized = _normalize_id_list(["review", "market/tools/deploy"], kind="command")
+    assert "review.md" in normalized
+    assert "market/tools/deploy.md" in normalized
+
+
+def test_load_project_exclusions_reads_commands(make_project):
+    """Project exclusions load commands from bridge.toml."""
+    project_root, _agents_md = make_project()
+    config_path = project_root / ".codex" / "bridge.toml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        "[exclude]\n"
+        'commands = ["market/tools/review", "deploy"]\n'
+    )
+
+    exclusions = load_project_exclusions(project_root)
+    assert "market/tools/review.md" in exclusions.commands
+    assert "deploy.md" in exclusions.commands
+
+
+def test_resolve_effective_exclusions_includes_commands():
+    """CLI command exclusions override config command exclusions."""
+    config = SyncExclusions(
+        plugins=("market/alpha",),
+        commands=("market/alpha/review.md",),
+    )
+
+    resolved = resolve_effective_exclusions(
+        config,
+        cli_exclude_commands=["market/alpha/deploy"],
+    )
+
+    assert resolved.plugins == ("market/alpha",)
+    assert resolved.commands == ("market/alpha/deploy.md",)
+    # Config commands replaced, not merged
+    assert "market/alpha/review.md" not in resolved.commands
+
+
+def test_resolve_effective_exclusions_preserves_commands_when_cli_is_none():
+    """When no CLI command exclusions given, config values are preserved."""
+    config = SyncExclusions(
+        commands=("market/alpha/review.md",),
+    )
+
+    resolved = resolve_effective_exclusions(config)
+
+    assert resolved.commands == ("market/alpha/review.md",)

@@ -20,6 +20,7 @@ class SyncExclusions:
     plugins: tuple[str, ...] = ()
     skills: tuple[str, ...] = ()
     agents: tuple[str, ...] = ()
+    commands: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,7 @@ class ExclusionReport:
     plugins: tuple[str, ...] = ()
     skills: tuple[str, ...] = ()
     agents: tuple[str, ...] = ()
+    commands: tuple[str, ...] = ()
 
 
 def load_project_exclusions(
@@ -68,6 +70,10 @@ def load_project_exclusions(
             _read_string_list(exclude_table, "agents", config_path),
             kind="agent",
         ),
+        commands=_normalize_id_list(
+            _read_string_list(exclude_table, "commands", config_path),
+            kind="command",
+        ),
     )
 
 
@@ -77,6 +83,7 @@ def resolve_effective_exclusions(
     cli_exclude_plugins: list[str] | None = None,
     cli_exclude_skills: list[str] | None = None,
     cli_exclude_agents: list[str] | None = None,
+    cli_exclude_commands: list[str] | None = None,
 ) -> SyncExclusions:
     """Resolve per-kind exclusions, letting CLI values override config values."""
     plugin_values = (
@@ -94,7 +101,17 @@ def resolve_effective_exclusions(
         if cli_exclude_agents is None
         else _normalize_id_list(cli_exclude_agents, kind="agent")
     )
-    return SyncExclusions(plugins=plugin_values, skills=skill_values, agents=agent_values)
+    command_values = (
+        config.commands
+        if cli_exclude_commands is None
+        else _normalize_id_list(cli_exclude_commands, kind="command")
+    )
+    return SyncExclusions(
+        plugins=plugin_values,
+        skills=skill_values,
+        agents=agent_values,
+        commands=command_values,
+    )
 
 
 def apply_sync_exclusions(
@@ -105,11 +122,13 @@ def apply_sync_exclusions(
     excluded_plugins: list[str] = []
     excluded_skills: list[str] = []
     excluded_agents: list[str] = []
+    excluded_commands: list[str] = []
     filtered_plugins: list[InstalledPlugin] = []
 
     excluded_plugin_set = set(exclusions.plugins)
     excluded_skill_set = set(exclusions.skills)
     excluded_agent_set = set(exclusions.agents)
+    excluded_command_set = set(exclusions.commands)
 
     for plugin in discovery.plugins:
         plugin_id = _plugin_id(plugin.marketplace, plugin.plugin_name)
@@ -133,6 +152,14 @@ def apply_sync_exclusions(
                 continue
             kept_agents.append(agent_path)
 
+        kept_commands = []
+        for command_path in plugin.commands:
+            command_id = _command_id(plugin.marketplace, plugin.plugin_name, command_path.name)
+            if command_id in excluded_command_set or command_path.name in excluded_command_set:
+                excluded_commands.append(command_id)
+                continue
+            kept_commands.append(command_path)
+
         filtered_plugins.append(
             InstalledPlugin(
                 marketplace=plugin.marketplace,
@@ -143,7 +170,7 @@ def apply_sync_exclusions(
                 source_path=plugin.source_path,
                 skills=tuple(kept_skills),
                 agents=tuple(kept_agents),
-                commands=plugin.commands,
+                commands=tuple(kept_commands),
             )
         )
 
@@ -179,21 +206,38 @@ def apply_sync_exclusions(
         else:
             kept_project_agents.append(agent_path)
 
+    # Filter standalone user commands
+    kept_user_commands: list[Path] = []
+    for command_path in discovery.user_commands:
+        if _matches_standalone_exclusion(command_path.name, "user", excluded_command_set):
+            excluded_commands.append(f"user/{command_path.name}")
+        else:
+            kept_user_commands.append(command_path)
+
+    # Filter standalone project commands
+    kept_project_commands: list[Path] = []
+    for command_path in discovery.project_commands:
+        if _matches_standalone_exclusion(command_path.name, "project", excluded_command_set):
+            excluded_commands.append(f"project/{command_path.name}")
+        else:
+            kept_project_commands.append(command_path)
+
     filtered_result = DiscoveryResult(
         project=discovery.project,
         plugins=tuple(filtered_plugins),
         user_skills=tuple(kept_user_skills),
         user_agents=tuple(kept_user_agents),
-        user_commands=discovery.user_commands,
+        user_commands=tuple(kept_user_commands),
         project_skills=tuple(kept_project_skills),
         project_agents=tuple(kept_project_agents),
-        project_commands=discovery.project_commands,
+        project_commands=tuple(kept_project_commands),
         user_claude_md=discovery.user_claude_md,
     )
     report = ExclusionReport(
         plugins=tuple(sorted(set(excluded_plugins))),
         skills=tuple(sorted(set(excluded_skills))),
         agents=tuple(sorted(set(excluded_agents))),
+        commands=tuple(sorted(set(excluded_commands))),
     )
     return filtered_result, report
 
@@ -241,8 +285,8 @@ def _normalize_entity_id(value: str, *, kind: str) -> str:
             "name, scope/name, or marketplace/plugin/name"
         )
 
-    # Auto-append .md to the agent leaf name
-    if kind == "agent":
+    # Auto-append .md to the agent/command leaf name
+    if kind in ("agent", "command"):
         leaf_index = len(parts) - 1
         if not parts[leaf_index].endswith(".md"):
             parts[leaf_index] = f"{parts[leaf_index]}.md"
@@ -279,3 +323,8 @@ def _skill_id(marketplace: str, plugin_name: str, skill_name: str) -> str:
 def _agent_id(marketplace: str, plugin_name: str, agent_filename: str) -> str:
     """Build canonical agent exclusion id."""
     return f"{marketplace}/{plugin_name}/{agent_filename}"
+
+
+def _command_id(marketplace: str, plugin_name: str, command_filename: str) -> str:
+    """Build canonical command exclusion id."""
+    return f"{marketplace}/{plugin_name}/{command_filename}"
