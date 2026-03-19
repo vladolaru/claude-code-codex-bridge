@@ -270,3 +270,55 @@ def test_reconcile_is_idempotent_with_all_sources(make_project, tmp_path: Path, 
     assert (codex_home / "AGENTS.md").read_text() == global_agents_md_v1
     assert (codex_home / "agents" / "test-agent.toml").read_text() == plugin_agent_v1
     assert (project_root / ".codex" / "agents" / "reviewer.toml").read_text() == project_agent_v1
+
+
+def test_plugin_commands_appear_as_global_skills(
+    make_project, make_plugin_version, tmp_path,
+):
+    """Plugin commands are translated to skills and included in desired state."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "tools", "1.0.0",
+    )
+    commands_dir = version_dir / "commands"
+    commands_dir.mkdir()
+    (commands_dir / "review.md").write_text(
+        "---\ndescription: Review code\n---\n\nReview $ARGUMENTS\n"
+    )
+
+    from cc_codex_bridge.reconcile import build_project_desired_state
+    build = build_project_desired_state(
+        project_root, cache_dir=cache_root, codex_home=tmp_path / "codex",
+    )
+    assert build.desired_state is not None
+
+    skill_names = [s.install_dir_name for s in build.desired_state.skills]
+    assert "review" in skill_names
+
+    # Verify $ARGUMENTS was replaced
+    review_skill = next(s for s in build.desired_state.skills if s.install_dir_name == "review")
+    skill_md = next(f for f in review_skill.files if f.relative_path == Path("SKILL.md"))
+    content = skill_md.content.decode()
+    assert "$ARGUMENTS" not in content
+    assert "<use any user-provided details; otherwise infer from context>" in content
+
+
+def test_project_commands_appear_as_project_skills(
+    make_project, tmp_path,
+):
+    """Project-level commands are translated to project-local skills."""
+    project_root, _ = make_project()
+    commands_dir = project_root / ".claude" / "commands"
+    commands_dir.mkdir(parents=True)
+    (commands_dir / "build.md").write_text(
+        "---\ndescription: Build project\n---\n\nRun build.\n"
+    )
+
+    from cc_codex_bridge.reconcile import build_project_desired_state
+    build = build_project_desired_state(
+        project_root, codex_home=tmp_path / "codex",
+    )
+    assert build.desired_state is not None
+
+    project_skill_names = [s.install_dir_name for s in build.desired_state.project_skills]
+    assert "build" in project_skill_names

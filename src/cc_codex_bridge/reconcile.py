@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import difflib
 from pathlib import Path
 import shutil
@@ -142,6 +142,24 @@ class _MutationPlan:
     registry_writes: tuple[_RegistryWrite, ...]
 
 
+def _normalise_command_skill_source_paths(
+    skills: tuple[GeneratedSkill, ...],
+) -> tuple[GeneratedSkill, ...]:
+    """Normalise command-derived skill source_paths for assign_skill_names.
+
+    Command-derived skills have file source_paths (e.g. .../commands/review.md)
+    while native skills have directory source_paths (.../skills/review/).
+    assign_skill_names groups by source_path.name, so we rewrite command
+    source_paths to use the stem as a pseudo-directory name.
+    """
+    return tuple(
+        replace(skill, source_path=skill.source_path.parent / skill.source_path.stem)
+        if skill.source_path.suffix == ".md"
+        else skill
+        for skill in skills
+    )
+
+
 def build_desired_state(
     discovery: DiscoveryResult,
     shim_decision: ClaudeShimDecision,
@@ -235,6 +253,7 @@ def build_project_desired_state(
     exclude_plugins: Iterable[str] = (),
     exclude_skills: Iterable[str] = (),
     exclude_agents: Iterable[str] = (),
+    exclude_commands: Iterable[str] = (),
 ) -> ProjectBuildResult:
     """Run the full discover-translate-build pipeline for one project.
 
@@ -254,6 +273,10 @@ def build_project_desired_state(
         translate_installed_agents_with_diagnostics,
         translate_standalone_agents,
     )
+    from cc_codex_bridge.translate_commands import (
+        translate_installed_commands,
+        translate_standalone_commands as translate_standalone_cmds,
+    )
     from cc_codex_bridge.translate_skills import (
         assign_skill_names,
         translate_installed_skills,
@@ -271,6 +294,7 @@ def build_project_desired_state(
         cli_exclude_plugins=tuple(exclude_plugins) or None,
         cli_exclude_skills=tuple(exclude_skills) or None,
         cli_exclude_agents=tuple(exclude_agents) or None,
+        cli_exclude_commands=tuple(exclude_commands) or None,
     )
     result, exclusion_report = apply_sync_exclusions(result, exclusions)
     shim_decision = plan_claude_shim(result.project)
@@ -333,21 +357,47 @@ def build_project_desired_state(
 
     plugin_skill_result = translate_installed_skills(result.plugins)
     user_skill_result = translate_standalone_skills(result.user_skills, scope="user")
-    all_global_skills = assign_skill_names((*plugin_skill_result.skills, *user_skill_result.skills))
     project_skill_result = translate_standalone_skills(result.project_skills, scope="project")
+
+    # Translate commands into skills
+    plugin_command_result = translate_installed_commands(result.plugins)
+    user_command_result = translate_standalone_cmds(result.user_commands, scope="user")
+    project_command_result = translate_standalone_cmds(result.project_commands, scope="project")
+
+    # Command-derived skills have file source_paths (e.g. review.md) while
+    # skill-derived skills have directory source_paths.  assign_skill_names
+    # groups by source_path.name, so normalise command source_paths to use
+    # the stem as the directory name for correct grouping and collision
+    # resolution.
+    plugin_cmd_skills = _normalise_command_skill_source_paths(plugin_command_result.skills)
+    user_cmd_skills = _normalise_command_skill_source_paths(user_command_result.skills)
+    project_cmd_skills = _normalise_command_skill_source_paths(project_command_result.skills)
+
+    all_global_skills = assign_skill_names((
+        *plugin_skill_result.skills,
+        *user_skill_result.skills,
+        *plugin_cmd_skills,
+        *user_cmd_skills,
+    ))
+    all_project_skills = (*project_skill_result.skills, *project_cmd_skills)
 
     skill_diagnostics = (
         *plugin_skill_result.diagnostics,
         *user_skill_result.diagnostics,
         *project_skill_result.diagnostics,
     )
-    all_diagnostics = (*all_diagnostics, *skill_diagnostics)
+    command_diagnostics = (
+        *plugin_command_result.diagnostics,
+        *user_command_result.diagnostics,
+        *project_command_result.diagnostics,
+    )
+    all_diagnostics = (*all_diagnostics, *skill_diagnostics, *command_diagnostics)
 
-    total_skill_count = len(all_global_skills) + len(project_skill_result.skills)
+    total_skill_count = len(all_global_skills) + len(all_project_skills)
     desired_state = build_desired_state(
         result, shim_decision,
         all_global_skills, codex_home=codex_home,
-        project_skills=project_skill_result.skills,
+        project_skills=all_project_skills,
         global_agents=global_agents,
         project_agent_files=project_agent_files,
     )
