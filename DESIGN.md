@@ -35,6 +35,7 @@ These are authoritative inputs:
 - optional project exclusion config at `.codex/bridge.toml`
 - installed Claude plugin skills discovered from the local Claude plugin cache
 - installed Claude plugin agents discovered from the local Claude plugin cache
+- installed Claude plugin commands discovered from the local Claude plugin cache
 - plugin-local resources attached to those skills, including `scripts/`, `references/`, `assets/`, and any additional directories
 - user-level Claude skills from `~/.claude/skills/`
 - user-level Claude agents from `~/.claude/agents/`
@@ -74,6 +75,7 @@ If a behavior is described differently in multiple docs:
 - selection of the latest installed plugin version by semantic version
 - translation of Claude agents into self-contained Codex agent `.toml` files
 - translation of Claude skills into self-contained Codex skills
+- translation of Claude commands into Codex skills with deterministic variable replacement
 - safe reconcile of generated project files, generated Codex agent files, and generated Codex skill directories
 - state tracking for generator-owned outputs
 - project-level artifact cleanup via `clean`
@@ -87,7 +89,7 @@ If a behavior is described differently in multiple docs:
 - filesystem-wide project discovery
 - watcher mode
 - automatic `launchctl bootstrap`
-- runtime execution of Claude slash commands
+- runtime execution of Claude commands (translated commands serve as context/instructions, not executable workflows)
 
 ## 4. Runtime Model
 
@@ -105,10 +107,13 @@ The runtime is a deterministic pipeline:
 10. translate standalone user and project agents into `GeneratedAgentFile` objects
 11. translate plugin and user skills into `GeneratedSkill` trees (global registry)
 12. translate project skills into project-local `GeneratedSkill` trees
-13. merge all agents, render project-local agent `.toml` files to `.codex/agents/`, and collect global agents for `~/.codex/agents/`
-14. decide whether `CLAUDE.md` can be created or preserved as an `@AGENTS.md` shim
-15. build a full desired state for project files, Codex skill directories, global agent files, and global instructions
-16. inspect/preview or reconcile that desired state with ownership and rollback protections
+13. translate plugin commands into command-derived `GeneratedSkill` trees (global registry)
+14. translate standalone user commands into command-derived `GeneratedSkill` trees (global registry)
+15. translate project commands into command-derived project-local `GeneratedSkill` trees
+16. merge all agents, render project-local agent `.toml` files to `.codex/agents/`, and collect global agents for `~/.codex/agents/`
+17. decide whether `CLAUDE.md` can be created or preserved as an `@AGENTS.md` shim
+18. build a full desired state for project files, Codex skill directories, global agent files, and global instructions
+19. inspect/preview or reconcile that desired state with ownership and rollback protections
 
 The reconcile pipeline is shared by `validate`, `status`, and `reconcile`.
 
@@ -242,6 +247,13 @@ Discovery lives in `src/cc_codex_bridge/discover.py`.
 - project-level skills are read from `<project>/.claude/skills/`
 - each subdirectory containing `SKILL.md` is a discovered skill
 - project-level agents are read from `<project>/.claude/agents/` as `*.md` files
+
+### Command discovery
+
+- plugin commands are discovered from `<plugin_path>/commands/` as `*.md` files
+- user-level commands are discovered from `~/.claude/commands/` as `*.md` files
+- project-level commands are discovered from `<project>/.claude/commands/` as `*.md` files
+- command discovery follows the same pattern as agent discovery (top-level `.md` files in a directory)
 
 ### Plugin enablement
 
@@ -400,6 +412,36 @@ All generated names must comply with the Agent Skills standard: max 64 character
 lowercase a-z/0-9/hyphens only, no consecutive hyphens, matching the parent
 directory name.
 
+### 8.5 Command translation
+
+`src/cc_codex_bridge/translate_commands.py` translates Claude commands into `GeneratedSkill` objects.
+
+Commands are treated as a variant of skills. Each command markdown file produces one `GeneratedSkill` with a single `SKILL.md` file.
+
+Required command frontmatter:
+
+- `description`
+
+Dropped command frontmatter (not carried to generated output):
+
+- `argument-hint`
+- `allowed-tools`
+
+Variable replacement rules (applied deterministically to the command body):
+
+- `$ARGUMENTS`, `$ARGUMENTS[N]`, `$N` → `<use any user-provided details; otherwise infer from context>`
+- `${CLAUDE_PLUGIN_ROOT}` → resolved absolute path from `InstalledPlugin.source_path` (plugin commands only; standalone commands leave it as-is)
+
+Generated SKILL.md structure:
+
+- frontmatter: `name` (from command filename stem) and `description` (from command frontmatter)
+- body: command body with variable replacements applied
+- provenance marker appended at end: `<!-- translated from Claude Code command -->`
+
+Command-derived skills share the same namespace as native skills. Collisions are resolved by `assign_skill_names()` using the standard `-alt` suffix scheme.
+
+Command source paths are normalised before name assignment: file-based source paths (`.md` suffix) are rewritten to use the stem as a pseudo-directory name so `assign_skill_names()` groups them correctly alongside directory-based native skills.
+
 ### Skill routing
 
 User-level and plugin skills are installed to the global Codex skill registry at `~/.codex/skills/`. Project-level skills are installed to project-local `.codex/skills/` directories and tracked as managed project skill directory names in the bridge state. Both global and project skills use exact directory-snapshot comparison for change detection.
@@ -527,6 +569,7 @@ Pipeline commands (`validate`, `status`, `reconcile`) support:
 - `--exclude-plugin marketplace/plugin`
 - `--exclude-skill name` or `scope/name` or `marketplace/plugin/skill`
 - `--exclude-agent name.md` or `scope/name.md` or `marketplace/plugin/agent.md`
+- `--exclude-command name` or `scope/name` or `marketplace/plugin/name`
 
 Exclusion IDs use part-count disambiguation: 1 part matches all scopes, 2 parts match by scope (`user` or `project`), 3 parts match plugin sources.
 
@@ -599,6 +642,8 @@ Current runtime module responsibilities:
   - global generated-skill and agent ownership registry serialization, deterministic skill and agent content hashing
 - `translate_skills.py`
   - Codex skill translation for plugins and standalone sources, plus relative-reference resolution, vendoring helpers, and collision-free name assignment via `assign_skill_names()`
+- `translate_commands.py`
+  - Claude command translation to command-derived `GeneratedSkill` objects, variable replacement, and provenance marking
 - `reconcile.py`
   - desired-state modeling, diffing, atomic apply, report formatting
   - shared project build pipeline via `build_project_desired_state()`
@@ -625,6 +670,7 @@ The suite currently verifies:
 - `CLAUDE.md` shim safety
 - agent translation, `.toml` file rendering, sandbox mode derivation, and global agent registry tracking
 - skill translation, relocation rewriting, vendoring, and standalone skill translation
+- command translation, variable replacement, provenance marking, and standalone command translation
 - exclusion filtering for plugins and standalone sources with part-count disambiguation
 - reconcile idempotence, stale cleanup, ownership safety, diff reporting, and global instructions bridging
 - CLI command behavior including multi-source integration
