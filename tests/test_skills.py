@@ -462,10 +462,10 @@ def test_translate_standalone_skill_with_sibling_reference(tmp_path: Path):
     assert guide.content == b"Guide content.\n"
 
 
-def test_skill_translation_rejects_symlinked_resource_directory(tmp_path):
-    """Skill translation must not follow symlinked resource directories."""
+def test_skill_translation_follows_symlinked_resource_directory(tmp_path):
+    """Skill translation follows symlinked resource directories."""
     from cc_codex_bridge.translate_skills import translate_installed_skills
-    from cc_codex_bridge.model import InstalledPlugin, SemVer, TranslationError
+    from cc_codex_bridge.model import InstalledPlugin, SemVer
 
     # Create a skill with a symlinked scripts/ directory
     cache_root = tmp_path / "cache"
@@ -491,14 +491,16 @@ def test_skill_translation_rejects_symlinked_resource_directory(tmp_path):
         commands=(),
     )
 
-    with pytest.raises(TranslationError, match="symlink"):
-        translate_installed_skills((plugin,))
+    result = translate_installed_skills((plugin,))
+    assert len(result.skills) == 1
+    file_paths = [f.relative_path.as_posix() for f in result.skills[0].files]
+    assert "scripts/run.sh" in file_paths
 
 
-def test_skill_translation_rejects_symlinked_file_in_resource_dir(tmp_path):
-    """Skill translation must not follow symlinked files inside resource directories."""
+def test_skill_translation_follows_symlinked_file_in_resource_dir(tmp_path):
+    """Skill translation follows symlinked files inside resource directories."""
     from cc_codex_bridge.translate_skills import translate_installed_skills
-    from cc_codex_bridge.model import InstalledPlugin, SemVer, TranslationError
+    from cc_codex_bridge.model import InstalledPlugin, SemVer
 
     cache_root = tmp_path / "cache"
     version_dir = cache_root / "market" / "tools" / "1.0.0"
@@ -512,7 +514,7 @@ def test_skill_translation_rejects_symlinked_file_in_resource_dir(tmp_path):
 
     outside = tmp_path / "outside"
     outside.mkdir()
-    (outside / "secret.md").write_text("Leaked content.\n")
+    (outside / "secret.md").write_text("Linked content.\n")
     (references_dir / "sneaky.md").symlink_to(outside / "secret.md")
 
     plugin = InstalledPlugin(
@@ -527,14 +529,17 @@ def test_skill_translation_rejects_symlinked_file_in_resource_dir(tmp_path):
         commands=(),
     )
 
-    with pytest.raises(TranslationError, match="symlinked file"):
-        translate_installed_skills((plugin,))
+    result = translate_installed_skills((plugin,))
+    assert len(result.skills) == 1
+    file_paths = [f.relative_path.as_posix() for f in result.skills[0].files]
+    assert "references/sneaky.md" in file_paths
+    assert "references/legit.md" in file_paths
 
 
-def test_skill_translation_rejects_symlinked_subdir_in_resource_dir(tmp_path):
-    """Skill translation must not follow symlinked subdirectories inside resource directories."""
+def test_skill_translation_follows_symlinked_subdir_in_resource_dir(tmp_path):
+    """Skill translation follows symlinked subdirectories inside resource directories."""
     from cc_codex_bridge.translate_skills import translate_installed_skills
-    from cc_codex_bridge.model import InstalledPlugin, SemVer, TranslationError
+    from cc_codex_bridge.model import InstalledPlugin, SemVer
 
     cache_root = tmp_path / "cache"
     version_dir = cache_root / "market" / "tools" / "1.0.0"
@@ -548,7 +553,7 @@ def test_skill_translation_rejects_symlinked_subdir_in_resource_dir(tmp_path):
 
     outside = tmp_path / "outside_subdir"
     outside.mkdir()
-    (outside / "leaked.md").write_text("Leaked content.\n")
+    (outside / "linked.md").write_text("Linked content.\n")
     (references_dir / "sneaky-dir").symlink_to(outside)
 
     plugin = InstalledPlugin(
@@ -563,14 +568,17 @@ def test_skill_translation_rejects_symlinked_subdir_in_resource_dir(tmp_path):
         commands=(),
     )
 
-    with pytest.raises(TranslationError, match="symlinked"):
-        translate_installed_skills((plugin,))
+    result = translate_installed_skills((plugin,))
+    assert len(result.skills) == 1
+    file_paths = [f.relative_path.as_posix() for f in result.skills[0].files]
+    assert "references/sneaky-dir/linked.md" in file_paths
+    assert "references/legit.md" in file_paths
 
 
-def test_skill_translation_rejects_symlinked_top_level_file(tmp_path):
-    """Skill translation must not follow symlinked top-level files in the skill root."""
+def test_skill_translation_follows_symlinked_top_level_file(tmp_path):
+    """Skill translation follows symlinked top-level files in the skill root."""
     from cc_codex_bridge.translate_skills import translate_installed_skills
-    from cc_codex_bridge.model import InstalledPlugin, SemVer, TranslationError
+    from cc_codex_bridge.model import InstalledPlugin, SemVer
 
     cache_root = tmp_path / "cache"
     version_dir = cache_root / "market" / "tools" / "1.0.0"
@@ -580,7 +588,7 @@ def test_skill_translation_rejects_symlinked_top_level_file(tmp_path):
 
     outside = tmp_path / "outside"
     outside.mkdir()
-    (outside / "extra.txt").write_text("Leaked content.\n")
+    (outside / "extra.txt").write_text("Linked content.\n")
     (skill_dir / "extra.txt").symlink_to(outside / "extra.txt")
 
     plugin = InstalledPlugin(
@@ -595,25 +603,28 @@ def test_skill_translation_rejects_symlinked_top_level_file(tmp_path):
         commands=(),
     )
 
-    with pytest.raises(TranslationError, match="symlinked file"):
-        translate_installed_skills((plugin,))
+    result = translate_installed_skills((plugin,))
+    assert len(result.skills) == 1
+    file_paths = [f.relative_path.as_posix() for f in result.skills[0].files]
+    assert "extra.txt" in file_paths
 
 
-def test_skill_translation_rejects_symlinked_skill_md(tmp_path):
-    """Skill translation must not follow a symlinked SKILL.md."""
+def test_skill_translation_follows_symlinked_skill_md(tmp_path):
+    """Skill translation follows a symlinked SKILL.md."""
     from cc_codex_bridge.translate_skills import translate_standalone_skills
-    from cc_codex_bridge.model import TranslationError
 
     skill_dir = tmp_path / "skills" / "my-tool"
     skill_dir.mkdir(parents=True)
 
     real_skill = tmp_path / "elsewhere" / "SKILL.md"
     real_skill.parent.mkdir(parents=True)
-    real_skill.write_text("---\nname: my-tool\ndescription: A tool\n---\n\nLeaked.\n")
+    real_skill.write_text("---\nname: my-tool\ndescription: A tool\n---\n\nLinked skill.\n")
     (skill_dir / "SKILL.md").symlink_to(real_skill)
 
-    with pytest.raises(TranslationError, match="symlinked"):
-        translate_standalone_skills((skill_dir,), scope="user")
+    result = translate_standalone_skills((skill_dir,), scope="user")
+    assert len(result.skills) == 1
+    skill_md = next(f for f in result.skills[0].files if f.relative_path.name == "SKILL.md")
+    assert b"Linked skill." in skill_md.content
 
 
 def test_sibling_reference_regex_ignores_triple_dot_paths(
