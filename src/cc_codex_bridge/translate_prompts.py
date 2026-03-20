@@ -255,7 +255,7 @@ def _translate_one_command(
     # Build prompt content with frontmatter
     lines = ["---", f"description: {description}"]
     if argument_hint:
-        lines.append(f"argument-hint: {argument_hint}")
+        lines.append(f"argument-hint: '{argument_hint}'")
     lines.append("---")
     prompt_content = "\n".join(lines) + "\n" + transformed_body
     if not prompt_content.endswith("\n"):

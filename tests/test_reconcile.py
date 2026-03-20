@@ -3357,6 +3357,63 @@ def test_uninstall_all_removes_prompt_files(make_project, make_plugin_version, t
         assert len(remaining) == 0
 
 
+def test_reconcile_prompt_conflict_across_projects_raises(make_project, tmp_path: Path):
+    """Two projects with the same prompt filename but different content raises ReconcileError."""
+    from cc_codex_bridge.model import GeneratedPrompt, ReconcileError
+    from cc_codex_bridge.reconcile import build_desired_state, reconcile_desired_state
+
+    project_a, _ = make_project("project-a")
+    project_b = tmp_path / "project-b"
+    project_b.mkdir()
+    (project_b / "AGENTS.md").write_text("# B\n")
+
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "bridge-home"
+
+    from cc_codex_bridge.model import DiscoveryResult, ProjectContext, ClaudeShimDecision
+
+    # Reconcile project A with a prompt
+    discovery_a = DiscoveryResult(
+        project=ProjectContext(root=project_a, agents_md_path=project_a / "AGENTS.md"),
+        plugins=(),
+    )
+    shim_a = ClaudeShimDecision(action="skip", path=project_a / "CLAUDE.md")
+    prompt_a = GeneratedPrompt(
+        filename="build--shop.md",
+        content=b"---\ndescription: Build A\n---\n\nBuild project A.\n",
+        source_path=project_a / ".claude" / "commands" / "build.md",
+        marketplace="_project",
+        plugin_name="local",
+    )
+    state_a = build_desired_state(
+        discovery_a, shim_a, (),
+        codex_home=codex_home, bridge_home=bridge_home,
+        global_prompts=(prompt_a,),
+    )
+    reconcile_desired_state(state_a)
+
+    # Reconcile project B with a different prompt at the same filename
+    discovery_b = DiscoveryResult(
+        project=ProjectContext(root=project_b, agents_md_path=project_b / "AGENTS.md"),
+        plugins=(),
+    )
+    shim_b = ClaudeShimDecision(action="skip", path=project_b / "CLAUDE.md")
+    prompt_b = GeneratedPrompt(
+        filename="build--shop.md",
+        content=b"---\ndescription: Build B\n---\n\nBuild project B.\n",
+        source_path=project_b / ".claude" / "commands" / "build.md",
+        marketplace="_project",
+        plugin_name="local",
+    )
+    state_b = build_desired_state(
+        discovery_b, shim_b, (),
+        codex_home=codex_home, bridge_home=bridge_home,
+        global_prompts=(prompt_b,),
+    )
+    with pytest.raises(ReconcileError, match="Generated prompt registry conflict"):
+        reconcile_desired_state(state_b)
+
+
 def _reconcile_once(project_root, cache_root, codex_home):
     """Run a full discover+translate+reconcile and return the desired state."""
     from cc_codex_bridge.discover import discover

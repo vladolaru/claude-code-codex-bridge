@@ -1717,9 +1717,12 @@ def _plan_prompt_mutations(
         registry_owned = existing_entry is not None
 
         if existing_entry is not None and existing_entry.content_hash != desired_hash:
-            # Prompt files are derived from command sources.  When the
-            # source changes, any project reconciling first should update
-            # the shared file and registry entry for all owners.
+            if set(existing_entry.owners) != {desired.project_root}:
+                raise ReconcileError(
+                    "Generated prompt registry conflict for "
+                    f"{destination}: existing content hash {existing_entry.content_hash} "
+                    f"does not match desired {desired_hash}"
+                )
             registry_owned = True
 
         if not registry_owned:

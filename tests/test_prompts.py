@@ -83,7 +83,29 @@ def test_translate_command_preserves_argument_hint(make_plugin_version):
     result = translate_installed_commands(plugins)
     content = result.prompts[0].content.decode()
 
-    assert "argument-hint: [PR_URL]" in content
+    assert "argument-hint: '[PR_URL]'" in content
+
+
+def test_translate_command_argument_hint_quoted_for_yaml_safety(make_plugin_version):
+    """argument-hint with brackets is quoted to prevent YAML sequence interpretation."""
+    cache_root, version_dir = make_plugin_version(
+        "market", "tools", "1.0.0",
+    )
+    commands_dir = version_dir / "commands"
+    commands_dir.mkdir()
+    (commands_dir / "cmd.md").write_text(
+        "---\n"
+        "description: Test\n"
+        "argument-hint: '[person] [month]'\n"
+        "---\n\nDo things.\n"
+    )
+
+    plugins = discover_latest_plugins(cache_root)
+    result = translate_installed_commands(plugins)
+    content = result.prompts[0].content.decode()
+
+    # Must be quoted so YAML parsers read it as a string, not a sequence
+    assert "argument-hint: '[person] [month]'" in content
 
 
 def test_translate_command_drops_allowed_tools(make_plugin_version):
