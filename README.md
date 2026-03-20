@@ -1,6 +1,8 @@
 # claude-code-codex-bridge
 
-Bridge your local Claude Code setup into Codex so both stay equally effective.
+[![Latest release](https://img.shields.io/github/v/release/vladolaru/claude-code-codex-bridge)](https://github.com/vladolaru/claude-code-codex-bridge/releases/latest)
+
+Automatically bridge your local Claude Code setup into Codex so both stay equally effective.
 
 `cc-codex-bridge` reads the Claude Code setup on your machine — plugins, skills, agents, commands, and instructions — and generates equivalent Codex artifacts. You install/set up/author once in Claude Code; the bridge keeps Codex in sync.
 
@@ -154,7 +156,7 @@ cc-codex-bridge install-launchagent            # install LaunchAgent plist
 cc-codex-bridge print-launchagent              # preview plist without installing
 ```
 
-The LaunchAgent runs `reconcile --all` every 30 minutes. Override with `--interval <seconds>`.
+The LaunchAgent runs `reconcile --all` every 30 minutes. Set a different interval with `--interval <seconds>` when installing.
 
 ## Exclusions
 
