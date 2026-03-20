@@ -1,10 +1,9 @@
 """Translation from Claude Code commands to Codex prompt files.
 
-Unlike translate_commands.py (which produces GeneratedSkill objects with
-SKILL.md format), this module produces GeneratedPrompt objects — flat
-.md prompt files for ~/.codex/prompts/.
+This module produces GeneratedPrompt objects — flat .md prompt files
+for ~/.codex/prompts/.
 
-Key differences from the skill-based approach:
+Design choices:
 - No cmd- prefix on filenames
 - $ARGUMENTS and positional args ($1, $2, ...) pass through unchanged
   (Codex natively supports them)
