@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.14.0] - 2026-03-20
 
 ### Added
 
@@ -20,8 +20,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- Symlinks in skill source trees (SKILL.md, resource files, subdirectories) are now followed instead of rejected, matching Claude Code's behavior.
+- Symlinks in skill, command, and agent source trees are now followed instead of rejected, matching Claude Code's behavior.
 - Agent frontmatter `tools:` field now accepts comma-separated strings (e.g., `tools: Read, Write, Edit`) in addition to YAML lists.
+- Unrecognized Claude tools (MCP tools, WebFetch, NotebookEdit, Agent, etc.) are now silently accepted instead of blocking agent translation. Only the core read/write tools affect sandbox mode derivation.
+- Frontmatter values containing YAML-confusing characters (colons in MCP tool names, brackets in `argument-hint`) are auto-quoted before parsing.
+- Sibling skill reference detection (`../name/`) now skips fenced code blocks to avoid false positives from shell commands.
 - CLAUDE.md containing any reference to AGENTS.md (e.g., `@AGENTS.md` without trailing newline, `Read and follow AGENTS.md`) is now preserved instead of rejected.
 - Hand-authored CLAUDE.md no longer blocks project reconciliation. The bridge skips CLAUDE.md management and proceeds with agents, skills, and commands.
 
