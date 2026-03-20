@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-03-21
+
+### Fixed
+- Prompt `description` and `argument-hint` values are now single-quoted in generated frontmatter, preventing invalid YAML when values contain colons, brackets, or single quotes
+- Shared global skills and prompts now allow existing owners to advance the content hash on plugin or source upgrade, while non-owner projects with different content at the same name are still rejected as conflicts
+- Bulk `--all` mode now forwards `--exclude-plugin`, `--exclude-skill`, `--exclude-agent`, `--exclude-command`, `--claude-home`, and `--cache-dir` flags to each per-project build
+
 ## [0.15.0] - 2026-03-20
 
 ### Changed
