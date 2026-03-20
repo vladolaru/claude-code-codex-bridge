@@ -18,6 +18,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - LaunchAgent plist now runs `reconcile --all` instead of the removed `reconcile-all` command.
 
+### Fixed
+
+- Symlinks in skill source trees (SKILL.md, resource files, subdirectories) are now followed instead of rejected, matching Claude Code's behavior.
+- Agent frontmatter `tools:` field now accepts comma-separated strings (e.g., `tools: Read, Write, Edit`) in addition to YAML lists.
+- CLAUDE.md containing any reference to AGENTS.md (e.g., `@AGENTS.md` without trailing newline, `Read and follow AGENTS.md`) is now preserved instead of rejected.
+- Hand-authored CLAUDE.md no longer blocks project reconciliation. The bridge skips CLAUDE.md management and proceeds with agents, skills, and commands.
+
 ### Removed
 
 - `reconcile-all` subcommand (replaced by `reconcile --all`).

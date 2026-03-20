@@ -220,7 +220,7 @@ The global registry records:
 - vendored plugin resource directories are removed only when the global registry shows no remaining owners
 - vendored plugin resource directories use content hash tracking for fast change detection — on-disk comparison is skipped when the registry hash matches the desired hash
 - all write targets must resolve within their expected root (`project_root` for project files, `codex_home` for global Codex files, `bridge_home` for state and registry files) after symlink resolution — this catches symlinked ancestor directories that would redirect operations outside the expected tree
-- skill translation rejects symlinked resource directories, symlinked files (including SKILL.md), and symlinked subdirectories within resource directories
+- skill translation follows symlinks unconditionally, matching Claude Code's behavior
 - project skills are tracked as managed directory names and compared using exact directory-snapshot matching, consistent with global skills
 - project files are written atomically via temp-file-then-rename to avoid partial reads
 - if a write fails mid-apply, the next idempotent reconcile run self-heals
@@ -330,20 +330,21 @@ The pipeline is deterministic: same filesystem state always produces the same so
 
 Allowed outcomes:
 
-- `create`
-- `preserve`
-- `bootstrap`
-- `fail`
+- `create` — CLAUDE.md does not exist; generate `@AGENTS.md\n`
+- `preserve` — CLAUDE.md is valid; leave it alone
+- `skip` — CLAUDE.md is hand-authored without AGENTS.md reference; proceed without managing it
+- `bootstrap` — CLAUDE.md exists without AGENTS.md; copy to AGENTS.md and replace with shim
+- `fail` — corrupted state (shim without AGENTS.md, or broken AGENTS.md symlink)
 
-`CLAUDE.md` is only generator-safe when:
+`CLAUDE.md` is treated as valid (`preserve`) when:
 
-- it does not exist
 - it exactly matches `@AGENTS.md` plus a trailing newline
 - it is a symlink to `AGENTS.md`
+- it contains the substring `AGENTS.md` anywhere in its content (lenient matching)
 
 When `AGENTS.md` does not exist but `CLAUDE.md` is a regular file, the outcome is `bootstrap`. Only `reconcile` (non-dry-run) and `reconcile --all` execute the bootstrap, which copies `CLAUDE.md` to `AGENTS.md` and replaces `CLAUDE.md` with the shim. Read-only commands report that bootstrap is required and exit without mutating files.
 
-Anything else is treated as hand-authored and causes failure.
+Hand-authored `CLAUDE.md` without an AGENTS.md reference produces `skip` — the bridge omits CLAUDE.md from managed project files but proceeds with agents, skills, commands, and state.
 
 ### 8.2 Agent translation
 
@@ -434,7 +435,7 @@ Current skill rules:
 - `SKILL.md` frontmatter must include `name`
 - generated `SKILL.md` has its `name:` rewritten to match the generated install directory name
 - skill trees are materialized as complete directory snapshots
-- symlinked resource directories, symlinked files (including `SKILL.md`), and symlinked subdirectories within resource directories are all rejected during translation — no symlinks anywhere in copied skill content
+- symlinks in skill source trees (SKILL.md, resource files, subdirectories) are followed unconditionally during translation, matching Claude Code's behavior
 
 Plugin resource vendoring:
 
@@ -781,7 +782,7 @@ These are current implemented simplifications, not necessarily permanent design 
 
 - the `claude` CLI must be available on PATH — without it, `discover()` raises a `DiscoveryError` and the bridge cannot function
 - Claude `model` hints are preserved as metadata only; agents rely on Codex's native model selection
-- Claude tools are mapped to a coarse `sandbox_mode` value (`workspace-write`, `read-only`, or omitted) rather than individual tool identifiers — unsupported Claude tools are hard errors rather than being silently dropped
+- Claude tools are mapped to a coarse `sandbox_mode` value (`workspace-write`, `read-only`, or omitted) rather than individual tool identifiers — unsupported Claude tools are hard errors rather than being silently dropped; the `tools` frontmatter field accepts both YAML lists and comma-separated strings
 - agents use Codex's native auto-discovery from `.codex/agents/` and `~/.codex/agents/` — no `config.toml` is generated
 - frontmatter parsing uses safe YAML loading for frontmatter blocks plus strict
   post-parse validation of supported runtime shapes
