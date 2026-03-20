@@ -746,6 +746,12 @@ def reconcile_all(
     *,
     codex_home: str | Path | None = None,
     bridge_home: str | Path | None = None,
+    claude_home: str | Path | None = None,
+    cache_dir: str | Path | None = None,
+    exclude_plugins: Iterable[str] = (),
+    exclude_skills: Iterable[str] = (),
+    exclude_agents: Iterable[str] = (),
+    exclude_commands: Iterable[str] = (),
     dry_run: bool = False,
 ) -> ReconcileAllReport:
     """Reconcile all registered projects."""
@@ -782,6 +788,12 @@ def reconcile_all(
                 project_root,
                 codex_home=codex_home_path,
                 bridge_home=bridge_home,
+                claude_home=claude_home,
+                cache_dir=cache_dir,
+                exclude_plugins=exclude_plugins,
+                exclude_skills=exclude_skills,
+                exclude_agents=exclude_agents,
+                exclude_commands=exclude_commands,
             )
             if build.shim_decision.action == "bootstrap":
                 if not dry_run:
@@ -791,6 +803,12 @@ def reconcile_all(
                         project_root,
                         codex_home=codex_home_path,
                         bridge_home=bridge_home,
+                        claude_home=claude_home,
+                        cache_dir=cache_dir,
+                        exclude_plugins=exclude_plugins,
+                        exclude_skills=exclude_skills,
+                        exclude_agents=exclude_agents,
+                        exclude_commands=exclude_commands,
                     )
                 else:
                     errors.append(ReconcileAllError(
@@ -1356,12 +1374,9 @@ def _plan_skill_mutations(
         registry_owned = existing_entry is not None
 
         if existing_entry is not None and existing_entry.content_hash != desired_hash:
-            if set(existing_entry.owners) != {desired.project_root}:
-                raise ReconcileError(
-                    "Generated skill registry conflict for "
-                    f"{destination}: existing content hash {existing_entry.content_hash} "
-                    f"does not match desired {desired_hash}"
-                )
+            # Global skills come from shared sources (plugins, user scope).
+            # When the source upgrades, any project reconciling first should
+            # update the shared skill and registry entry for all owners.
             registry_owned = True
 
         if destination.exists() and not destination.is_dir():
@@ -1717,12 +1732,9 @@ def _plan_prompt_mutations(
         registry_owned = existing_entry is not None
 
         if existing_entry is not None and existing_entry.content_hash != desired_hash:
-            if set(existing_entry.owners) != {desired.project_root}:
-                raise ReconcileError(
-                    "Generated prompt registry conflict for "
-                    f"{destination}: existing content hash {existing_entry.content_hash} "
-                    f"does not match desired {desired_hash}"
-                )
+            # Global prompts come from shared sources (plugins, user scope).
+            # When the source changes, any project reconciling first should
+            # update the shared prompt and registry entry for all owners.
             registry_owned = True
 
         if not registry_owned:

@@ -298,12 +298,12 @@ def test_reconcile_adopts_existing_matching_skill_directory(
     ]
 
 
-def test_reconcile_fails_on_registry_conflict_for_same_skill_directory(
+def test_reconcile_shared_skill_advances_on_upgrade(
     make_project,
     make_plugin_version,
     tmp_path: Path,
 ):
-    """A different generated tree for the same install dir is a hard conflict."""
+    """A shared global skill updates when its plugin source changes."""
     first_project, _ = make_project("project-a")
     second_project, _ = make_project("project-b")
     cache_root, version_dir = make_plugin_version(
@@ -318,13 +318,20 @@ def test_reconcile_fails_on_registry_conflict_for_same_skill_directory(
     )
     codex_home = tmp_path / "codex-home"
 
+    # Both projects reconcile with the same plugin skill (version A)
     reconcile_desired_state(_build_desired(first_project, cache_root, codex_home))
+    reconcile_desired_state(_build_desired(second_project, cache_root, codex_home))
+
+    # Plugin upgrades — skill content changes to version B
     skill_path.write_text(
         "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse version B.\n"
     )
 
-    with pytest.raises(ReconcileError, match="Generated skill registry conflict"):
-        reconcile_desired_state(_build_desired(second_project, cache_root, codex_home))
+    # Either project reconciling should succeed and update the shared skill
+    report = reconcile_desired_state(_build_desired(second_project, cache_root, codex_home))
+    assert report.applied is True
+    generated_skill = codex_home / "skills" / "prompt-engineer" / "SKILL.md"
+    assert "Use version B." in generated_skill.read_text()
 
 
 def test_reconcile_updates_shared_agent_when_plugin_upgrades(
@@ -3357,9 +3364,9 @@ def test_uninstall_all_removes_prompt_files(make_project, make_plugin_version, t
         assert len(remaining) == 0
 
 
-def test_reconcile_prompt_conflict_across_projects_raises(make_project, tmp_path: Path):
-    """Two projects with the same prompt filename but different content raises ReconcileError."""
-    from cc_codex_bridge.model import GeneratedPrompt, ReconcileError
+def test_reconcile_shared_prompt_advances_on_upgrade(make_project, tmp_path: Path):
+    """A shared global prompt updates when its source content changes."""
+    from cc_codex_bridge.model import GeneratedPrompt
     from cc_codex_bridge.reconcile import build_desired_state, reconcile_desired_state
 
     project_a, _ = make_project("project-a")
@@ -3372,46 +3379,52 @@ def test_reconcile_prompt_conflict_across_projects_raises(make_project, tmp_path
 
     from cc_codex_bridge.model import DiscoveryResult, ProjectContext, ClaudeShimDecision
 
-    # Reconcile project A with a prompt
+    shared_content_v1 = b"---\ndescription: 'Review code'\n---\n\nReview v1.\n"
+    shared_content_v2 = b"---\ndescription: 'Review code'\n---\n\nReview v2.\n"
+
+    # Both projects reconcile with the same shared plugin prompt (v1)
+    for project_root in (project_a, project_b):
+        discovery = DiscoveryResult(
+            project=ProjectContext(root=project_root, agents_md_path=project_root / "AGENTS.md"),
+            plugins=(),
+        )
+        shim = ClaudeShimDecision(action="skip", path=project_root / "CLAUDE.md")
+        prompt = GeneratedPrompt(
+            filename="review.md",
+            content=shared_content_v1,
+            source_path=project_root / ".claude" / "commands" / "review.md",
+            marketplace="market",
+            plugin_name="tools",
+        )
+        state = build_desired_state(
+            discovery, shim, (),
+            codex_home=codex_home, bridge_home=bridge_home,
+            global_prompts=(prompt,),
+        )
+        reconcile_desired_state(state)
+
+    # Plugin upgrades — project A reconciles with v2 content
     discovery_a = DiscoveryResult(
         project=ProjectContext(root=project_a, agents_md_path=project_a / "AGENTS.md"),
         plugins=(),
     )
     shim_a = ClaudeShimDecision(action="skip", path=project_a / "CLAUDE.md")
-    prompt_a = GeneratedPrompt(
-        filename="build--shop.md",
-        content=b"---\ndescription: Build A\n---\n\nBuild project A.\n",
-        source_path=project_a / ".claude" / "commands" / "build.md",
-        marketplace="_project",
-        plugin_name="local",
+    prompt_v2 = GeneratedPrompt(
+        filename="review.md",
+        content=shared_content_v2,
+        source_path=project_a / ".claude" / "commands" / "review.md",
+        marketplace="market",
+        plugin_name="tools",
     )
     state_a = build_desired_state(
         discovery_a, shim_a, (),
         codex_home=codex_home, bridge_home=bridge_home,
-        global_prompts=(prompt_a,),
+        global_prompts=(prompt_v2,),
     )
-    reconcile_desired_state(state_a)
-
-    # Reconcile project B with a different prompt at the same filename
-    discovery_b = DiscoveryResult(
-        project=ProjectContext(root=project_b, agents_md_path=project_b / "AGENTS.md"),
-        plugins=(),
-    )
-    shim_b = ClaudeShimDecision(action="skip", path=project_b / "CLAUDE.md")
-    prompt_b = GeneratedPrompt(
-        filename="build--shop.md",
-        content=b"---\ndescription: Build B\n---\n\nBuild project B.\n",
-        source_path=project_b / ".claude" / "commands" / "build.md",
-        marketplace="_project",
-        plugin_name="local",
-    )
-    state_b = build_desired_state(
-        discovery_b, shim_b, (),
-        codex_home=codex_home, bridge_home=bridge_home,
-        global_prompts=(prompt_b,),
-    )
-    with pytest.raises(ReconcileError, match="Generated prompt registry conflict"):
-        reconcile_desired_state(state_b)
+    # Should succeed — shared source upgraded, not a conflict
+    report = reconcile_desired_state(state_a)
+    assert report.applied is True
+    assert (codex_home / "prompts" / "review.md").read_bytes() == shared_content_v2
 
 
 def _reconcile_once(project_root, cache_root, codex_home):

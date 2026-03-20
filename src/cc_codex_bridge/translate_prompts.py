@@ -252,10 +252,13 @@ def _translate_one_command(
                     files=files,
                 ))
 
-    # Build prompt content with frontmatter
-    lines = ["---", f"description: {description}"]
+    # Build prompt content with frontmatter.
+    # Values are single-quoted so YAML-significant characters (colons,
+    # brackets) are treated as literal strings.  Internal single quotes
+    # are escaped by doubling them per YAML spec.
+    lines = ["---", f"description: '{description.replace(chr(39), chr(39)*2)}'"]
     if argument_hint:
-        lines.append(f"argument-hint: '{argument_hint}'")
+        lines.append(f"argument-hint: '{argument_hint.replace(chr(39), chr(39)*2)}'")
     lines.append("---")
     prompt_content = "\n".join(lines) + "\n" + transformed_body
     if not prompt_content.endswith("\n"):

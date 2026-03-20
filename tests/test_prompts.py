@@ -37,7 +37,7 @@ def test_translate_command_produces_prompt(make_plugin_version):
     assert prompt.filename == "code-review.md"
 
     content = prompt.content.decode()
-    assert "description: Review code incrementally" in content
+    assert "description: 'Review code incrementally'" in content
     assert "Review the code." in content
 
 
@@ -262,7 +262,7 @@ def test_translate_command_derives_description_from_filename(make_plugin_version
     assert len(result.prompts) == 1
 
     content = result.prompts[0].content.decode()
-    assert "description: consolidate ai memory" in content
+    assert "description: 'consolidate ai memory'" in content
 
 
 def test_translate_command_without_frontmatter(make_plugin_version):
@@ -281,7 +281,7 @@ def test_translate_command_without_frontmatter(make_plugin_version):
     assert len(result.prompts) == 1
 
     content = result.prompts[0].content.decode()
-    assert "description: log experience" in content
+    assert "description: 'log experience'" in content
     assert "# Log Experience" in content
 
 

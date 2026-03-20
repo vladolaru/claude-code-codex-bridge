@@ -501,6 +501,12 @@ def _handle_all_command(args: argparse.Namespace) -> int:
         from cc_codex_bridge.reconcile import reconcile_all
         report = reconcile_all(
             codex_home=args.codex_home,
+            claude_home=getattr(args, "claude_home", None),
+            cache_dir=getattr(args, "cache_dir", None),
+            exclude_plugins=getattr(args, "exclude_plugin", None) or (),
+            exclude_skills=getattr(args, "exclude_skill", None) or (),
+            exclude_agents=getattr(args, "exclude_agent", None) or (),
+            exclude_commands=getattr(args, "exclude_command", None) or (),
             dry_run=dry_run,
         )
     except (ReconcileError, OSError, UnicodeError) as exc:
