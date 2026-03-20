@@ -2,182 +2,226 @@
 
 Bridge your local Claude Code setup into Codex so both stay equally effective.
 
-This repository contains the `cc-codex-bridge` CLI. It reads the Claude Code setup available on a local machine and projects it into Codex-compatible artifacts without creating a second hand-maintained ecosystem.
+`cc-codex-bridge` reads the Claude Code setup on your machine — plugins, skills, agents, commands, and instructions — and generates equivalent Codex artifacts. You author once in Claude Code; the bridge keeps Codex in sync.
 
-What it bridges:
+## What It Reads
 
-- installed Claude Code plugins
-- shared project instructions rooted in `AGENTS.md`
+The bridge discovers these canonical Claude Code sources:
 
-What it generates:
+| Source | Location |
+|--------|----------|
+| Installed plugins | `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` |
+| Plugin skills | `<plugin>/skills/<skill-name>/SKILL.md` |
+| Plugin agents | `<plugin>/agents/<agent-name>.md` |
+| Plugin commands | `<plugin>/commands/<command-name>.md` |
+| User skills | `~/.claude/skills/<skill-name>/SKILL.md` |
+| User agents | `~/.claude/agents/<agent-name>.md` |
+| User commands | `~/.claude/commands/<command-name>.md` |
+| Project skills | `.claude/skills/<skill-name>/SKILL.md` |
+| Project agents | `.claude/agents/<agent-name>.md` |
+| Project commands | `.claude/commands/<command-name>.md` |
+| User global instructions | `~/.claude/CLAUDE.md` |
+| Project instructions | `AGENTS.md` (hand-authored, never modified) |
 
-- project-local `CLAUDE.md`
-- project-local `.codex/config.toml`
-- project-local `.codex/prompts/agents/*.md`
-- project-local `.codex/claude-code-bridge-state.json`
-- user-global `~/.codex/skills/*`
+Plugin enablement is checked by running `claude plugins list --json`, so only plugins you have enabled in Claude Code are bridged.
 
-## Install From GitHub Releases
+When multiple installed versions of the same plugin exist, the highest semantic version is selected.
 
-For normal use on macOS, install from the latest GitHub Release:
+## What It Generates
+
+### Project-local outputs
+
+| Artifact | Description |
+|----------|-------------|
+| `CLAUDE.md` | Shim containing `@AGENTS.md` so Codex reads the shared project instructions |
+| `.codex/agents/*.toml` | Agent files from project-scope Claude agents |
+| `.codex/skills/<name>/` | Skill directories from project-scope Claude skills |
+
+### User-global outputs
+
+| Artifact | Description |
+|----------|-------------|
+| `~/.codex/skills/<name>/` | Skill directories from plugin and user Claude skills |
+| `~/.codex/agents/*.toml` | Agent files from plugin and user Claude agents |
+| `~/.codex/prompts/*.md` | Prompt files from plugin, user, and project Claude commands |
+| `~/.codex/AGENTS.md` | Global instructions bridged from `~/.claude/CLAUDE.md` |
+
+### Bridge-internal state
+
+| Artifact | Description |
+|----------|-------------|
+| `~/.cc-codex-bridge/registry.json` | Global ownership registry for skills, agents, prompts, and vendored resources |
+| `~/.cc-codex-bridge/projects/<hash>/state.json` | Per-project managed-file tracking |
+| `~/.cc-codex-bridge/plugins/<marketplace>-<plugin>/` | Vendored plugin resource directories (scripts, references, etc.) |
+
+All generated outputs are derived artifacts. Do not hand-edit them — change the Claude Code source and re-run `reconcile`.
+
+## How Claude Code Maps to Codex
+
+The bridge translates between two different extensibility models. This table shows how each Claude Code mechanic maps to its Codex equivalent:
+
+| Claude Code | Codex | How the bridge translates |
+|-------------|-------|---------------------------|
+| **Skills** (`SKILL.md` in a directory) | **Skills** (`SKILL.md` in a directory) | Copied as self-contained directory trees under `~/.codex/skills/`. The `name:` frontmatter is rewritten to match the generated directory name. Plugin resource paths (`$PLUGIN_ROOT`, sibling references) are rewritten to vendored absolute paths. |
+| **Agents** (`.md` with frontmatter) | **Agents** (`.toml` with role config) | Translated into self-contained `.toml` files. `name` and `description` map directly. The markdown body becomes `developer_instructions`. Claude `tools` are mapped to Codex `sandbox_mode` (`Bash`/`Write`/`Edit` → `workspace-write`, read-only tools → `read-only`). |
+| **Commands** (`.md` slash commands) | **Prompts** (`.md` in `~/.codex/prompts/`) | Translated into native Codex prompt files. `description` and `argument-hint` frontmatter are preserved. `$ARGUMENTS` and positional args (`$1`-`$9`) pass through natively — Codex supports the same syntax. `allowed-tools` is dropped (Codex controls tool access differently). |
+| **`CLAUDE.md`** (project instructions) | **`AGENTS.md`** (project instructions) | The bridge generates `CLAUDE.md` as the shim `@AGENTS.md` so both CLIs read the same shared instructions. `AGENTS.md` is the canonical source, never modified by the bridge. |
+| **`~/.claude/CLAUDE.md`** (global instructions) | **`~/.codex/AGENTS.md`** (global instructions) | Content is copied with a bridge ownership sentinel appended. |
+| **Plugin resources** (`scripts/`, `references/`, etc.) | Vendored under `~/.cc-codex-bridge/plugins/` | Resource directories referenced by skills, agents, or commands via `$PLUGIN_ROOT` or `${CLAUDE_PLUGIN_ROOT}` are copied to bridge-internal storage. All references in generated content are rewritten to absolute vendored paths. Transitive dependencies are detected and vendored automatically. |
+
+### Naming conventions
+
+| Entity | Naming rule |
+|--------|-------------|
+| Skills | Bare directory name (e.g., `code-review`). Collisions get `-alt`, `-alt-2` suffixes. User skills win the bare name over plugin skills. |
+| Agents | `<marketplace>-<plugin>-<agent>.toml` for plugins, `user-<agent>.toml` for user scope, `project-<agent>.toml` for project scope. |
+| Prompts | Bare command filename (e.g., `review.md`). Project commands get a `--<project-dirname>` suffix (e.g., `build--my-app.md`). Collisions resolved with `-alt` suffixes. |
+
+## Install
+
+### From GitHub Releases (recommended)
 
 ```bash
 curl -fsSL https://github.com/vladolaru/claude-code-codex-bridge/releases/latest/download/install.sh | bash
 ```
 
-The release installer downloads a self-contained wheelhouse bundle from GitHub and installs with `pip --no-index`, so it does not need PyPI during installation.
+The installer downloads a self-contained wheelhouse bundle and installs with `pip --no-index` — no PyPI needed. Supports Python 3.11, 3.12, 3.13, and 3.14.
 
-Supported interpreter versions for the release installer are currently Python `3.11`, `3.12`, `3.13`, and `3.14`.
-
-To install a specific release instead of the latest:
+To install a specific version:
 
 ```bash
 curl -fsSL https://github.com/vladolaru/claude-code-codex-bridge/releases/latest/download/install.sh | \
-  bash -s -- --version v0.3.0
+  bash -s -- --version v0.15.0
 ```
 
-After installation, verify the local machine setup:
-
-```bash
-cc-codex-bridge doctor
-cc-codex-bridge doctor --json
-```
-
-Then run the normal project commands:
-
-```bash
-cc-codex-bridge validate --project .
-cc-codex-bridge reconcile --dry-run --project .
-cc-codex-bridge reconcile --dry-run --diff --project .
-cc-codex-bridge status --project .
-cc-codex-bridge reconcile --project .
-```
-
-Reconcile all registered projects at once:
-
-```bash
-cc-codex-bridge reconcile --all
-cc-codex-bridge reconcile --all --dry-run
-cc-codex-bridge reconcile --all --dry-run --json
-```
-
-Remove bridge artifacts from a single project:
-
-```bash
-cc-codex-bridge clean --project .
-cc-codex-bridge clean --dry-run --project .
-```
-
-Remove all bridge artifacts from the machine:
-
-```bash
-cc-codex-bridge uninstall --dry-run
-cc-codex-bridge uninstall --dry-run --json
-cc-codex-bridge uninstall
-```
-
-Install the global LaunchAgent to run reconcile --all every 30 minutes:
-
-```bash
-cc-codex-bridge install-launchagent
-cc-codex-bridge print-launchagent
-```
-
-## Install From A Local Checkout
-
-For direct installation from a local clone, install the package non-editably:
+### From a local checkout
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python3 -m pip install --upgrade pip
-python3 -m pip install .
+pip install --upgrade pip
+pip install .
 ```
 
-Optional exclusion flags (repeatable) let you skip Claude-specific entities:
+### Verify the setup
+
+```bash
+cc-codex-bridge doctor
+```
+
+## Usage
+
+### Single project
+
+```bash
+cc-codex-bridge validate --project .           # check without writing
+cc-codex-bridge reconcile --dry-run --project . # preview changes
+cc-codex-bridge reconcile --dry-run --diff --project .  # preview with diffs
+cc-codex-bridge status --project .             # inspect current state
+cc-codex-bridge reconcile --project .          # apply changes
+```
+
+### All projects
+
+```bash
+cc-codex-bridge reconcile --all                # reconcile all registered projects
+cc-codex-bridge reconcile --all --dry-run      # preview
+cc-codex-bridge status --all                   # bulk status overview
+cc-codex-bridge validate --all                 # bulk validation
+```
+
+Bulk operations merge scan-discovered projects (from `~/.cc-codex-bridge/config.toml`) with previously reconciled projects from the registry.
+
+Configure scan discovery in `~/.cc-codex-bridge/config.toml`:
+
+```toml
+scan_paths = ["~/Work/projects/*"]
+exclude_paths = ["~/Work/projects/scratch"]
+```
+
+### Cleanup
+
+```bash
+cc-codex-bridge clean --project .              # remove artifacts from one project
+cc-codex-bridge uninstall                      # remove all bridge artifacts from the machine
+cc-codex-bridge uninstall --dry-run            # preview what would be removed
+```
+
+### Scheduled reconciliation (macOS)
+
+```bash
+cc-codex-bridge install-launchagent            # install LaunchAgent plist
+cc-codex-bridge print-launchagent              # preview plist without installing
+```
+
+The LaunchAgent runs `reconcile --all` every 30 minutes. Override with `--interval <seconds>`.
+
+## Exclusions
+
+Skip specific plugins, skills, agents, or commands with CLI flags (repeatable):
 
 ```bash
 cc-codex-bridge reconcile --project . \
   --exclude-plugin marketplace/plugin \
   --exclude-skill marketplace/plugin/skill \
-  --exclude-agent marketplace/plugin/agent.md
+  --exclude-agent marketplace/plugin/agent.md \
+  --exclude-command marketplace/plugin/command.md
 ```
 
-To persist exclusions per project, create `.codex/bridge.toml`:
+Persist exclusions per project in `.codex/bridge.toml`:
 
 ```toml
 [exclude]
 plugins = ["market/pirategoat-tools"]
 skills = ["market/prompt-engineer/internal-cc-only"]
 agents = ["market/prompt-engineer/reviewer.md"]
+commands = ["market/plugin/debug.md"]
 ```
 
-CLI exclusion flags override config exclusions for the same entity kind in that run.
+CLI flags override config exclusions for the same entity kind in that run.
 
-The module entrypoint also works after installation:
+## Ownership and Safety
 
-```bash
-python3 -m cc_codex_bridge reconcile --project .
-```
+The reconcile engine is conservative. It tracks which files it created and refuses to overwrite anything it did not generate.
+
+**Never modified:**
+- `AGENTS.md` (hand-authored project instructions)
+- Hand-authored `CLAUDE.md` files
+- Hand-authored `.codex/agents/*.toml` files
+- Existing non-generated skill directories or prompt files
+
+**Generator-owned (tracked in registry and state):**
+- `CLAUDE.md` (only when it is the `@AGENTS.md` shim)
+- `.codex/agents/*.toml` (generated from Claude agents)
+- `~/.codex/skills/`, `~/.codex/agents/`, `~/.codex/prompts/` (generated entries)
+- `~/.codex/AGENTS.md` (bridged from `~/.claude/CLAUDE.md`)
+
+**Safety guarantees:**
+- Files are written atomically (temp file + rename) to prevent partial reads
+- Stale artifacts are cleaned up when their source is removed
+- Reconcile is idempotent — running without source changes is a no-op
+- Content hashing detects and rejects cross-project conflicts for shared global artifacts
+- Symlinked targets are rejected to prevent writes outside expected directories
 
 ## Contributor Setup
-
-For development, use the editable install with the dev extras:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python3 -m pip install --upgrade pip
-python3 -m pip install -e ".[dev]"
-```
-
-Common verification commands:
-
-```bash
+pip install --upgrade pip
+pip install -e ".[dev]"
 pytest tests -q
-python3 -m build --sdist --wheel
-```
-
-## Run From A Raw Checkout
-
-If you need to run directly from the checkout without installing the package, use:
-
-```bash
-PYTHONPATH=src python3 -m cc_codex_bridge reconcile --project .
 ```
 
 ## Release
-
-The release workflow is triggered by version tags in the form `vX.Y.Z`.
-
-Maintainer flow:
 
 ```bash
 make release VERSION=X.Y.Z
 ```
 
-Run it from a clean `main` checkout using the repository `.venv`.
+Run from a clean `main` checkout using the repository `.venv`. Update `CHANGELOG.md` and both version declarations (`pyproject.toml`, `__init__.py`) first.
 
-That command checks version alignment, verifies the selected interpreter has `pytest` and `setuptools`, verifies the git worktree is clean, requires the current branch to be `main`, runs `pytest tests -q`, creates the annotated tag, and atomically pushes the branch plus tag. GitHub Actions then builds the release artifacts and publishes the GitHub Release.
-
-Fresh disposable Python virtualenvs on modern macOS may not include `setuptools`. If you rehearse the release flow outside the repository `.venv`, bootstrap `setuptools` in that venv before installing the repo.
-
-Update [`CHANGELOG.md`](CHANGELOG.md) and both version declarations before running it. The detailed agent-facing release guidance lives in [`AGENTS.md`](AGENTS.md).
-
-## Developer Workflow
-
-1. Update the canonical Claude Code sources that define the local setup.
-2. Make sure those assets are available in the local Claude Code environment.
-3. Run `cc-codex-bridge validate --project .`
-4. Run `cc-codex-bridge reconcile --dry-run --project .`
-5. Optionally run `cc-codex-bridge reconcile --dry-run --diff --project .`
-6. Inspect current state with `cc-codex-bridge status --project .`
-7. Run `cc-codex-bridge reconcile --project .`
-8. Use the generated Codex artifacts. Do not hand-edit them.
-
-## More Detail
-
-The package-level documentation remains in [`src/cc_codex_bridge/README.md`](src/cc_codex_bridge/README.md).
+The release workflow creates a GitHub Release with a self-contained wheelhouse bundle, `install.sh`, and `SHA256SUMS`.
 
 ## License
 
