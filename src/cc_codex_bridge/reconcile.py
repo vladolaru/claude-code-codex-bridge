@@ -1374,10 +1374,19 @@ def _plan_skill_mutations(
         registry_owned = existing_entry is not None
 
         if existing_entry is not None and existing_entry.content_hash != desired_hash:
-            # Global skills come from shared sources (plugins, user scope).
-            # When the source upgrades, any project reconciling first should
-            # update the shared skill and registry entry for all owners.
-            registry_owned = True
+            if desired.project_root in existing_entry.owners:
+                # This project already owns this entry — the shared source
+                # (plugin or user skill) upgraded.  Allow the update.
+                registry_owned = True
+            else:
+                # A different project owns this entry with different content.
+                # This is a genuine conflict (e.g., exclusion-driven name
+                # shifts producing different content at the same name).
+                raise ReconcileError(
+                    "Generated skill registry conflict for "
+                    f"{destination}: existing content hash {existing_entry.content_hash} "
+                    f"does not match desired {desired_hash}"
+                )
 
         if destination.exists() and not destination.is_dir():
             raise ReconcileError(f"Expected a skill directory but found a file: {destination}")
@@ -1732,10 +1741,19 @@ def _plan_prompt_mutations(
         registry_owned = existing_entry is not None
 
         if existing_entry is not None and existing_entry.content_hash != desired_hash:
-            # Global prompts come from shared sources (plugins, user scope).
-            # When the source changes, any project reconciling first should
-            # update the shared prompt and registry entry for all owners.
-            registry_owned = True
+            if desired.project_root in existing_entry.owners:
+                # This project already owns this entry — the shared source
+                # (plugin or user command) changed.  Allow the update.
+                registry_owned = True
+            else:
+                # A different project owns this entry with different content.
+                # This is a genuine conflict (e.g., exclusion-driven name
+                # shifts producing different content at the same name).
+                raise ReconcileError(
+                    "Generated prompt registry conflict for "
+                    f"{destination}: existing content hash {existing_entry.content_hash} "
+                    f"does not match desired {desired_hash}"
+                )
 
         if not registry_owned:
             if destination.exists() and not destination.is_symlink():

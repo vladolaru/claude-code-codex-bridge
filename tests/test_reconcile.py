@@ -334,6 +334,37 @@ def test_reconcile_shared_skill_advances_on_upgrade(
     assert "Use version B." in generated_skill.read_text()
 
 
+def test_reconcile_rejects_skill_conflict_from_non_owner(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """A non-owner project with different content at the same skill name is rejected."""
+    first_project, _ = make_project("project-a")
+    second_project, _ = make_project("project-b")
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "prompt-engineer",
+        "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    skill_path = version_dir / "skills" / "prompt-engineer" / "SKILL.md"
+    skill_path.write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nVersion A.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+
+    # Only project A reconciles with version A
+    reconcile_desired_state(_build_desired(first_project, cache_root, codex_home))
+
+    # Source changes — project B (not yet an owner) tries to reconcile with different content
+    skill_path.write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nVersion B.\n"
+    )
+    with pytest.raises(ReconcileError, match="Generated skill registry conflict"):
+        reconcile_desired_state(_build_desired(second_project, cache_root, codex_home))
+
+
 def test_reconcile_updates_shared_agent_when_plugin_upgrades(
     make_project,
     make_plugin_version,
