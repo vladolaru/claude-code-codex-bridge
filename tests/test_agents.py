@@ -528,6 +528,41 @@ def test_parse_frontmatter_lines_rejects_unsupported_yaml_runtime_shapes():
         parse_frontmatter_lines(["options: !!set {Read: null}"])
 
 
+def test_unsupported_tools_coerces_comma_separated_string():
+    """Comma-separated string is split into a list of tool names."""
+    from cc_codex_bridge.translate_agents import _unsupported_tools
+    result = _unsupported_tools("Read, Write, Edit")
+    assert result == ()
+
+
+def test_unsupported_tools_coerces_single_string():
+    """Single tool name as string is treated as a one-element list."""
+    from cc_codex_bridge.translate_agents import _unsupported_tools
+    result = _unsupported_tools("Read")
+    assert result == ()
+
+
+def test_unsupported_tools_string_detects_unsupported():
+    """Comma-separated string with unrecognized tools reports them."""
+    from cc_codex_bridge.translate_agents import _unsupported_tools
+    result = _unsupported_tools("Read, CustomTool, Write")
+    assert result == ("CustomTool",)
+
+
+def test_extract_tool_names_coerces_string():
+    """_extract_tool_names handles comma-separated string input."""
+    from cc_codex_bridge.translate_agents import _extract_tool_names
+    result = _extract_tool_names("Read, Write, Edit")
+    assert result == ("Read", "Write", "Edit")
+
+
+def test_extract_tool_names_single_string():
+    """_extract_tool_names handles single tool string."""
+    from cc_codex_bridge.translate_agents import _extract_tool_names
+    result = _extract_tool_names("Bash")
+    assert result == ("Bash",)
+
+
 def test_translate_standalone_agent_with_unsupported_tools(tmp_path: Path):
     """Standalone agents with unsupported tools produce diagnostics."""
     agents_dir = tmp_path / "agents"

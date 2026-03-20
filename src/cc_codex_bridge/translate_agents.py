@@ -315,8 +315,12 @@ def _unsupported_tools(raw_tools: object) -> tuple[str, ...]:
     """Return unsupported Claude tools after validating the frontmatter shape."""
     if raw_tools is None:
         return ()
+    if isinstance(raw_tools, str):
+        raw_tools = [t.strip() for t in raw_tools.split(",") if t.strip()]
     if not isinstance(raw_tools, list):
-        raise TranslationError(f"Agent tools must be a list, got: {type(raw_tools).__name__}")
+        raise TranslationError(
+            f"Agent tools must be a list or comma-separated string, got: {type(raw_tools).__name__}"
+        )
 
     unsupported = {
         tool
@@ -330,6 +334,8 @@ def _extract_tool_names(raw_tools: object) -> tuple[str, ...] | None:
     """Extract Claude tool names as a tuple for sandbox mode derivation."""
     if raw_tools is None:
         return None
+    if isinstance(raw_tools, str):
+        raw_tools = [t.strip() for t in raw_tools.split(",") if t.strip()]
     if not isinstance(raw_tools, list):
         return None
     return tuple(tool for tool in raw_tools if isinstance(tool, str))
