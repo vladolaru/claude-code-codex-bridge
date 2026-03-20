@@ -41,18 +41,29 @@ class GlobalPluginResourceEntry:
 
 
 @dataclass(frozen=True)
+class GlobalPromptEntry:
+    """One generated-prompt ownership record."""
+
+    content_hash: str
+    owners: tuple[Path, ...]
+
+
+@dataclass(frozen=True)
 class GlobalSkillRegistry:
-    """Validated global generated-skill, agent, and plugin resource ownership registry."""
+    """Validated global generated-skill, agent, prompt, and plugin resource ownership registry."""
 
     skills: dict[str, GlobalSkillEntry]
     projects: tuple[Path, ...] = ()
     agents: dict[str, GlobalAgentEntry] = None  # type: ignore[assignment]
+    prompts: dict[str, GlobalPromptEntry] = None  # type: ignore[assignment]
     plugin_resources: dict[str, GlobalPluginResourceEntry] = None  # type: ignore[assignment]
     version: int = GLOBAL_REGISTRY_VERSION
 
     def __post_init__(self) -> None:
         if self.agents is None:
             object.__setattr__(self, "agents", {})
+        if self.prompts is None:
+            object.__setattr__(self, "prompts", {})
         if self.plugin_resources is None:
             object.__setattr__(self, "plugin_resources", {})
 
@@ -129,6 +140,27 @@ class GlobalSkillRegistry:
                 owners=agent_owners,
             )
 
+        raw_prompts = data.get("prompts", {})
+        if not isinstance(raw_prompts, dict):
+            raise ReconcileError(f"Invalid global skill registry file: {path}")
+
+        prompts: dict[str, GlobalPromptEntry] = {}
+        for prompt_filename, raw_prompt_entry in raw_prompts.items():
+            normalized_prompt_filename = _require_prompt_filename(prompt_filename, path)
+            if not isinstance(raw_prompt_entry, dict):
+                raise ReconcileError(f"Invalid global skill registry file: {path}")
+            prompt_content_hash = _require_content_hash(raw_prompt_entry, path)
+            prompt_owners = tuple(
+                sorted(
+                    _read_owner_path_list(raw_prompt_entry, "owners", path),
+                    key=str,
+                )
+            )
+            prompts[normalized_prompt_filename] = GlobalPromptEntry(
+                content_hash=prompt_content_hash,
+                owners=prompt_owners,
+            )
+
         raw_plugin_resources = data.get("plugin_resources", {})
         if not isinstance(raw_plugin_resources, dict):
             raise ReconcileError(f"Invalid global skill registry file: {path}")
@@ -154,6 +186,7 @@ class GlobalSkillRegistry:
             skills=skills,
             projects=tuple(sorted(projects, key=str)),
             agents=agents,
+            prompts=prompts,
             plugin_resources=plugin_resources,
             version=GLOBAL_REGISTRY_VERSION,
         )
@@ -177,6 +210,13 @@ class GlobalSkillRegistry:
                 for dir_name, entry in sorted(self.plugin_resources.items())
             },
             "projects": sorted(str(p) for p in self.projects),
+            "prompts": {
+                prompt_filename: {
+                    "content_hash": entry.content_hash,
+                    "owners": [str(owner) for owner in sorted(entry.owners, key=str)],
+                }
+                for prompt_filename, entry in sorted(self.prompts.items())
+            },
             "skills": {
                 skill_name: {
                     "content_hash": entry.content_hash,
@@ -194,6 +234,14 @@ def hash_agent_file(content: str) -> str:
     encoded = content.encode("utf-8")
     digest.update(len(encoded).to_bytes(8, "big"))
     digest.update(encoded)
+    return f"sha256:{digest.hexdigest()}"
+
+
+def hash_prompt_content(content: bytes) -> str:
+    """Return the deterministic content hash for one generated prompt file."""
+    digest = hashlib.sha256()
+    digest.update(len(content).to_bytes(8, "big"))
+    digest.update(content)
     return f"sha256:{digest.hexdigest()}"
 
 
@@ -270,6 +318,22 @@ def _require_agent_filename(value: str, path: Path) -> str:
         raise ReconcileError(f"Invalid global skill registry file: {path}")
 
     if not candidate.endswith(".toml"):
+        raise ReconcileError(f"Invalid global skill registry file: {path}")
+
+    return candidate
+
+
+def _require_prompt_filename(value: str, path: Path) -> str:
+    """Validate one generated prompt .md filename."""
+    candidate = value.strip()
+    if not candidate:
+        raise ReconcileError(f"Invalid global skill registry file: {path}")
+
+    normalized = Path(candidate)
+    if normalized.is_absolute() or candidate != normalized.name or candidate in {".", ".."}:
+        raise ReconcileError(f"Invalid global skill registry file: {path}")
+
+    if not candidate.endswith(".md"):
         raise ReconcileError(f"Invalid global skill registry file: {path}")
 
     return candidate

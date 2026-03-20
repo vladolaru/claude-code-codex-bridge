@@ -12,8 +12,10 @@ from cc_codex_bridge.registry import (
     GLOBAL_REGISTRY_FILENAME,
     GlobalAgentEntry,
     GlobalPluginResourceEntry,
+    GlobalPromptEntry,
     GlobalSkillRegistry,
     hash_agent_file,
+    hash_prompt_content,
 )
 
 
@@ -182,3 +184,43 @@ def test_registry_rejects_plugin_resource_dir_name_with_toml_suffix(tmp_path: Pa
 
     with pytest.raises(ReconcileError):
         GlobalSkillRegistry.from_path(path)
+
+
+def test_registry_round_trips_prompts(tmp_path):
+    """Registry serializes and deserializes prompts section."""
+    content_hash = hash_prompt_content(b"---\ndescription: test\n---\n\nDo things.\n")
+    owner = Path("/a/project")
+    registry = GlobalSkillRegistry(
+        skills={},
+        prompts={
+            "review.md": GlobalPromptEntry(
+                content_hash=content_hash,
+                owners=(owner,),
+            ),
+        },
+    )
+    json_str = registry.to_json()
+    path = tmp_path / "registry.json"
+    path.write_text(json_str)
+
+    loaded = GlobalSkillRegistry.from_path(path)
+    assert loaded is not None
+    assert "review.md" in loaded.prompts
+    assert loaded.prompts["review.md"].content_hash == content_hash
+    assert loaded.prompts["review.md"].owners == (owner,)
+
+
+def test_registry_without_prompts_defaults_empty(tmp_path):
+    """Old registries without prompts key parse with empty prompts dict."""
+    path = tmp_path / "registry.json"
+    path.write_text(json.dumps({
+        "version": 1,
+        "skills": {},
+        "agents": {},
+        "plugin_resources": {},
+        "projects": [],
+    }) + "\n")
+
+    loaded = GlobalSkillRegistry.from_path(path)
+    assert loaded is not None
+    assert loaded.prompts == {}
