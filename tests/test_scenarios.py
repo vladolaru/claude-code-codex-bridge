@@ -1048,12 +1048,12 @@ def test_uninstall_skips_vanished_project_cleans_rest(make_project, tmp_path: Pa
 
 
 # ===========================================================================
-# reconcile-all scenario tests
+# reconcile --all scenario tests
 # ===========================================================================
 
 
 def test_reconcile_all_reconciles_registered_projects(make_project, tmp_path: Path):
-    """Two projects reconciled individually, then reconcile-all updates both."""
+    """Two projects reconciled individually, then reconcile --all updates both."""
     project_a, _ = make_project("project-a")
     project_b, _ = make_project("project-b")
     claude_home = tmp_path / "claude-home"
@@ -1075,8 +1075,8 @@ def test_reconcile_all_reconciles_registered_projects(make_project, tmp_path: Pa
     assert str(project_a) in reg["projects"]
     assert str(project_b) in reg["projects"]
 
-    # Run reconcile-all
-    exit_code = cli.main(["reconcile-all", "--codex-home", str(codex_home)])
+    # Run reconcile --all
+    exit_code = cli.main(["reconcile", "--all", "--codex-home", str(codex_home)])
     assert exit_code == 0
 
     # Both projects have artifacts (state file confirms reconcile ran)
@@ -1085,7 +1085,7 @@ def test_reconcile_all_reconciles_registered_projects(make_project, tmp_path: Pa
 
 
 def test_reconcile_all_handles_missing_project(make_project, tmp_path: Path):
-    """reconcile-all reports error for deleted project, reconciles the rest."""
+    """reconcile --all reports error for deleted project, reconciles the rest."""
     import shutil as shutil_mod
 
     project_a, _ = make_project("project-a")
@@ -1102,8 +1102,8 @@ def test_reconcile_all_handles_missing_project(make_project, tmp_path: Path):
     # Delete project A
     shutil_mod.rmtree(project_a)
 
-    # reconcile-all should report error but exit 1 (partial failure)
-    exit_code = cli.main(["reconcile-all", "--codex-home", str(codex_home)])
+    # reconcile --all should report error but exit 1 (partial failure)
+    exit_code = cli.main(["reconcile", "--all", "--codex-home", str(codex_home)])
     assert exit_code == 1
 
     # Project B was still reconciled successfully

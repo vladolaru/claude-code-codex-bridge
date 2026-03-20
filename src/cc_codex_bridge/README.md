@@ -220,7 +220,7 @@ The normal workflow is:
 To reconcile all previously reconciled projects at once:
 
 ```bash
-cc-codex-bridge reconcile-all
+cc-codex-bridge reconcile --all
 ```
 
 If you do not want to install the console script, either install the package and use `python3 -m cc_codex_bridge ...` or run from a raw checkout with `PYTHONPATH=src`.
@@ -261,7 +261,7 @@ Install the global LaunchAgent plist into `~/Library/LaunchAgents/`:
 cc-codex-bridge install-launchagent
 ```
 
-The global LaunchAgent runs `reconcile-all` every 30 minutes (1800 seconds).
+The global LaunchAgent runs `reconcile --all` every 30 minutes (1800 seconds).
 
 Optional scheduling overrides:
 

@@ -311,7 +311,7 @@ Allowed outcomes:
 - it exactly matches `@AGENTS.md` plus a trailing newline
 - it is a symlink to `AGENTS.md`
 
-When `AGENTS.md` does not exist but `CLAUDE.md` is a regular file, the outcome is `bootstrap`. Only `reconcile` (non-dry-run) and `reconcile-all` execute the bootstrap, which copies `CLAUDE.md` to `AGENTS.md` and replaces `CLAUDE.md` with the shim. Read-only commands report that bootstrap is required and exit without mutating files.
+When `AGENTS.md` does not exist but `CLAUDE.md` is a regular file, the outcome is `bootstrap`. Only `reconcile` (non-dry-run) and `reconcile --all` execute the bootstrap, which copies `CLAUDE.md` to `AGENTS.md` and replaces `CLAUDE.md` with the shim. Read-only commands report that bootstrap is required and exit without mutating files.
 
 Anything else is treated as hand-authored and causes failure.
 
@@ -598,15 +598,23 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
   - support `--dry-run` for preview
   - support `--dry-run --json` for structured output
   - support `--launchagents-dir` override
-- `reconcile-all`
-  - read the projects list from the global registry
-  - run the full discover-translate-reconcile pipeline for each registered project using default paths
-  - skip inaccessible or invalid projects with an error entry in the report
-  - exit code 0 if all succeed, 1 if any error
-  - support `--dry-run` for preview
-  - support `--json` for structured output
+Pipeline commands (`reconcile`, `validate`, `status`) support `--all` to operate on all projects from the registry and scan config:
 
-Pipeline commands (`validate`, `status`, `reconcile`) support:
+- `reconcile --all`: run the full discover-translate-reconcile pipeline for each project
+- `validate --all`: run discovery and validation for each project (always dry-run)
+- `status --all`: show sync state for each project (always dry-run)
+
+`--all` behavior:
+
+- reads the projects list from the global registry and merges with scan-discovered projects
+- skips inaccessible or invalid projects with an error entry in the report
+- exit code 0 if all succeed, 1 if any error
+- supports `--dry-run` for preview (`reconcile --all` only; `validate` and `status` are always dry-run)
+- supports `--json` for structured output (`reconcile --all` and `status --all`)
+- `--all` is mutually exclusive with `--project` (runtime check)
+- scan discovery results are included in both text and JSON output when scan config exists
+
+Pipeline commands (`validate`, `status`, `reconcile`) also support:
 
 - `--claude-home` to override the `~/.claude` base path for user-level discovery
 - `--exclude-plugin marketplace/plugin`
@@ -621,12 +629,12 @@ All exclusion flags are repeatable. `.codex/bridge.toml` can define persistent e
 ### LaunchAgent commands
 
 - `print-launchagent`
-  - render the global reconcile-all LaunchAgent plist to stdout
+  - render the global `reconcile --all` LaunchAgent plist to stdout
 - `install-launchagent`
   - write the global plist into a LaunchAgents directory and print the `launchctl bootstrap` next step
   - warn about existing per-project plists with removal commands
 
-LaunchAgent commands have their own parser and do not accept pipeline flags (`--project`, `--cache-dir`, `--claude-home`, `--codex-home`). They produce a global plist that runs `reconcile-all`.
+LaunchAgent commands have their own parser and do not accept pipeline flags (`--project`, `--cache-dir`, `--claude-home`, `--codex-home`). They produce a global plist that runs `reconcile --all`.
 
 ### CLI invariants
 
@@ -644,7 +652,7 @@ LaunchAgent support lives in `src/cc_codex_bridge/install_launchagent.py`.
 Current design:
 
 - macOS scheduling is supported through `launchd`
-- a single global LaunchAgent runs `reconcile-all` to reconcile all registered projects
+- a single global LaunchAgent runs `reconcile --all` to reconcile all registered projects
 - the global plist label is `com.openai.codex-bridge.reconcile-all`
 - the default interval is 1800 seconds (30 minutes)
 - the plist uses `RunAtLoad` and `StartInterval`
@@ -728,7 +736,7 @@ The suite currently verifies:
 - plugin resource ownership tracking in the global registry with multi-project ownership and content hash fast path
 - plugin resource cleanup in clean and uninstall commands
 - project-level clean and machine-level uninstall
-- multi-project reconcile-all with missing project error handling
+- multi-project reconcile --all with missing project error handling
 - global registry projects list round-tripping and backwards compatibility
 - doctor reporting and release-bundle generation
 

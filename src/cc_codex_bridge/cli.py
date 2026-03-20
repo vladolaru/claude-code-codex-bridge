@@ -50,7 +50,6 @@ from cc_codex_bridge.translate_skills import format_skill_validation_diagnostics
 
 PIPELINE_COMMANDS = {"reconcile", "validate", "status"}
 LAUNCHAGENT_COMMANDS = {"print-launchagent", "install-launchagent"}
-GLOBAL_COMMANDS = {"reconcile-all"}
 UTILITY_COMMANDS = {"doctor"}
 
 
@@ -141,23 +140,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Override the LaunchAgents directory to scan.",
     )
-    reconcile_all_parser = subparsers.add_parser("reconcile-all")
-    reconcile_all_parser.add_argument(
-        "--codex-home",
-        type=Path,
-        help="Override the Codex home path (mainly for testing).",
-    )
-    reconcile_all_parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Compute reconcile changes without writing.",
-    )
-    reconcile_all_parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit structured JSON output.",
-    )
-
     doctor_parser = subparsers.add_parser("doctor")
     doctor_parser.add_argument(
         "--claude-home",
@@ -186,6 +168,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     for pipeline_parser in (reconcile_parser, validate_parser, status_parser):
         pipeline_parser.add_argument(
+            "--all",
+            action="store_true",
+            default=False,
+            help="Operate on all projects from registry and scan config.",
+        )
+        pipeline_parser.add_argument(
             "--exclude-plugin",
             action="append",
             default=None,
@@ -209,6 +197,11 @@ def build_parser() -> argparse.ArgumentParser:
             default=None,
             help="Exclude one command from sync (repeatable; name, scope/name, or marketplace/plugin/name).",
         )
+    reconcile_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit structured JSON output (--all mode only).",
+    )
     status_parser.add_argument(
         "--json",
         action="store_true",
@@ -264,9 +257,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "uninstall":
         return _handle_uninstall_command(args)
 
-    if args.command in GLOBAL_COMMANDS:
-        return _handle_reconcile_all_command(args)
-
     if args.command in LAUNCHAGENT_COMMANDS:
         return _handle_launchagent_command(args)
 
@@ -286,6 +276,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.command not in PIPELINE_COMMANDS:
         print(f"Error: unsupported command `{args.command}`", file=sys.stderr)
         return 1
+
+    if getattr(args, "all", False):
+        if args.project:
+            print("Error: --all and --project are mutually exclusive", file=sys.stderr)
+            return 1
+        return _handle_all_command(args)
+
+    if args.command == "reconcile" and getattr(args, "json", False):
+        print("Error: --json is only supported with --all for reconcile", file=sys.stderr)
+        return 1
+
     if args.command == "reconcile" and args.diff and not args.dry_run:
         print("Error: --diff requires --dry-run for reconcile", file=sys.stderr)
         return 1
@@ -490,59 +491,88 @@ def _handle_uninstall_command(args: argparse.Namespace) -> int:
     return 1 if report.has_errors else 0
 
 
-def _handle_reconcile_all_command(args: argparse.Namespace) -> int:
-    """Handle the reconcile-all command."""
-    if args.json and not args.dry_run:
-        # JSON output is allowed in both modes but let's keep it flexible
-        pass
+def _handle_all_command(args: argparse.Namespace) -> int:
+    """Handle --all mode for reconcile, validate, and status commands."""
+    # validate and status always run in dry-run mode
+    dry_run = True if args.command in ("validate", "status") else getattr(args, "dry_run", False)
+    use_json = getattr(args, "json", False)
 
     try:
         from cc_codex_bridge.reconcile import reconcile_all
         report = reconcile_all(
             codex_home=args.codex_home,
-            dry_run=args.dry_run,
+            dry_run=dry_run,
         )
     except (ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    if args.json:
-        print(_format_reconcile_all_json(report))
+    if use_json:
+        print(_format_all_json(report))
     else:
-        print(_format_reconcile_all_report(report, dry_run=args.dry_run))
+        print(_format_all_report(report, dry_run=dry_run))
 
     has_errors = len(report.errors) > 0
     return 1 if has_errors else 0
 
 
-def _format_reconcile_all_json(report) -> str:
-    """Render reconcile-all report as JSON."""
-    payload = {
-        "projects": [
-            {
-                "root": str(r.project_root),
-                "changes": len(r.report.changes),
-                "applied": r.report.applied,
-            }
-            for r in report.results
-        ],
-        "errors": [
-            {
-                "root": str(e.project_root),
-                "error": e.error,
-            }
-            for e in report.errors
-        ],
-    }
+def _format_all_json(report) -> str:
+    """Render --all report as JSON, including scan info when available."""
+    payload: dict[str, object] = {}
+
+    if report.scan_result is not None:
+        payload["scan"] = {
+            "bridgeable": [str(p) for p in report.scan_result.bridgeable],
+            "not_bridgeable": [
+                {"path": str(c.path), "reason": c.filter_reason or c.status}
+                for c in report.scan_result.not_bridgeable
+            ],
+            "filtered": [
+                {"path": str(c.path), "reason": c.filter_reason or c.status}
+                for c in report.scan_result.filtered
+            ],
+        }
+
+    payload["projects"] = [
+        {
+            "root": str(r.project_root),
+            "changes": len(r.report.changes),
+            "applied": r.report.applied,
+        }
+        for r in report.results
+    ]
+    payload["errors"] = [
+        {
+            "root": str(e.project_root),
+            "error": e.error,
+        }
+        for e in report.errors
+    ]
     return json.dumps(payload, indent=2, sort_keys=True)
 
 
-def _format_reconcile_all_report(report, *, dry_run: bool = False) -> str:
-    """Render reconcile-all report as human-readable text."""
+def _format_all_report(report, *, dry_run: bool = False) -> str:
+    """Render --all report as human-readable text, including scan summary."""
     lines: list[str] = []
 
     if dry_run:
         lines.append("Dry run — no changes applied.")
+        lines.append("")
+
+    # Scan summary (only when scan config exists and produced results)
+    scan = report.scan_result
+    if scan is not None and (scan.bridgeable or scan.not_bridgeable or scan.filtered):
+        total = len(scan.bridgeable) + len(scan.not_bridgeable) + len(scan.filtered)
+        lines.append(
+            f"Scan: {total} candidates, "
+            f"{len(scan.bridgeable)} bridgeable, "
+            f"{len(scan.not_bridgeable)} not bridgeable, "
+            f"{len(scan.filtered)} filtered"
+        )
+        for c in scan.filtered:
+            lines.append(f"  SKIP: {c.path} ({c.filter_reason})")
+        for c in scan.not_bridgeable:
+            lines.append(f"  NOTE: {c.path} ({c.filter_reason})")
         lines.append("")
 
     for r in report.results:
@@ -694,7 +724,7 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
     if per_project_plists:
         print("")
         print("WARNING: Found existing per-project LaunchAgent plists.")
-        print("These are no longer needed with the global reconcile-all plist.")
+        print("These are no longer needed with the global reconcile --all plist.")
         print("Remove them with:")
         for plist_path in per_project_plists:
             print(f"  launchctl bootout gui/$(id -u) {plist_path} && rm {plist_path}")

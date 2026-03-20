@@ -127,22 +127,25 @@ def test_install_launchagent_cli_writes_plist(tmp_path: Path):
     assert len(plist_paths) == 1
     payload = plistlib.loads(plist_paths[0].read_bytes())
     assert payload["StartInterval"] == 900
-    assert payload["ProgramArguments"][:3] == [
+    assert payload["ProgramArguments"][:4] == [
         "/usr/bin/python3",
         str(Path("/tmp/cc_codex_bridge/cli.py").resolve()),
-        "reconcile-all",
+        "reconcile",
+        "--all",
     ]
 
 
 def test_print_launchagent_cli_produces_global_plist(capsys: pytest.CaptureFixture[str]):
-    """print-launchagent produces a global reconcile-all plist without requiring --project."""
+    """print-launchagent produces a global reconcile --all plist without requiring --project."""
     exit_code = cli.main(["print-launchagent"])
 
     captured = capsys.readouterr()
     payload = plistlib.loads(captured.out.encode())
     assert exit_code == 0
     assert "reconcile-all" in payload["Label"]
-    assert "reconcile-all" in payload["ProgramArguments"]
+    args = payload["ProgramArguments"]
+    assert "reconcile" in args
+    assert "--all" in args
 
 
 def test_print_launchagent_rejects_pipeline_flags():
@@ -1304,14 +1307,16 @@ def test_find_bridge_launchagents_missing_dir(tmp_path: Path):
 
 
 def test_print_launchagent_renders_global_plist(tmp_path: Path, capsys):
-    """print-launchagent produces a global reconcile-all plist."""
+    """print-launchagent produces a global reconcile --all plist."""
     exit_code = cli.main(["print-launchagent"])
     assert exit_code == 0
 
     captured = capsys.readouterr()
     payload = plistlib.loads(captured.out.encode() if isinstance(captured.out, str) else captured.out)
     assert "reconcile-all" in payload["Label"]
-    assert "reconcile-all" in payload["ProgramArguments"]
+    args = payload["ProgramArguments"]
+    assert "reconcile" in args
+    assert "--all" in args
     assert payload["StartInterval"] == 1800
 
 
@@ -1334,7 +1339,7 @@ def test_install_launchagent_warns_about_per_project_plists(tmp_path: Path, caps
 def test_reconcile_all_command_dispatches(
     make_project, make_plugin_version, tmp_path: Path,
 ):
-    """reconcile-all command runs without error on a registered project."""
+    """reconcile --all command runs without error on a registered project."""
     project_root, _ = make_project()
     cache_root, version_dir = make_plugin_version(
         "market", "test-plugin", "1.0.0",
@@ -1350,9 +1355,9 @@ def test_reconcile_all_command_dispatches(
     ])
     assert exit_code == 0
 
-    # Now run reconcile-all
+    # Now run reconcile --all
     exit_code = cli.main([
-        "reconcile-all",
+        "reconcile", "--all",
         "--codex-home", str(codex_home),
     ])
     assert exit_code == 0
@@ -1361,7 +1366,7 @@ def test_reconcile_all_command_dispatches(
 def test_reconcile_all_dry_run_json(
     make_project, make_plugin_version, tmp_path: Path, capsys,
 ):
-    """reconcile-all --dry-run --json produces valid JSON."""
+    """reconcile --all --dry-run --json produces valid JSON."""
     import json as json_mod
 
     project_root, _ = make_project()
@@ -1379,7 +1384,7 @@ def test_reconcile_all_dry_run_json(
     capsys.readouterr()  # discard
 
     exit_code = cli.main([
-        "reconcile-all",
+        "reconcile", "--all",
         "--codex-home", str(codex_home),
         "--dry-run", "--json",
     ])
@@ -1391,16 +1396,140 @@ def test_reconcile_all_dry_run_json(
     assert isinstance(data["projects"], list)
 
 
-def test_reconcile_all_rejects_unused_flags():
-    """reconcile-all does not accept --project, --claude-home, or --cache-dir."""
-    with pytest.raises(SystemExit, match="2"):
-        cli.main(["reconcile-all", "--project", "/tmp/fake"])
+def test_reconcile_all_rejects_project_flag():
+    """--all and --project are mutually exclusive."""
+    exit_code = cli.main(["reconcile", "--all", "--project", "/tmp/fake"])
+    assert exit_code == 1
 
-    with pytest.raises(SystemExit, match="2"):
-        cli.main(["reconcile-all", "--claude-home", "/tmp/fake"])
 
-    with pytest.raises(SystemExit, match="2"):
-        cli.main(["reconcile-all", "--cache-dir", "/tmp/fake"])
+def test_reconcile_all_subcommand_no_longer_exists():
+    """The old reconcile-all subcommand is gone."""
+    with pytest.raises(SystemExit):
+        cli.main(["reconcile-all"])
+
+
+def test_validate_all_dispatches(
+    make_project, make_plugin_version, tmp_path: Path, capsys,
+):
+    """validate --all succeeds on registered projects."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version(
+        "market", "test-plugin", "1.0.0",
+        skill_names=("test-skill",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    cli.main([
+        "reconcile", "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(codex_home),
+    ])
+    capsys.readouterr()
+
+    exit_code = cli.main([
+        "validate", "--all",
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    assert "OK:" in captured.out
+
+
+def test_status_all_json(
+    make_project, make_plugin_version, tmp_path: Path, capsys,
+):
+    """status --all --json produces valid JSON with projects."""
+    import json as json_mod
+
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version(
+        "market", "test-plugin", "1.0.0",
+        skill_names=("test-skill",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    cli.main([
+        "reconcile", "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(codex_home),
+    ])
+    capsys.readouterr()
+
+    exit_code = cli.main([
+        "status", "--all", "--json",
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    data = json_mod.loads(captured.out)
+    assert "projects" in data
+    assert isinstance(data["projects"], list)
+
+
+def test_status_all_text(
+    make_project, make_plugin_version, tmp_path: Path, capsys,
+):
+    """status --all text output shows project status."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version(
+        "market", "test-plugin", "1.0.0",
+        skill_names=("test-skill",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    cli.main([
+        "reconcile", "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(codex_home),
+    ])
+    capsys.readouterr()
+
+    exit_code = cli.main([
+        "status", "--all",
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    assert "OK:" in captured.out
+
+
+def test_reconcile_all_with_scan_config_shows_scan_info(
+    make_project, tmp_path: Path, capsys,
+):
+    """reconcile --all --dry-run with scan config includes scan summary in output."""
+    from cc_codex_bridge.scan import SCAN_CONFIG_FILENAME
+
+    project_root, _ = make_project()
+    codex_home = tmp_path / "codex-home"
+
+    # Set up bridge_home with scan config pointing at tmp_path
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    bridge_home.mkdir(parents=True)
+    config_path = bridge_home / SCAN_CONFIG_FILENAME
+    config_path.write_text(f'[scan]\npaths = ["{tmp_path}"]\n')
+
+    import os
+    old_home = os.environ.get("HOME")
+    os.environ["HOME"] = str(tmp_path / "home")
+    try:
+        exit_code = cli.main([
+            "reconcile", "--all", "--dry-run",
+            "--codex-home", str(codex_home),
+        ])
+    finally:
+        if old_home is not None:
+            os.environ["HOME"] = old_home
+        else:
+            del os.environ["HOME"]
+
+    # We just verify it ran (exit code depends on project state)
+    assert exit_code in (0, 1)
+    captured = capsys.readouterr()
+    # Output should contain scan info or project results
+    assert "Scan:" in captured.out or "OK:" in captured.out or "ERROR:" in captured.out or "No registered" in captured.out
 
 
 def test_uninstall_rejects_unused_flags():

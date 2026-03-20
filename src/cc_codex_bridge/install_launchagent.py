@@ -89,7 +89,7 @@ def build_global_launchagent_plist(
     label: str | None = None,
     logs_dir: str | Path | None = None,
 ) -> bytes:
-    """Render a global LaunchAgent plist that periodically runs reconcile-all."""
+    """Render a global LaunchAgent plist that periodically runs reconcile --all."""
     if interval_seconds <= 0:
         raise ReconcileError("LaunchAgent interval must be a positive integer")
 
@@ -103,7 +103,8 @@ def build_global_launchagent_plist(
     program_arguments = [
         python_path,
         cli_script_path,
-        "reconcile-all",
+        "reconcile",
+        "--all",
     ]
 
     payload: dict[str, Any] = {

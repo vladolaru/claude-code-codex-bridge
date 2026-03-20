@@ -709,7 +709,7 @@ def clean_project(
 
 @dataclass(frozen=True)
 class ReconcileAllProjectResult:
-    """Result of reconciling one project in a reconcile-all run."""
+    """Result of reconciling one project in a reconcile --all run."""
 
     project_root: Path
     report: ReconcileReport
@@ -717,7 +717,7 @@ class ReconcileAllProjectResult:
 
 @dataclass(frozen=True)
 class ReconcileAllError:
-    """One project that failed during reconcile-all."""
+    """One project that failed during reconcile --all."""
 
     project_root: Path
     error: str
@@ -725,7 +725,7 @@ class ReconcileAllError:
 
 @dataclass(frozen=True)
 class ReconcileAllReport:
-    """Full reconcile-all result."""
+    """Full reconcile --all result."""
 
     results: tuple[ReconcileAllProjectResult, ...]
     errors: tuple[ReconcileAllError, ...]
