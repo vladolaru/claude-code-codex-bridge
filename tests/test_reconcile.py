@@ -1432,44 +1432,39 @@ def test_reconcile_rejects_symlinked_global_instructions(
         reconcile_desired_state(desired)
 
 
-def test_build_project_desired_state_short_circuits_on_agent_diagnostics(
+def test_build_project_desired_state_raises_on_broken_skill_with_accepted_agent(
     make_project,
     make_plugin_version,
     tmp_path: Path,
 ):
-    """Agent diagnostics are returned before skill translation runs.
+    """Unrecognized agent tools are accepted, so broken skills surface their own errors.
 
-    If skill translation would raise (e.g. missing sibling reference),
-    the diagnostics must still be returned so callers can report the
-    unsupported-tools issue instead of a skill error.
+    Previously agent diagnostics would short-circuit before skill translation.
+    Now that all tools are accepted, skill errors are raised directly.
     """
     from cc_codex_bridge.reconcile import build_project_desired_state
 
     project_root, _ = make_project()
     cache_root, version_dir = make_plugin_version(
         "market", "demo", "1.0.0",
-        agent_names=("broken-agent",),
+        agent_names=("mixed-agent",),
         skill_names=("broken-skill",),
     )
-    # Agent with unsupported tool → diagnostic
-    (version_dir / "agents" / "broken-agent.md").write_text(
-        "---\nname: broken-agent\ndescription: Review\ntools:\n  - NotebookEdit\n---\n\nPrompt.\n"
+    # Agent with unrecognized tool → now accepted
+    (version_dir / "agents" / "mixed-agent.md").write_text(
+        "---\nname: mixed-agent\ndescription: Review\ntools:\n  - NotebookEdit\n---\n\nPrompt.\n"
     )
-    # Skill referencing a missing sibling → would raise TranslationError
+    # Skill referencing a missing sibling → raises TranslationError
     (version_dir / "skills" / "broken-skill" / "SKILL.md").write_text(
-        "---\nname: broken-skill\ndescription: Broken\nreferences:\n  sibling: ../nonexistent/\n---\n\nBody.\n"
+        "---\nname: broken-skill\ndescription: Broken\n---\n\nSee ../nonexistent/ for details.\n"
     )
 
-    build = build_project_desired_state(
-        project_root,
-        codex_home=tmp_path / "codex-home",
-        cache_dir=cache_root,
-    )
-
-    # Should return diagnostics, not raise
-    assert len(build.diagnostics) == 1
-    assert build.diagnostics[0].agent_name == "broken-agent"
-    assert build.desired_state is None
+    with pytest.raises(TranslationError, match="missing sibling"):
+        build_project_desired_state(
+            project_root,
+            codex_home=tmp_path / "codex-home",
+            cache_dir=cache_root,
+        )
 
 
 def test_build_project_resolves_same_stem_agent_collision_with_alt_suffix(

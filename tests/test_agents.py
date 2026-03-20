@@ -319,17 +319,17 @@ def test_translate_installed_agents_requires_name_and_description(make_plugin_ve
         translate_installed_agents(discover_latest_plugins(cache_root))
 
 
-def test_translate_installed_agents_reports_unsupported_tools(make_plugin_version):
-    """Unsupported Claude tools become explicit diagnostics and strict translation errors."""
+def test_translate_installed_agents_accepts_unrecognized_tools(make_plugin_version):
+    """Unrecognized Claude tools are accepted — sandbox mode is derived from recognized tools only."""
     cache_root, version_dir = make_plugin_version(
         "market",
         "test-plugin",
         "1.0.0",
-        agent_names=("broken",),
+        agent_names=("mixed-tools",),
     )
-    (version_dir / "agents" / "broken.md").write_text(
+    (version_dir / "agents" / "mixed-tools.md").write_text(
         "---\n"
-        "name: broken\n"
+        "name: mixed-tools\n"
         "description: Review\n"
         "tools:\n"
         "  - Read\n"
@@ -341,17 +341,10 @@ def test_translate_installed_agents_reports_unsupported_tools(make_plugin_versio
 
     result = translate_installed_agents_with_diagnostics(discover_latest_plugins(cache_root))
 
-    assert result.agents == ()
-    assert len(result.diagnostics) == 1
-    assert result.diagnostics[0].source_path == version_dir / "agents" / "broken.md"
-    assert result.diagnostics[0].agent_name == "broken"
-    assert result.diagnostics[0].unsupported_tools == ("NotebookEdit",)
-    assert "unsupported Claude tools: NotebookEdit" in format_agent_translation_diagnostics(
-        result.diagnostics
-    )
-
-    with pytest.raises(TranslationError, match="unsupported Claude tools: NotebookEdit"):
-        translate_installed_agents(discover_latest_plugins(cache_root))
+    assert len(result.agents) == 1
+    assert result.diagnostics == ()
+    # sandbox_mode derived from Read + Bash (write tool present)
+    assert result.agents[0].sandbox_mode == "workspace-write"
 
 
 def test_assign_agent_names_handles_same_stem_across_marketplaces(make_plugin_version):
@@ -542,11 +535,22 @@ def test_unsupported_tools_coerces_single_string():
     assert result == ()
 
 
-def test_unsupported_tools_string_detects_unsupported():
-    """Comma-separated string with unrecognized tools reports them."""
+def test_unsupported_tools_accepts_unrecognized():
+    """Unrecognized tool names are silently accepted."""
     from cc_codex_bridge.translate_agents import _unsupported_tools
     result = _unsupported_tools("Read, CustomTool, Write")
-    assert result == ("CustomTool",)
+    assert result == ()
+
+
+def test_unsupported_tools_accepts_mcp_tools():
+    """MCP tool names are silently accepted."""
+    from cc_codex_bridge.translate_agents import _unsupported_tools
+    result = _unsupported_tools([
+        "Read", "Write",
+        "mcp__plugin_context-a8c_context-a8c__context-a8c-load-provider",
+        "mcp__plugin_context-a8c_context-a8c__context-a8c-execute-tool",
+    ])
+    assert result == ()
 
 
 def test_extract_tool_names_coerces_string():
@@ -563,19 +567,20 @@ def test_extract_tool_names_single_string():
     assert result == ("Bash",)
 
 
-def test_translate_standalone_agent_with_unsupported_tools(tmp_path: Path):
-    """Standalone agents with unsupported tools produce diagnostics."""
+def test_translate_standalone_agent_accepts_unrecognized_tools(tmp_path: Path):
+    """Standalone agents with unrecognized tools translate successfully."""
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
-    (agents_dir / "broken.md").write_text(
-        "---\nname: broken\ndescription: Review\ntools:\n  - Read\n  - NotebookEdit\n---\n\nPrompt.\n"
+    (agents_dir / "mixed.md").write_text(
+        "---\nname: mixed\ndescription: Review\ntools:\n  - Read\n  - NotebookEdit\n---\n\nPrompt.\n"
     )
 
-    result = translate_standalone_agents((agents_dir / "broken.md",), scope="user")
+    result = translate_standalone_agents((agents_dir / "mixed.md",), scope="user")
 
-    assert result.agents == ()
-    assert len(result.diagnostics) == 1
-    assert result.diagnostics[0].unsupported_tools == ("NotebookEdit",)
+    assert len(result.agents) == 1
+    assert result.diagnostics == ()
+    # Only Read is recognized → read-only sandbox
+    assert result.agents[0].sandbox_mode == "read-only"
 
 
 def test_translate_standalone_agent_empty_input():

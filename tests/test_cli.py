@@ -313,18 +313,18 @@ def test_validate_surfaces_non_utf8_claude_md_as_user_facing_error(
     assert "Unable to decode CLAUDE.md shim candidate as UTF-8" in captured.err
 
 
-def test_validate_fails_for_unsupported_agent_tools(make_project, make_plugin_version, capsys):
-    """Unsupported Claude tools block validation with an explicit diagnostic."""
+def test_validate_succeeds_with_unrecognized_agent_tools(make_project, make_plugin_version, capsys):
+    """Unrecognized Claude tools are accepted — validation succeeds."""
     project_root, _agents_md = make_project()
     cache_root, version_dir = make_plugin_version(
         "market",
         "prompt-engineer",
         "1.0.0",
-        agent_names=("broken",),
+        agent_names=("mixed-tools",),
     )
-    (version_dir / "agents" / "broken.md").write_text(
+    (version_dir / "agents" / "mixed-tools.md").write_text(
         "---\n"
-        "name: broken\n"
+        "name: mixed-tools\n"
         "description: Review\n"
         "tools:\n"
         "  - Read\n"
@@ -337,28 +337,26 @@ def test_validate_fails_for_unsupported_agent_tools(make_project, make_plugin_ve
         ["validate", "--project", str(project_root), "--cache-dir", str(cache_root)]
     )
 
-    captured = capsys.readouterr()
-    assert exit_code == 1
-    assert "unsupported Claude tools: NotebookEdit" in captured.err
+    assert exit_code == 0
 
 
-def test_reconcile_fails_before_writing_for_unsupported_agent_tools(
+def test_reconcile_succeeds_with_unrecognized_agent_tools(
     make_project,
     make_plugin_version,
     tmp_path: Path,
     capsys,
 ):
-    """Unsupported Claude tools block reconcile before any outputs are written."""
+    """Unrecognized Claude tools are accepted — reconcile proceeds."""
     project_root, _agents_md = make_project()
     cache_root, version_dir = make_plugin_version(
         "market",
         "prompt-engineer",
         "1.0.0",
-        agent_names=("broken",),
+        agent_names=("mixed-tools",),
     )
-    (version_dir / "agents" / "broken.md").write_text(
+    (version_dir / "agents" / "mixed-tools.md").write_text(
         "---\n"
-        "name: broken\n"
+        "name: mixed-tools\n"
         "description: Review\n"
         "tools:\n"
         "  - NotebookEdit\n"
@@ -379,11 +377,9 @@ def test_reconcile_fails_before_writing_for_unsupported_agent_tools(
         ]
     )
 
-    captured = capsys.readouterr()
-    assert exit_code == 1
-    assert "unsupported Claude tools: NotebookEdit" in captured.err
-    assert not (project_root / ".codex").exists()
-    assert not codex_home.exists()
+    assert exit_code == 0
+    # Agent was translated — .toml file exists
+    assert (codex_home / "agents" / "mixed-tools.toml").exists()
 
 
 def test_status_surfaces_os_errors_as_user_facing_errors(
@@ -427,23 +423,23 @@ def test_status_surfaces_os_errors_as_user_facing_errors(
     assert "Error: boom" in captured.err
 
 
-def test_status_json_reports_invalid_translation_diagnostics(
+def test_status_json_succeeds_with_unrecognized_tools(
     make_project,
     make_plugin_version,
     tmp_path: Path,
     capsys,
 ):
-    """`status --json` reports invalid agent translation state instead of pending changes."""
+    """`status --json` reports pending_changes when agent has unrecognized tools."""
     project_root, _agents_md = make_project()
     cache_root, version_dir = make_plugin_version(
         "market",
         "prompt-engineer",
         "1.0.0",
-        agent_names=("broken",),
+        agent_names=("mixed-tools",),
     )
-    (version_dir / "agents" / "broken.md").write_text(
+    (version_dir / "agents" / "mixed-tools.md").write_text(
         "---\n"
-        "name: broken\n"
+        "name: mixed-tools\n"
         "description: Review\n"
         "tools:\n"
         "  - NotebookEdit\n"
@@ -468,17 +464,8 @@ def test_status_json_reports_invalid_translation_diagnostics(
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
     assert exit_code == 0
-    assert payload["status"] == "invalid"
-    assert payload["pending_change_count"] == 0
-    assert payload["diagnostics"] == [
-        {
-            "agent_name": "broken",
-            "kind": "unsupported_agent_tools",
-            "message": f"{version_dir / 'agents' / 'broken.md'}: unsupported Claude tools: NotebookEdit",
-            "source_path": str(version_dir / "agents" / "broken.md"),
-            "unsupported_tools": ["NotebookEdit"],
-        }
-    ]
+    assert payload["status"] == "pending_changes"
+    assert payload["diagnostics"] == []
 
 
 def test_validate_succeeds_when_unsupported_agent_is_excluded(

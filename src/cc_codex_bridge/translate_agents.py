@@ -312,7 +312,15 @@ def _format_agent_translation_diagnostic(diagnostic: AgentTranslationDiagnostic)
 
 
 def _unsupported_tools(raw_tools: object) -> tuple[str, ...]:
-    """Return unsupported Claude tools after validating the frontmatter shape."""
+    """Validate the tools frontmatter shape.
+
+    Returns an empty tuple unconditionally — unrecognized tool names are
+    accepted and ignored for sandbox mode derivation.  Codex controls
+    capabilities through ``sandbox_mode`` at the session level, so only
+    the core read/write tools (``WRITE_TOOLS``, ``READ_TOOLS``) affect
+    the mapping.  MCP tools, WebFetch, Agent, and any future Claude
+    tools are silently passed through.
+    """
     if raw_tools is None:
         return ()
     if isinstance(raw_tools, str):
@@ -321,13 +329,7 @@ def _unsupported_tools(raw_tools: object) -> tuple[str, ...]:
         raise TranslationError(
             f"Agent tools must be a list or comma-separated string, got: {type(raw_tools).__name__}"
         )
-
-    unsupported = {
-        tool
-        for tool in raw_tools
-        if isinstance(tool, str) and tool not in RECOGNIZED_TOOLS
-    }
-    return tuple(sorted(unsupported))
+    return ()
 
 
 def _extract_tool_names(raw_tools: object) -> tuple[str, ...] | None:
