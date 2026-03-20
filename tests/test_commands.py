@@ -217,20 +217,20 @@ def test_translate_command_without_frontmatter(make_plugin_version):
     assert "# Log Experience" in content
 
 
-def test_translate_command_rejects_symlinked_file(make_plugin_version, tmp_path: Path):
-    """Symlinked command files are rejected."""
+def test_translate_command_follows_symlinked_file(make_plugin_version, tmp_path: Path):
+    """Symlinked command files are followed during translation."""
     cache_root, version_dir = make_plugin_version(
         "market", "tools", "1.0.0",
     )
     commands_dir = version_dir / "commands"
     commands_dir.mkdir()
     real_file = tmp_path / "real.md"
-    real_file.write_text("---\ndescription: test\n---\n")
+    real_file.write_text("---\ndescription: test\n---\n\nDo the thing.\n")
     (commands_dir / "link.md").symlink_to(real_file)
 
     plugins = discover_latest_plugins(cache_root)
-    with pytest.raises(TranslationError, match="symlink"):
-        translate_installed_commands(plugins)
+    result = translate_installed_commands(plugins)
+    assert len(result.skills) == 1
 
 
 def test_translate_standalone_commands(tmp_path: Path):

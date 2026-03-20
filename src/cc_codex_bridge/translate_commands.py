@@ -102,11 +102,6 @@ def _translate_one_command(
         rewrite_plugin_paths,
     )
 
-    if command_path.is_symlink():
-        raise TranslationError(
-            f"Refusing to follow symlinked command file: {command_path}"
-        )
-
     parsed_frontmatter, body = frontmatter.parse_markdown_with_frontmatter(
         command_path
     )
