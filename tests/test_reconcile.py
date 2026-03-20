@@ -3162,6 +3162,201 @@ def test_reconcile_records_plugin_resource_ownership_in_registry(
         assert "plugin_resources" in registry_payload
 
 
+# -- Prompt reconciliation tests --
+
+
+def test_reconcile_creates_prompt_files(make_project, make_plugin_version, tmp_path: Path):
+    """Prompts in desired state are written to codex_home/prompts/."""
+    from cc_codex_bridge.reconcile import build_project_desired_state
+
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version("market", "tools", "1.0.0")
+    commands_dir = version_dir / "commands"
+    commands_dir.mkdir()
+    (commands_dir / "review.md").write_text(
+        "---\ndescription: Review code\n---\n\nReview the code.\n"
+    )
+
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+
+    build = build_project_desired_state(
+        project_root,
+        codex_home=codex_home,
+        bridge_home=bridge_home,
+        cache_dir=cache_root,
+    )
+    assert build.desired_state is not None
+    assert len(build.desired_state.global_prompts) > 0
+
+    report = reconcile_desired_state(build.desired_state)
+    assert report.applied is True
+
+    # Verify prompt file was written
+    prompt_files = list((codex_home / "prompts").glob("*.md"))
+    assert len(prompt_files) > 0
+    # Check content is non-empty
+    for pf in prompt_files:
+        assert pf.read_bytes()
+
+    # Verify registry tracks prompt ownership
+    registry_payload = _read_global_registry(bridge_home)
+    assert "prompts" in registry_payload
+    assert len(registry_payload["prompts"]) > 0
+    for prompt_name, entry in registry_payload["prompts"].items():
+        assert str(project_root) in entry["owners"]
+        assert entry["content_hash"].startswith("sha256:")
+
+
+def test_reconcile_prompt_is_idempotent(make_project, make_plugin_version, tmp_path: Path):
+    """Running reconcile twice with same prompts produces no changes on second run."""
+    from cc_codex_bridge.reconcile import build_project_desired_state
+
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version("market", "tools", "1.0.0")
+    commands_dir = version_dir / "commands"
+    commands_dir.mkdir()
+    (commands_dir / "lint.md").write_text(
+        "---\ndescription: Lint code\n---\n\nLint the code.\n"
+    )
+
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+
+    build = build_project_desired_state(
+        project_root, codex_home=codex_home, bridge_home=bridge_home,
+        cache_dir=cache_root,
+    )
+    assert build.desired_state is not None
+    first = reconcile_desired_state(build.desired_state)
+    assert first.applied is True
+
+    # Rebuild and reconcile again — should be no-op
+    build2 = build_project_desired_state(
+        project_root, codex_home=codex_home, bridge_home=bridge_home,
+        cache_dir=cache_root,
+    )
+    assert build2.desired_state is not None
+    second = reconcile_desired_state(build2.desired_state)
+    assert second.changes == ()
+
+
+def test_reconcile_removes_stale_prompts(make_project, make_plugin_version, tmp_path: Path):
+    """Prompts removed from desired state are cleaned up from disk and registry."""
+    from cc_codex_bridge.reconcile import build_project_desired_state
+
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version("market", "tools", "1.0.0")
+    commands_dir = version_dir / "commands"
+    commands_dir.mkdir()
+    (commands_dir / "deploy.md").write_text(
+        "---\ndescription: Deploy\n---\n\nDeploy the app.\n"
+    )
+
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+
+    # First reconcile creates the prompt
+    build1 = build_project_desired_state(
+        project_root, codex_home=codex_home, bridge_home=bridge_home,
+        cache_dir=cache_root,
+    )
+    assert build1.desired_state is not None
+    reconcile_desired_state(build1.desired_state)
+
+    prompt_files_before = list((codex_home / "prompts").glob("*.md"))
+    assert len(prompt_files_before) > 0
+
+    # Remove the command source and reconcile again
+    (commands_dir / "deploy.md").unlink()
+    build2 = build_project_desired_state(
+        project_root, codex_home=codex_home, bridge_home=bridge_home,
+        cache_dir=cache_root,
+    )
+    assert build2.desired_state is not None
+    report = reconcile_desired_state(build2.desired_state)
+
+    # Prompt file should be removed
+    prompt_files_after = list((codex_home / "prompts").glob("*.md"))
+    assert len(prompt_files_after) == 0
+
+    # Registry should no longer list the prompt
+    registry_payload = _read_global_registry(bridge_home)
+    assert len(registry_payload.get("prompts", {})) == 0
+
+
+def test_clean_project_removes_prompt_files(make_project, make_plugin_version, tmp_path: Path):
+    """clean_project releases prompt ownership and removes files."""
+    from cc_codex_bridge.reconcile import build_project_desired_state, clean_project
+
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version("market", "tools", "1.0.0")
+    commands_dir = version_dir / "commands"
+    commands_dir.mkdir()
+    (commands_dir / "test-runner.md").write_text(
+        "---\ndescription: Run tests\n---\n\nRun tests.\n"
+    )
+
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+
+    build = build_project_desired_state(
+        project_root, codex_home=codex_home, bridge_home=bridge_home,
+        cache_dir=cache_root,
+    )
+    assert build.desired_state is not None
+    reconcile_desired_state(build.desired_state)
+
+    prompt_files_before = list((codex_home / "prompts").glob("*.md"))
+    assert len(prompt_files_before) > 0
+
+    report = clean_project(project_root, bridge_home=bridge_home)
+    assert report.applied is True
+
+    # Prompt files should be removed
+    prompt_files_after = list((codex_home / "prompts").glob("*.md"))
+    assert len(prompt_files_after) == 0
+
+    # Registry should no longer list prompts for this project
+    registry_payload = _read_global_registry(bridge_home)
+    assert len(registry_payload.get("prompts", {})) == 0
+
+
+def test_uninstall_all_removes_prompt_files(make_project, make_plugin_version, tmp_path: Path):
+    """uninstall_all removes prompt files from codex_home/prompts/."""
+    from cc_codex_bridge.reconcile import build_project_desired_state, uninstall_all
+
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version("market", "tools", "1.0.0")
+    commands_dir = version_dir / "commands"
+    commands_dir.mkdir()
+    (commands_dir / "check.md").write_text(
+        "---\ndescription: Check\n---\n\nCheck things.\n"
+    )
+
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+
+    build = build_project_desired_state(
+        project_root, codex_home=codex_home, bridge_home=bridge_home,
+        cache_dir=cache_root,
+    )
+    assert build.desired_state is not None
+    reconcile_desired_state(build.desired_state)
+
+    prompt_files_before = list((codex_home / "prompts").glob("*.md"))
+    assert len(prompt_files_before) > 0
+
+    report = uninstall_all(bridge_home=bridge_home, codex_home=codex_home)
+    assert report.applied is True
+
+    # Prompt files should be removed
+    prompts_dir = codex_home / "prompts"
+    if prompts_dir.exists():
+        remaining = list(prompts_dir.glob("*.md"))
+        assert len(remaining) == 0
+
+
 def _reconcile_once(project_root, cache_root, codex_home):
     """Run a full discover+translate+reconcile and return the desired state."""
     from cc_codex_bridge.discover import discover

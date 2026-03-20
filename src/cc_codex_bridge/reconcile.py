@@ -24,11 +24,13 @@ from cc_codex_bridge.registry import (
     GLOBAL_REGISTRY_FILENAME,
     GlobalAgentEntry,
     GlobalPluginResourceEntry,
+    GlobalPromptEntry,
     GlobalSkillEntry,
     GlobalSkillRegistry,
     hash_agent_file,
     hash_generated_skill,
     hash_generated_skill_files,
+    hash_prompt_content,
 )
 from cc_codex_bridge.state import BridgeState
 from cc_codex_bridge.text import read_utf8_text
@@ -626,6 +628,27 @@ def clean_project(
                 changes.append(Change("remove", plugin_dir, resource_kind="plugin_resource"))
         registry_changed = True
 
+    # Release prompt ownership claims
+    updated_prompts = dict(registry.prompts)
+    for prompt_filename in sorted(registry.prompts):
+        entry = registry.prompts[prompt_filename]
+        if project_root_path not in entry.owners:
+            continue
+        remaining_owners = tuple(
+            owner for owner in entry.owners if owner != project_root_path
+        )
+        if remaining_owners:
+            updated_prompts[prompt_filename] = GlobalPromptEntry(
+                content_hash=entry.content_hash,
+                owners=remaining_owners,
+            )
+        else:
+            del updated_prompts[prompt_filename]
+            prompt_path = codex_home_path / "prompts" / prompt_filename
+            if prompt_path.exists():
+                changes.append(Change("remove", prompt_path, resource_kind="prompt"))
+        registry_changed = True
+
     # Remove project from the projects list
     updated_projects = tuple(
         p for p in registry.projects if p != project_root_path
@@ -638,6 +661,7 @@ def clean_project(
             skills=updated_skills,
             projects=updated_projects,
             agents=updated_agents,
+            prompts=updated_prompts,
             plugin_resources=updated_plugin_resources,
         )
     else:
@@ -647,8 +671,8 @@ def clean_project(
     for change in changes:
         if change.path == state_path:
             continue
-        if change.resource_kind in ("skill", "agent"):
-            # Global skills and agents live under codex_home, not project_root
+        if change.resource_kind in ("skill", "agent", "prompt"):
+            # Global skills, agents, and prompts live under codex_home, not project_root
             _assert_path_contained(change.path, codex_home_path, label="Clean target")
         elif change.resource_kind == "plugin_resource":
             # Plugin resources live under bridge_home, not project_root
@@ -669,6 +693,8 @@ def clean_project(
             elif change.path.exists() or change.path.is_symlink():
                 change.path.unlink()
         elif change.resource_kind == "agent":
+            change.path.unlink(missing_ok=True)
+        elif change.resource_kind == "prompt":
             change.path.unlink(missing_ok=True)
         elif change.resource_kind == "plugin_resource":
             shutil.rmtree(change.path)
@@ -879,6 +905,12 @@ def uninstall_all(
                     global_removals.append(
                         Change("remove", agent_path, resource_kind="agent")
                     )
+            for prompt_filename in sorted(post_clean_snapshot.registry.prompts):
+                prompt_path = codex_home_path / "prompts" / prompt_filename
+                if prompt_path.exists():
+                    global_removals.append(
+                        Change("remove", prompt_path, resource_kind="prompt")
+                    )
 
     # Remove global AGENTS.md only if bridge-generated (sentinel present)
     global_agents_md = codex_home_path / "AGENTS.md"
@@ -913,6 +945,8 @@ def uninstall_all(
                     shutil.rmtree(change.path)
                 elif change.path.exists() or change.path.is_symlink():
                     change.path.unlink()
+            elif change.resource_kind == "prompt":
+                change.path.unlink(missing_ok=True)
             else:
                 change.path.unlink(missing_ok=True)
 
@@ -953,6 +987,7 @@ def _apply_changes(
     skills_by_name = {skill.install_dir_name: skill for skill in desired.skills}
     project_skills_by_name = {skill.install_dir_name: skill for skill in desired.project_skills}
     agents_by_filename = {agent.install_filename: agent for agent in desired.global_agents}
+    desired_prompt_map = {p.filename: p for p in desired.global_prompts}
     plugin_resources_by_path: dict[Path, VendoredPluginResource] = {
         desired.bridge_home / "plugins" / f"{r.marketplace}-{r.plugin_name}" / r.target_dir_name: r
         for r in desired.plugin_resources
@@ -995,6 +1030,14 @@ def _apply_changes(
                     sandbox_mode=agent.sandbox_mode,
                 )
                 _atomic_write_file(change.path, content.encode(), container=desired.codex_home)
+            elif change.kind == "remove":
+                change.path.unlink(missing_ok=True)
+            continue
+        if change.resource_kind == "prompt":
+            if change.kind in ("create", "update"):
+                prompt = desired_prompt_map[change.path.name]
+                change.path.parent.mkdir(parents=True, exist_ok=True)
+                _atomic_write_file(change.path, prompt.content, container=desired.codex_home)
             elif change.kind == "remove":
                 change.path.unlink(missing_ok=True)
             continue
@@ -1109,6 +1152,10 @@ def format_diff_report(desired: DesiredState, report: ReconcileReport) -> str:
                 ).encode()
             else:
                 desired_content = None
+        elif change.resource_kind == "prompt":
+            prompts_by_filename = {p.filename: p for p in desired.global_prompts}
+            prompt = prompts_by_filename.get(change.path.name)
+            desired_content = prompt.content if prompt is not None else None
         else:
             desired_content = desired_map.get(change.path)
         if desired_content is None:
@@ -1132,13 +1179,12 @@ def _plan_mutations(
     desired: DesiredState,
     previous_state: BridgeState | None,
 ) -> _MutationPlan:
-    """Plan file, skill, agent, and registry mutations for one reconcile run.
+    """Plan file, skill, agent, prompt, and registry mutations for one reconcile run.
 
-    Skills and agents share the same global registry file.  To prevent
-    independent planners from clobbering each other's updates, we load the
-    registry snapshot once, let the skill planner mutate it, then pass the
-    updated registry to the agent planner.  A single registry write is
-    generated at the end.
+    Skills, agents, and prompts share the same global registry file.  To
+    prevent independent planners from clobbering each other's updates, we
+    load the registry snapshot once, let each planner mutate it in sequence,
+    then generate a single registry write at the end.
     """
     project_changes = _compute_project_file_changes(desired, previous_state)
     project_skill_changes = _plan_project_skill_mutations(desired, previous_state)
@@ -1150,6 +1196,9 @@ def _plan_mutations(
     )
     agent_changes, updated_registry = _plan_global_agent_mutations(
         desired, previous_state, snapshot, updated_registry,
+    )
+    prompt_changes, updated_registry = _plan_prompt_mutations(
+        desired, snapshot, updated_registry,
     )
     plugin_resource_changes, updated_registry = _plan_plugin_resource_mutations(
         desired, snapshot, updated_registry,
@@ -1165,8 +1214,8 @@ def _plan_mutations(
     return _MutationPlan(
         changes=tuple((
             *project_changes, *project_skill_changes,
-            *skill_changes, *agent_changes, *global_changes,
-            *plugin_resource_changes,
+            *skill_changes, *agent_changes, *prompt_changes,
+            *global_changes, *plugin_resource_changes,
         )),
         registry_writes=tuple(registry_writes),
     )
@@ -1296,6 +1345,7 @@ def _plan_skill_mutations(
             snapshot.registry.projects, desired.project_root
         ),
         agents=dict(snapshot.registry.agents),
+        prompts=dict(snapshot.registry.prompts),
         plugin_resources=dict(snapshot.registry.plugin_resources),
     )
     for install_dir_name in sorted(desired_skills):
@@ -1628,6 +1678,100 @@ def _owned_plugin_resource_dirs(registry: GlobalSkillRegistry, project_root: Pat
     }
 
 
+def _owned_prompt_names(
+    registry: GlobalSkillRegistry,
+    project_root: Path,
+) -> set[str]:
+    """Return prompt filenames owned by a project."""
+    return {
+        filename
+        for filename, entry in registry.prompts.items()
+        if project_root in entry.owners
+    }
+
+
+def _plan_prompt_mutations(
+    desired: DesiredState,
+    snapshot: _RegistrySnapshot,
+    updated_registry: GlobalSkillRegistry,
+) -> tuple[tuple[Change, ...], GlobalSkillRegistry]:
+    """Plan global-prompt ownership and file mutations.
+
+    Prompts are flat files at ``codex_home / "prompts" / filename``.
+    Ownership follows the same model as agents: the registry tracks
+    which projects contributed each prompt, and the first project to
+    reconcile after a content change updates both the file and registry.
+    """
+    desired_prompts = {p.filename: p for p in desired.global_prompts}
+    desired_hashes: dict[str, str] = {
+        filename: hash_prompt_content(prompt.content)
+        for filename, prompt in desired_prompts.items()
+    }
+    changes: list[Change] = []
+
+    for filename in sorted(desired_prompts):
+        prompt = desired_prompts[filename]
+        destination = desired.codex_home / "prompts" / filename
+        existing_entry = updated_registry.prompts.get(filename)
+        desired_hash = desired_hashes[filename]
+        registry_owned = existing_entry is not None
+
+        if existing_entry is not None and existing_entry.content_hash != desired_hash:
+            # Prompt files are derived from command sources.  When the
+            # source changes, any project reconciling first should update
+            # the shared file and registry entry for all owners.
+            registry_owned = True
+
+        if not registry_owned:
+            if destination.exists() and not destination.is_symlink():
+                existing_hash = hash_prompt_content(destination.read_bytes())
+                if existing_hash != desired_hash:
+                    raise ReconcileError(
+                        f"Refusing to adopt conflicting existing prompt file: {destination}"
+                    )
+            existing_owners: tuple[Path, ...] = ()
+        else:
+            existing_owners = existing_entry.owners if existing_entry is not None else ()
+
+        updated_registry.prompts[filename] = GlobalPromptEntry(
+            content_hash=desired_hash,
+            owners=_sorted_owner_set((*existing_owners, desired.project_root)),
+        )
+
+        if not destination.exists():
+            changes.append(Change("create", destination, resource_kind="prompt"))
+            continue
+        if destination.is_symlink():
+            raise ReconcileError(f"Refusing to overwrite symlinked prompt file: {destination}")
+        existing_hash = hash_prompt_content(destination.read_bytes())
+        if existing_hash == desired_hash:
+            continue
+        changes.append(Change("update", destination, resource_kind="prompt"))
+
+    # Detect stale prompt files owned by this project
+    previously_owned_prompts = _owned_prompt_names(
+        snapshot.registry, desired.project_root
+    )
+    for filename in sorted(previously_owned_prompts - set(desired_prompts)):
+        entry = updated_registry.prompts[filename]
+        remaining_owners = tuple(
+            owner for owner in entry.owners if owner != desired.project_root
+        )
+        if remaining_owners:
+            updated_registry.prompts[filename] = GlobalPromptEntry(
+                content_hash=entry.content_hash,
+                owners=remaining_owners,
+            )
+            continue
+
+        del updated_registry.prompts[filename]
+        stale_path = desired.codex_home / "prompts" / filename
+        if stale_path.exists():
+            changes.append(Change("remove", stale_path, resource_kind="prompt"))
+
+    return tuple(changes), updated_registry
+
+
 def _build_registry_write(
     snapshot: _RegistrySnapshot,
     updated_registry: GlobalSkillRegistry,
@@ -1713,7 +1857,7 @@ def _validate_mutation_targets(
 ) -> None:
     """Reject plans whose write or delete targets escape managed roots."""
     for change in plan.changes:
-        if change.resource_kind in {"skill", "agent", "global_instructions"}:
+        if change.resource_kind in {"skill", "agent", "prompt", "global_instructions"}:
             _assert_path_contained(
                 change.path,
                 desired.codex_home,
