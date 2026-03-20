@@ -10,7 +10,7 @@ from typing import Iterable
 from uuid import uuid4
 
 from cc_codex_bridge.bridge_home import resolve_bridge_home, project_state_dir
-from cc_codex_bridge.scan import ScanResult, scan_for_projects
+from cc_codex_bridge.scan import ScanResult, scan_for_projects, seed_config_stub
 from cc_codex_bridge.model import (
     ClaudeShimDecision,
     DiscoveryResult,
@@ -1042,6 +1042,8 @@ def _apply_changes(
             registry_write.content,
             container=registry_write.container,
         )
+
+    seed_config_stub(desired.bridge_home)
 
     state_bytes = _build_state_record(desired, previously_managed).to_json().encode()
     desired.state_path.parent.mkdir(parents=True, exist_ok=True)

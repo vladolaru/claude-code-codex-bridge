@@ -13,6 +13,32 @@ from cc_codex_bridge.text import read_utf8_text
 
 SCAN_CONFIG_FILENAME = "config.toml"
 
+CONFIG_STUB = """\
+# Scan these directories for projects to reconcile with --all.
+# Uncomment and edit to enable bulk project discovery.
+#
+# scan_paths = [
+#   "~/Work/projects/*",
+# ]
+#
+# exclude_paths = [
+#   "~/Work/projects/scratch",
+# ]
+"""
+
+
+def seed_config_stub(bridge_home: Path) -> bool:
+    """Write a commented-out config.toml stub if it does not exist.
+
+    Returns True if the stub was written, False if the file already exists.
+    """
+    config_path = bridge_home / SCAN_CONFIG_FILENAME
+    if config_path.exists():
+        return False
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(CONFIG_STUB)
+    return True
+
 
 # ---------------------------------------------------------------------------
 # Config loading (Task 1)

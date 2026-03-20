@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from cc_codex_bridge.scan import (
+    CONFIG_STUB,
     SCAN_CONFIG_FILENAME,
     ScanCandidate,
     ScanConfig,
@@ -16,6 +17,7 @@ from cc_codex_bridge.scan import (
     filter_scan_candidates,
     load_scan_config,
     scan_for_projects,
+    seed_config_stub,
 )
 from cc_codex_bridge.model import ReconcileError
 
@@ -532,3 +534,42 @@ class TestScanForProjects:
             + [c.path for c in result.filtered]
         )
         assert all(p.name != "skip" for p in all_paths)
+
+
+# ===================================================================
+# seed_config_stub
+# ===================================================================
+
+
+def test_seed_config_stub_creates_file(tmp_path: Path):
+    """seed_config_stub creates config.toml when it doesn't exist."""
+    result = seed_config_stub(tmp_path)
+    assert result is True
+    config_path = tmp_path / SCAN_CONFIG_FILENAME
+    assert config_path.exists()
+    assert config_path.read_text() == CONFIG_STUB
+
+
+def test_seed_config_stub_skips_existing(tmp_path: Path):
+    """seed_config_stub does not overwrite an existing config.toml."""
+    config_path = tmp_path / SCAN_CONFIG_FILENAME
+    config_path.write_text('scan_paths = ["/custom"]\n')
+    result = seed_config_stub(tmp_path)
+    assert result is False
+    assert config_path.read_text() == 'scan_paths = ["/custom"]\n'
+
+
+def test_seed_config_stub_creates_parent_dirs(tmp_path: Path):
+    """seed_config_stub creates parent directories if needed."""
+    nested = tmp_path / "deep" / "bridge-home"
+    result = seed_config_stub(nested)
+    assert result is True
+    assert (nested / SCAN_CONFIG_FILENAME).exists()
+
+
+def test_seed_config_stub_is_valid_toml(tmp_path: Path):
+    """The stub file is parseable and produces empty scan config."""
+    seed_config_stub(tmp_path)
+    config = load_scan_config(tmp_path)
+    assert config.scan_paths == ()
+    assert config.exclude_paths == ()

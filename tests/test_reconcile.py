@@ -3754,3 +3754,27 @@ def test_reconcile_releases_stale_plugin_resources_preserves_shared_dirs(
     assert "market-tools" not in registry3.plugin_resources
     remove_changes_b = [c for c in report_b2.changes if c.kind == "remove" and c.resource_kind == "plugin_resource"]
     assert len(remove_changes_b) == 1
+
+
+def test_reconcile_seeds_config_stub(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """First reconcile seeds config.toml stub in bridge home."""
+    from cc_codex_bridge.scan import SCAN_CONFIG_FILENAME
+
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("m", "p", "1.0.0", skill_names=("s",))
+    codex_home = tmp_path / "codex-home"
+
+    desired = _build_desired(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    bridge_home = desired.bridge_home
+    config_path = bridge_home / SCAN_CONFIG_FILENAME
+    assert config_path.exists()
+    # Stub should be all comments — loading it produces empty config
+    from cc_codex_bridge.scan import load_scan_config
+    config = load_scan_config(bridge_home)
+    assert config.scan_paths == ()
