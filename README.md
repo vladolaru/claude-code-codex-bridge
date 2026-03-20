@@ -2,7 +2,7 @@
 
 Bridge your local Claude Code setup into Codex so both stay equally effective.
 
-`cc-codex-bridge` reads the Claude Code setup on your machine — plugins, skills, agents, commands, and instructions — and generates equivalent Codex artifacts. You author once in Claude Code; the bridge keeps Codex in sync.
+`cc-codex-bridge` reads the Claude Code setup on your machine — plugins, skills, agents, commands, and instructions — and generates equivalent Codex artifacts. You install/set up/author once in Claude Code; the bridge keeps Codex in sync.
 
 ## What It Reads
 
