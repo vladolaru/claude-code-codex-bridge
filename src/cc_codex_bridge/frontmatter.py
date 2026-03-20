@@ -14,12 +14,16 @@ silently after parsing.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
 
 from cc_codex_bridge.model import TranslationError
 from cc_codex_bridge.text import read_utf8_text
+
+# Keys whose plain-scalar values may contain YAML-confusing characters.
+_QUOTABLE_KEY_RE = re.compile(r"^(tools|argument-hint):\s+")
 
 
 class _FrontmatterSafeLoader(yaml.SafeLoader):
@@ -92,8 +96,39 @@ def parse_frontmatter_from_content(content: str) -> dict[str, object]:
     return parse_frontmatter_lines(lines[1:end_index])
 
 
+def _quote_problematic_scalars(lines: list[str]) -> list[str]:
+    """Quote frontmatter values that would confuse the YAML parser.
+
+    Claude Code accepts ``tools: Read, Write, mcp__foo__bar`` and
+    ``argument-hint: [person] [month]`` as plain scalars, but YAML
+    may interpret colons, brackets, or other special characters in
+    the value as mapping indicators or flow sequences.
+
+    Strategy: try parsing each candidate line as YAML.  If it parses
+    without error, leave it alone.  If it fails, wrap the value in
+    double quotes so YAML treats it as a string.
+    """
+    result: list[str] = []
+    for line in lines:
+        m = _QUOTABLE_KEY_RE.match(line)
+        if m:
+            # Test whether YAML can parse this line as-is
+            try:
+                yaml.safe_load(line)
+                result.append(line)
+            except yaml.YAMLError:
+                prefix = line[:m.end()]
+                value = line[m.end():]
+                escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+                result.append(prefix + '"' + escaped + '"')
+        else:
+            result.append(line)
+    return result
+
+
 def parse_frontmatter_lines(lines: list[str]) -> dict[str, object]:
     """Parse frontmatter lines with safe YAML and normalize accepted shapes."""
+    lines = _quote_problematic_scalars(lines)
     frontmatter_text = "\n".join(lines)
     if not frontmatter_text.strip():
         return {}

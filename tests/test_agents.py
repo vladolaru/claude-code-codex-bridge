@@ -486,6 +486,22 @@ def test_parse_frontmatter_lines_accepts_quoted_strings_and_inline_lists():
     }
 
 
+def test_parse_frontmatter_lines_quotes_mcp_tool_names():
+    """MCP tool names with colons are handled by quoting the tools value."""
+    parsed = parse_frontmatter_lines(
+        [
+            "name: my-agent",
+            "description: test",
+            "tools: Read, Write, mcp__context-a8c__context-a8c-load-provider, mcp__context-a8c__context-a8c-execute-tool",
+        ]
+    )
+
+    assert parsed["name"] == "my-agent"
+    # tools value is a quoted string (will be split by _unsupported_tools downstream)
+    assert isinstance(parsed["tools"], str)
+    assert "mcp__context-a8c__context-a8c-load-provider" in parsed["tools"]
+
+
 def test_parse_frontmatter_lines_normalizes_yaml_scalars_to_strings():
     """Low-level frontmatter parsing keeps scalar runtime values string-shaped."""
     parsed = parse_frontmatter_lines(
