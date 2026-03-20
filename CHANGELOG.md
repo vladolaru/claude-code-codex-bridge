@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-03-20
+
 ### Changed
 - Commands are now translated to native Codex prompt files (`~/.codex/prompts/*.md`) instead of Codex skills (`~/.codex/skills/cmd-*/SKILL.md`)
 - `$ARGUMENTS` and positional args (`$1`-`$9`) are passed through natively instead of being replaced with fallback text
