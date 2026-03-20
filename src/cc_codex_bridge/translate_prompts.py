@@ -14,6 +14,7 @@ Key differences from the skill-based approach:
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Iterable
 
@@ -28,6 +29,45 @@ from cc_codex_bridge.model import (
 )
 
 PROVENANCE_MARKER = "\n<!-- bridge: translated from Claude Code command -->\n"
+
+
+def assign_prompt_names(
+    prompts: tuple[GeneratedPrompt, ...],
+) -> tuple[GeneratedPrompt, ...]:
+    """Assign collision-free filenames to prompts.
+
+    Priority: user prompts win bare names over plugin prompts.
+    Among plugins, sorted by (marketplace, plugin_name).
+    Collisions get -alt, -alt-2, -alt-3 suffixes before .md extension.
+    """
+    groups: dict[str, list[GeneratedPrompt]] = {}
+    for prompt in prompts:
+        groups.setdefault(prompt.filename, []).append(prompt)
+
+    result: list[GeneratedPrompt] = []
+
+    for filename in sorted(groups):
+        candidates = groups[filename]
+
+        if len(candidates) > 1:
+            candidates.sort(key=lambda p: (
+                0 if p.marketplace.startswith("_") else 1,
+                p.marketplace,
+                p.plugin_name,
+            ))
+
+        stem = Path(filename).stem
+        for index, prompt in enumerate(candidates):
+            if index == 0:
+                assigned = filename
+            elif index == 1:
+                assigned = f"{stem}-alt.md"
+            else:
+                assigned = f"{stem}-alt-{index}.md"
+
+            result.append(replace(prompt, filename=assigned))
+
+    return tuple(sorted(result, key=lambda p: p.filename))
 
 
 def translate_installed_commands(

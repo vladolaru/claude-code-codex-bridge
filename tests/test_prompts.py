@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from cc_codex_bridge.discover import discover_latest_plugins
+from cc_codex_bridge.model import GeneratedPrompt
 from cc_codex_bridge.translate_prompts import (
     PROVENANCE_MARKER,
     translate_installed_commands,
@@ -330,3 +331,113 @@ def test_translate_command_vendors_root_level_files(make_plugin_version, tmp_pat
     root_resources = [r for r in result.plugin_resources if r.target_dir_name == "_root"]
     assert len(root_resources) == 1
     assert any(f.relative_path == Path("run.py") for f in root_resources[0].files)
+
+
+def test_assign_prompt_names_no_collision():
+    """Non-colliding prompts keep their filenames."""
+    from cc_codex_bridge.translate_prompts import assign_prompt_names
+
+    prompts = (
+        GeneratedPrompt(
+            filename="review.md",
+            content=b"---\ndescription: A\n---\n\nA.\n",
+            source_path=Path("/p1/commands/review.md"),
+            marketplace="_user",
+            plugin_name="personal",
+        ),
+        GeneratedPrompt(
+            filename="build.md",
+            content=b"---\ndescription: B\n---\n\nB.\n",
+            source_path=Path("/p2/commands/build.md"),
+            marketplace="market",
+            plugin_name="tools",
+        ),
+    )
+    result = assign_prompt_names(prompts)
+    filenames = sorted(p.filename for p in result)
+    assert filenames == ["build.md", "review.md"]
+
+
+def test_assign_prompt_names_resolves_collisions():
+    """Two prompts with same filename get -alt suffix."""
+    from cc_codex_bridge.translate_prompts import assign_prompt_names
+
+    prompts = (
+        GeneratedPrompt(
+            filename="review.md",
+            content=b"---\ndescription: A\n---\n\nA.\n",
+            source_path=Path("/p1/commands/review.md"),
+            marketplace="_user",
+            plugin_name="personal",
+        ),
+        GeneratedPrompt(
+            filename="review.md",
+            content=b"---\ndescription: B\n---\n\nB.\n",
+            source_path=Path("/p2/commands/review.md"),
+            marketplace="market",
+            plugin_name="tools",
+        ),
+    )
+    result = assign_prompt_names(prompts)
+    filenames = sorted(p.filename for p in result)
+    assert "review.md" in filenames
+    assert "review-alt.md" in filenames
+
+
+def test_assign_prompt_names_user_wins_bare_name():
+    """User-scope prompts get the bare name over plugin prompts."""
+    from cc_codex_bridge.translate_prompts import assign_prompt_names
+
+    prompts = (
+        GeneratedPrompt(
+            filename="review.md",
+            content=b"---\ndescription: Plugin\n---\n\nPlugin.\n",
+            source_path=Path("/p1/commands/review.md"),
+            marketplace="market",
+            plugin_name="tools",
+        ),
+        GeneratedPrompt(
+            filename="review.md",
+            content=b"---\ndescription: User\n---\n\nUser.\n",
+            source_path=Path("/p2/commands/review.md"),
+            marketplace="_user",
+            plugin_name="personal",
+        ),
+    )
+    result = assign_prompt_names(prompts)
+    user_prompt = next(p for p in result if p.marketplace == "_user")
+    plugin_prompt = next(p for p in result if p.marketplace == "market")
+    assert user_prompt.filename == "review.md"
+    assert plugin_prompt.filename == "review-alt.md"
+
+
+def test_assign_prompt_names_triple_collision():
+    """Three-way collision gets -alt and -alt-2 suffixes."""
+    from cc_codex_bridge.translate_prompts import assign_prompt_names
+
+    prompts = (
+        GeneratedPrompt(
+            filename="review.md",
+            content=b"A",
+            source_path=Path("/p1/commands/review.md"),
+            marketplace="_user",
+            plugin_name="personal",
+        ),
+        GeneratedPrompt(
+            filename="review.md",
+            content=b"B",
+            source_path=Path("/p2/commands/review.md"),
+            marketplace="alpha",
+            plugin_name="tools",
+        ),
+        GeneratedPrompt(
+            filename="review.md",
+            content=b"C",
+            source_path=Path("/p3/commands/review.md"),
+            marketplace="beta",
+            plugin_name="tools",
+        ),
+    )
+    result = assign_prompt_names(prompts)
+    filenames = sorted(p.filename for p in result)
+    assert filenames == ["review-alt-2.md", "review-alt.md", "review.md"]
