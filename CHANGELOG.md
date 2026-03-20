@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+- Commands are now translated to native Codex prompt files (`~/.codex/prompts/*.md`) instead of Codex skills (`~/.codex/skills/cmd-*/SKILL.md`)
+- `$ARGUMENTS` and positional args (`$1`-`$9`) are passed through natively instead of being replaced with fallback text
+- `argument-hint` frontmatter is preserved in prompt output (previously dropped for skills)
+- Project-level commands get a `--<project-dirname>` suffix (e.g., `build--my-app.md`)
+- CLI output label `TRANSLATED_COMMANDS` renamed to `TRANSLATED_PROMPTS`
+
+### Removed
+- `translate_commands` module (replaced by `translate_prompts`)
+- `cmd-` prefix naming convention for command-derived artifacts
+
 ## [0.14.0] - 2026-03-20
 
 ### Added

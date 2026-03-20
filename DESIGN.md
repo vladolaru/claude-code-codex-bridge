@@ -51,6 +51,7 @@ These are derived artifacts and must not become hand-maintained sources:
 - `.codex/agents/*.toml`
 - `~/.codex/agents/*.toml`
 - `~/.codex/skills/*`
+- `~/.codex/prompts/*.md`
 - `~/.cc-codex-bridge/projects/<hash>/state.json`
 - `~/.cc-codex-bridge/registry.json`
 - `~/.cc-codex-bridge/plugins/<marketplace>-<plugin>/`
@@ -76,7 +77,7 @@ If a behavior is described differently in multiple docs:
 - selection of the latest installed plugin version by semantic version
 - translation of Claude agents into self-contained Codex agent `.toml` files
 - translation of Claude skills into self-contained Codex skills
-- translation of Claude commands into Codex skills with deterministic variable replacement
+- translation of Claude commands into native Codex prompt files with plugin resource vendoring
 - safe reconcile of generated project files, generated Codex agent files, and generated Codex skill directories
 - state tracking for generator-owned outputs
 - project-level artifact cleanup via `clean`
@@ -90,7 +91,7 @@ If a behavior is described differently in multiple docs:
 - filesystem-wide project discovery (scan-based discovery via `config.toml` is in scope; unbounded filesystem traversal is not)
 - watcher mode
 - automatic `launchctl bootstrap`
-- runtime execution of Claude commands (translated commands serve as context/instructions, not executable workflows)
+- runtime execution of Claude commands (translated prompts serve as context/instructions, not executable workflows)
 
 ## 4. Runtime Model
 
@@ -108,9 +109,9 @@ The runtime is a deterministic pipeline:
 10. translate standalone user and project agents into `GeneratedAgentFile` objects
 11. translate plugin and user skills into `GeneratedSkill` trees (global registry)
 12. translate project skills into project-local `GeneratedSkill` trees
-13. translate plugin commands into command-derived `GeneratedSkill` trees (global registry), with plugin resource vendoring when `bridge_home` is provided
-14. translate standalone user commands into command-derived `GeneratedSkill` trees (global registry)
-15. translate project commands into command-derived project-local `GeneratedSkill` trees
+13. translate plugin commands into `GeneratedPrompt` objects (global prompts), with plugin resource vendoring when `bridge_home` is provided
+14. translate standalone user commands into `GeneratedPrompt` objects (global prompts)
+15. translate project commands into `GeneratedPrompt` objects (global prompts) with `--<project-dirname>` filename suffix
 16. merge all agents, render project-local agent `.toml` files to `.codex/agents/`, and collect global agents for `~/.codex/agents/`
 17. decide whether `CLAUDE.md` can be created or preserved as an `@AGENTS.md` shim
 18. build a full desired state for project files, Codex skill directories, global agent files, and global instructions
@@ -140,6 +141,10 @@ Utility commands such as `doctor` and the LaunchAgent commands are intentionally
   - tracked in the global registry alongside skills
 - `~/.codex/skills/<generated-skill-name>/`
   - self-contained Codex skill directories derived from Claude plugin and user skills
+- `~/.codex/prompts/*.md`
+  - native Codex prompt files derived from Claude plugin, user, and project commands
+  - project-level commands get a `--<project-dirname>` suffix (e.g., `build--my-app.md`)
+  - tracked in the global registry under the `prompts` section
 - `~/.codex/AGENTS.md`
   - user-global Codex instructions bridged from `~/.claude/CLAUDE.md`
 
@@ -473,26 +478,27 @@ All generated names must comply with the Agent Skills standard: max 64 character
 lowercase a-z/0-9/hyphens only, no consecutive hyphens, matching the parent
 directory name.
 
-### 8.5 Command translation
+### 8.5 Command translation (prompts)
 
-`src/cc_codex_bridge/translate_commands.py` translates Claude commands into `GeneratedSkill` objects.
+`src/cc_codex_bridge/translate_prompts.py` translates Claude commands into `GeneratedPrompt` objects.
 
-Commands are treated as a variant of skills. Each command markdown file produces one `GeneratedSkill` with a single `SKILL.md` file.
+Commands are translated to native Codex prompt files (`~/.codex/prompts/*.md`). Each command markdown file produces one `GeneratedPrompt` with a single markdown file.
 
 Required command frontmatter:
 
 - `description`
 
+Preserved command frontmatter:
+
+- `argument-hint` (included in generated prompt output)
+
 Dropped command frontmatter (not carried to generated output):
 
-- `argument-hint`
 - `allowed-tools`
 
-Command-derived Codex skills use a `cmd-` name prefix (e.g., `code-review.md` → `cmd-code-review`) to prevent namespace collisions with native skills. The `cmd-` prefix is applied during translation to the `install_dir_name`, `original_skill_name`, and `codex_skill_name` fields. The existing `-alt` suffix collision resolution in `assign_skill_names()` still applies as a safety net for any remaining name collisions after the prefix is applied.
+Variable handling:
 
-Variable replacement rules (applied deterministically to the command body):
-
-- `$ARGUMENTS`, `$ARGUMENTS[N]`, `$N` → `<use any user-provided details; otherwise infer from context>`
+- `$ARGUMENTS`, `$ARGUMENTS[N]`, `$1`-`$9` are passed through natively in the prompt body (Codex handles them at runtime)
 - `${CLAUDE_PLUGIN_ROOT}` → when `bridge_home` is provided, replaced with the vendored root path under `~/.cc-codex-bridge/plugins/` instead of the raw plugin cache path; without `bridge_home`, falls back to the resolved absolute path from `InstalledPlugin.source_path` (plugin commands only; standalone commands leave it as-is)
 
 Plugin resource vendoring:
@@ -502,15 +508,31 @@ Plugin resource vendoring:
 - transitive dependency detection applies to vendored command scripts (same as skills/agents)
 - runtime discovery blocks are removed and replaced with direct absolute paths, consistent with skill vendoring
 
-Generated SKILL.md structure:
+Generated prompt file structure:
 
-- frontmatter: `name` (from command filename stem, with `cmd-` prefix) and `description` (from command frontmatter)
-- body: command body with variable replacements applied
+- frontmatter: `description` (from command frontmatter), optional `argument-hint` (preserved from command frontmatter)
+- body: command body with plugin root replacements applied
 - provenance marker appended at end: `<!-- translated from Claude Code command -->`
 
-Command-derived skills share the same namespace as native skills. Collisions are resolved by `assign_skill_names()` using the standard `-alt` suffix scheme.
+### Prompt naming
 
-Command source paths are normalised before name assignment: file-based source paths (`.md` suffix) are rewritten to use the stem as a pseudo-directory name so `assign_skill_names()` groups them correctly alongside directory-based native skills.
+Prompt filenames are derived from the command filename stem (e.g., `code-review.md` → `code-review.md`).
+
+Project-level commands get a `--<project-dirname>` suffix (e.g., `build.md` from project `my-app` → `build--my-app.md`).
+
+When multiple prompts share the same filename across sources, collisions are resolved with deterministic suffixes via `assign_prompt_names()`:
+
+- 1st (priority winner): `<name>.md` (bare)
+- 2nd: `<name>-alt.md`
+- 3rd: `<name>-alt-2.md`
+- Nth: `<name>-alt-<N-1>.md`
+
+Priority order for collision resolution:
+1. User prompts (standalone user commands)
+2. Project prompts (standalone project commands, with `--<dirname>` suffix)
+3. Plugin prompts, sorted by `(marketplace, plugin_name)`
+
+All generated prompts are installed to `~/.codex/prompts/` and tracked in the global registry under the `prompts` section.
 
 ### Skill routing
 
@@ -730,8 +752,8 @@ Current runtime module responsibilities:
   - Codex skill translation for plugins and standalone sources, plus relative-reference resolution, vendoring helpers, and collision-free name assignment via `assign_skill_names()`
 - `vendor_plugin.py`
   - plugin resource path detection and rewriting for `$PLUGIN_ROOT` references, transitive dependency detection for vendored scripts
-- `translate_commands.py`
-  - Claude command translation to command-derived `GeneratedSkill` objects with `cmd-` name prefix, variable replacement, provenance marking, and plugin resource vendoring support (when `bridge_home` is provided)
+- `translate_prompts.py`
+  - Claude command translation to `GeneratedPrompt` objects (native Codex prompt files), variable pass-through, provenance marking, and plugin resource vendoring support (when `bridge_home` is provided)
 - `reconcile.py`
   - desired-state modeling, diffing, atomic apply, report formatting
   - shared project build pipeline via `build_project_desired_state()`
@@ -758,7 +780,7 @@ The suite currently verifies:
 - `CLAUDE.md` shim safety
 - agent translation, `.toml` file rendering, sandbox mode derivation, and global agent registry tracking
 - skill translation, relocation rewriting, vendoring, and standalone skill translation
-- command translation, `cmd-` name prefix, variable replacement, provenance marking, plugin resource vendoring through command translation, and standalone command translation
+- prompt translation from commands, variable pass-through, provenance marking, plugin resource vendoring through prompt translation, and standalone command-to-prompt translation
 - exclusion filtering for plugins and standalone sources with part-count disambiguation
 - reconcile idempotence, stale cleanup, ownership safety, diff reporting, and global instructions bridging
 - CLI command behavior including multi-source integration
@@ -787,7 +809,7 @@ These are current implemented simplifications, not necessarily permanent design 
 - frontmatter parsing uses safe YAML loading for frontmatter blocks plus strict
   post-parse validation of supported runtime shapes
 - exclusion ids are exact-match identifiers, not wildcard/glob patterns
-- command-derived skills use the `cmd-` prefix convention to separate them from native skills in the shared Codex skill namespace
+- commands are translated to native Codex prompt files (`~/.codex/prompts/`) rather than Codex skills, avoiding namespace collisions with the skill directory entirely
 - LaunchAgent scheduling is supported; watcher mode is not
 
 Any change to these constraints should update this file.
