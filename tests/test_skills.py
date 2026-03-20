@@ -695,6 +695,45 @@ def test_sibling_reference_regex_still_matches_real_siblings(
     assert b"../shared-lib/" not in skill_md.content
 
 
+def test_sibling_reference_regex_ignores_code_blocks(
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """../name/ paths inside fenced code blocks are not treated as sibling references.
+
+    Real-world case: setup-email-editor skill has ``cd ../mailpoet/mailpoet``
+    inside a ```sh block.  This is a shell command, not a skill reference.
+    """
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "tools",
+        "1.0.0",
+        skill_names=("setup-editor",),
+    )
+    skill_dir = version_dir / "skills" / "setup-editor"
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: setup-editor\n"
+        "description: Set up editor\n"
+        "---\n\n"
+        "# Setup\n\n"
+        "Build dependencies:\n\n"
+        "```sh\n"
+        "cd ../mailpoet/mailpoet\n"
+        "./do install\n"
+        "```\n\n"
+        "Then restart.\n"
+    )
+
+    skills = translate_installed_skills(discover_latest_plugins(cache_root)).skills
+
+    assert len(skills) == 1
+    assert skills[0].install_dir_name == "setup-editor"
+    # The ../mailpoet/ inside the code block should NOT be rewritten
+    skill_md = next(f for f in skills[0].files if f.relative_path == Path("SKILL.md"))
+    assert b"../mailpoet/" in skill_md.content
+
+
 def test_translate_standalone_skill_empty_input():
     """Empty skill paths produce empty result."""
     result = translate_standalone_skills((), scope="user")

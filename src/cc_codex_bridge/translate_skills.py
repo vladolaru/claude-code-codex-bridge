@@ -37,6 +37,7 @@ def _format_skill_validation_diagnostic(diagnostic: SkillValidationDiagnostic) -
 
 
 SIBLING_SKILL_REF_RE = re.compile(r"(?<!\.)\.\./(?P<skill>[A-Za-z0-9._-]+)/")
+_FENCED_CODE_BLOCK_RE = re.compile(r"^```[^\n]*\n.*?^```", re.MULTILINE | re.DOTALL)
 IGNORED_NAMES = {".DS_Store", "__pycache__"}
 IGNORED_SKILL_DIRS = {".git", "node_modules", "__pycache__", ".venv", ".tox"}
 
@@ -378,7 +379,11 @@ def _resolve_relative_references(
     Returns rewritten content and a mapping of target directory names to
     source paths on disk.  Missing referenced paths are a hard error.
     """
-    matches = set(SIBLING_SKILL_REF_RE.findall(content))
+    # Strip fenced code blocks before scanning for sibling references.
+    # Paths like ../mailpoet/ inside ```sh blocks are shell commands, not
+    # skill references.
+    prose = _FENCED_CODE_BLOCK_RE.sub("", content)
+    matches = set(SIBLING_SKILL_REF_RE.findall(prose))
     if not matches:
         return content, {}
 
