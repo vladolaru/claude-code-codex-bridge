@@ -72,7 +72,7 @@ def plan_claude_shim(project: ProjectContext) -> ClaudeShimDecision:
                 reason="CLAUDE.md is a symlink to AGENTS.md",
             )
         return ClaudeShimDecision(
-            action="fail",
+            action="skip",
             path=claude_md_path,
             reason="CLAUDE.md is a symlink but not to AGENTS.md",
         )
@@ -90,8 +90,15 @@ def plan_claude_shim(project: ProjectContext) -> ClaudeShimDecision:
             reason="CLAUDE.md already matches shim",
         )
 
+    if "AGENTS.md" in content:
+        return ClaudeShimDecision(
+            action="preserve",
+            path=claude_md_path,
+            reason="CLAUDE.md references AGENTS.md",
+        )
+
     return ClaudeShimDecision(
-        action="fail",
+        action="skip",
         path=claude_md_path,
         reason="CLAUDE.md exists and is not a generator-owned shim",
     )

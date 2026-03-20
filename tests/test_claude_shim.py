@@ -39,8 +39,8 @@ def test_plan_claude_shim_preserves_exact_shim(tmp_path: Path):
     assert decision.content == SHIM_CONTENT
 
 
-def test_plan_claude_shim_rejects_non_exact_shim_variants(tmp_path: Path):
-    """Whitespace variants are treated as hand-authored rather than generator-owned."""
+def test_plan_claude_shim_preserves_non_exact_shim_with_agents_ref(tmp_path: Path):
+    """Whitespace variants that still reference AGENTS.md are preserved."""
     project_root = tmp_path / "project"
     project_root.mkdir()
     agents_md_path = project_root / "AGENTS.md"
@@ -50,8 +50,8 @@ def test_plan_claude_shim_rejects_non_exact_shim_variants(tmp_path: Path):
 
     decision = plan_claude_shim(ProjectContext(project_root, agents_md_path))
 
-    assert decision.action == "fail"
-    assert "not a generator-owned shim" in decision.reason
+    assert decision.action == "preserve"
+    assert "AGENTS.md" in decision.reason
 
 
 def test_plan_claude_shim_preserves_symlink_to_agents_md(tmp_path: Path):
@@ -67,8 +67,8 @@ def test_plan_claude_shim_preserves_symlink_to_agents_md(tmp_path: Path):
     assert decision.action == "preserve"
 
 
-def test_plan_claude_shim_fails_for_hand_authored_file(tmp_path: Path):
-    """Hand-authored CLAUDE.md is not overwritten."""
+def test_plan_claude_shim_skips_hand_authored_file(tmp_path: Path):
+    """Hand-authored CLAUDE.md without AGENTS.md reference is skipped."""
     project_root = tmp_path / "project"
     project_root.mkdir()
     agents_md_path = project_root / "AGENTS.md"
@@ -77,7 +77,7 @@ def test_plan_claude_shim_fails_for_hand_authored_file(tmp_path: Path):
 
     decision = plan_claude_shim(ProjectContext(project_root, agents_md_path))
 
-    assert decision.action == "fail"
+    assert decision.action == "skip"
     assert "not a generator-owned shim" in decision.reason
 
 
@@ -153,8 +153,8 @@ def test_execute_bootstrap_rejects_symlinked_agents_md(tmp_path: Path):
         execute_bootstrap(project)
 
 
-def test_plan_claude_shim_fails_for_non_agents_symlink(tmp_path: Path):
-    """Symlinks to anything except AGENTS.md are rejected."""
+def test_plan_claude_shim_skips_non_agents_symlink(tmp_path: Path):
+    """Symlinks to anything except AGENTS.md are skipped."""
     project_root = tmp_path / "project"
     project_root.mkdir()
     agents_md_path = project_root / "AGENTS.md"
@@ -165,5 +165,48 @@ def test_plan_claude_shim_fails_for_non_agents_symlink(tmp_path: Path):
 
     decision = plan_claude_shim(ProjectContext(project_root, agents_md_path))
 
-    assert decision.action == "fail"
+    assert decision.action == "skip"
     assert "not to AGENTS.md" in decision.reason
+
+
+def test_plan_claude_shim_preserves_agents_md_reference_no_newline(tmp_path: Path):
+    """CLAUDE.md with '@AGENTS.md' (no trailing newline) is preserved."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# Shared\n")
+    (project_root / "CLAUDE.md").write_text("@AGENTS.md")
+    decision = plan_claude_shim(ProjectContext(project_root, project_root / "AGENTS.md"))
+    assert decision.action == "preserve"
+    assert "AGENTS.md" in decision.reason
+
+
+def test_plan_claude_shim_preserves_human_redirect_phrase(tmp_path: Path):
+    """CLAUDE.md with 'Read and follow AGENTS.md' is preserved."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# Shared\n")
+    (project_root / "CLAUDE.md").write_text("Read and follow AGENTS.md\n")
+    decision = plan_claude_shim(ProjectContext(project_root, project_root / "AGENTS.md"))
+    assert decision.action == "preserve"
+
+
+def test_plan_claude_shim_preserves_long_content_referencing_agents_md(tmp_path: Path):
+    """CLAUDE.md with substantial content mentioning AGENTS.md is preserved."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# Shared\n")
+    (project_root / "CLAUDE.md").write_text(
+        "# Instructions\n\nSee AGENTS.md for details.\n\n## More stuff\n"
+    )
+    decision = plan_claude_shim(ProjectContext(project_root, project_root / "AGENTS.md"))
+    assert decision.action == "preserve"
+
+
+def test_plan_claude_shim_skips_independent_hand_authored(tmp_path: Path):
+    """Hand-authored CLAUDE.md without AGENTS.md reference produces skip."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# Shared\n")
+    (project_root / "CLAUDE.md").write_text("# Fully independent instructions\n")
+    decision = plan_claude_shim(ProjectContext(project_root, project_root / "AGENTS.md"))
+    assert decision.action == "skip"

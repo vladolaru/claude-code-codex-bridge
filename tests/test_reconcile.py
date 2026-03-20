@@ -956,27 +956,51 @@ def test_reconcile_removes_stale_global_agent_toml_file(
     assert not agent_toml.exists()
 
 
-def test_build_desired_state_fails_for_hand_authored_claude_md(
+def test_build_desired_state_skips_hand_authored_claude_md(
     make_project,
     make_plugin_version,
     tmp_path: Path,
 ):
-    """build_desired_state raises when the shim decision is 'fail'."""
+    """build_desired_state proceeds when the shim decision is 'skip'."""
     project_root, _agents_md = make_project()
     (project_root / "CLAUDE.md").write_text("# My hand-authored config\n")
     cache_root, _version_dir = make_plugin_version("market", "prompt-engineer", "1.0.0")
 
     discovery = discover(project_path=project_root, cache_dir=cache_root)
     shim_decision = plan_claude_shim(discovery.project)
-    assert shim_decision.action == "fail"
+    assert shim_decision.action == "skip"
 
-    with pytest.raises(ReconcileError, match="CLAUDE.md"):
-        build_desired_state(
-            discovery,
-            shim_decision,
-            (),
-            codex_home=tmp_path / "codex-home",
-        )
+    desired = build_desired_state(
+        discovery,
+        shim_decision,
+        (),
+        codex_home=tmp_path / "codex-home",
+    )
+    project_file_paths = [p for p, _ in desired.project_files]
+    assert (project_root / "CLAUDE.md") not in project_file_paths
+    assert (project_root / "CLAUDE.md") not in desired.preserved_project_files
+
+
+def test_build_desired_state_proceeds_with_skip_shim(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """build_desired_state succeeds when shim decision is skip."""
+    project_root, _ = make_project()
+    (project_root / "CLAUDE.md").write_text("# Independent instructions\n")
+    cache_root, _ = make_plugin_version("m", "p", "1.0.0", skill_names=("s",))
+    codex_home = tmp_path / "codex-home"
+
+    build = build_project_desired_state(
+        project_root,
+        codex_home=codex_home,
+        cache_dir=cache_root,
+    )
+    assert build.desired_state is not None
+    project_file_paths = [p for p, _ in build.desired_state.project_files]
+    assert (project_root / "CLAUDE.md") not in project_file_paths
+    assert (project_root / "CLAUDE.md") not in build.desired_state.preserved_project_files
 
 
 def test_diff_report_skips_remove_and_skill_changes_in_diff_output(
