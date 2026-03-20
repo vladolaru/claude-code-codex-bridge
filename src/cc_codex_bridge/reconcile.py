@@ -10,6 +10,7 @@ from typing import Iterable
 from uuid import uuid4
 
 from cc_codex_bridge.bridge_home import resolve_bridge_home, project_state_dir
+from cc_codex_bridge.scan import ScanResult, scan_for_projects
 from cc_codex_bridge.model import (
     ClaudeShimDecision,
     DiscoveryResult,
@@ -728,6 +729,7 @@ class ReconcileAllReport:
 
     results: tuple[ReconcileAllProjectResult, ...]
     errors: tuple[ReconcileAllError, ...]
+    scan_result: ScanResult | None = None
 
 
 def reconcile_all(
@@ -745,12 +747,16 @@ def reconcile_all(
     registry_path = bridge_home_path / GLOBAL_REGISTRY_FILENAME
 
     snapshot = _load_registry_snapshot(registry_path)
-    project_roots = list(snapshot.registry.projects) if snapshot.existed else []
+    scan_result = scan_for_projects(bridge_home_path)
+    registry_roots = list(snapshot.registry.projects) if snapshot.existed else []
+    project_roots = sorted(
+        set(registry_roots) | set(scan_result.bridgeable), key=str
+    )
 
     results: list[ReconcileAllProjectResult] = []
     errors: list[ReconcileAllError] = []
 
-    for project_root in sorted(project_roots, key=str):
+    for project_root in project_roots:
         if not project_root.is_dir():
             errors.append(ReconcileAllError(project_root=project_root, error="directory not found"))
             continue
@@ -805,7 +811,7 @@ def reconcile_all(
         except Exception as exc:
             errors.append(ReconcileAllError(project_root=project_root, error=str(exc)))
 
-    return ReconcileAllReport(results=tuple(results), errors=tuple(errors))
+    return ReconcileAllReport(results=tuple(results), errors=tuple(errors), scan_result=scan_result)
 
 
 def uninstall_all(

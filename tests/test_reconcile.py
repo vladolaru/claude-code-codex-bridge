@@ -2110,6 +2110,122 @@ def test_reconcile_all_rejects_symlinked_registry(tmp_path: Path):
         reconcile_all(codex_home=tmp_path / "codex-home")
 
 
+def test_reconcile_all_merges_scanned_projects(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """reconcile_all discovers projects via scan config and reconciles them."""
+    from cc_codex_bridge.reconcile import reconcile_all
+    from cc_codex_bridge.scan import SCAN_CONFIG_FILENAME
+
+    # Create a project that is NOT in the registry but IS scannable
+    scan_dir = tmp_path / "scan-root"
+    project_root = scan_dir / "scanned-project"
+    project_root.mkdir(parents=True)
+    (project_root / ".git").mkdir()
+    (project_root / "AGENTS.md").write_text("# Scanned project\n")
+
+    # Write scan config to bridge_home
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    bridge_home.mkdir(parents=True)
+    config_path = bridge_home / SCAN_CONFIG_FILENAME
+    config_path.write_text(f'scan_paths = ["{scan_dir}/*"]\n')
+
+    codex_home = tmp_path / "codex-home"
+    report = reconcile_all(codex_home=codex_home)
+
+    # The scanned project should appear in results
+    result_roots = [r.project_root for r in report.results]
+    assert project_root.resolve() in [r.resolve() for r in result_roots]
+
+
+def test_reconcile_all_deduplicates_registry_and_scan(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """A project in both registry and scan appears exactly once in results."""
+    from cc_codex_bridge.reconcile import reconcile_all
+    from cc_codex_bridge.scan import SCAN_CONFIG_FILENAME
+
+    # Create a project, give it a .git dir, and reconcile to register it
+    scan_dir = tmp_path / "scan-root"
+    project_root = scan_dir / "my-project"
+    project_root.mkdir(parents=True)
+    (project_root / ".git").mkdir()
+    (project_root / "AGENTS.md").write_text("# My project\n")
+
+    cache_root, _ = make_plugin_version("m", "p", "1.0.0", skill_names=("s",))
+    codex_home = tmp_path / "codex-home"
+
+    # Register the project via reconcile
+    desired = _build_desired(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    # Also configure scan to find the same project
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    bridge_home.mkdir(parents=True, exist_ok=True)
+    config_path = bridge_home / SCAN_CONFIG_FILENAME
+    config_path.write_text(f'scan_paths = ["{scan_dir}/*"]\n')
+
+    report = reconcile_all(codex_home=codex_home)
+
+    # The project should appear exactly once
+    resolved_roots = [r.project_root.resolve() for r in report.results]
+    assert resolved_roots.count(project_root.resolve()) == 1
+
+
+def test_reconcile_all_no_config_uses_registry_only(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Without config.toml, reconcile_all uses registry projects only (backwards compatible)."""
+    from cc_codex_bridge.reconcile import reconcile_all
+
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("m", "p", "1.0.0", skill_names=("s",))
+    codex_home = tmp_path / "codex-home"
+
+    # Register the project via reconcile (no config.toml created)
+    desired = _build_desired(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    report = reconcile_all(codex_home=codex_home)
+    assert len(report.results) == 1
+    assert report.results[0].project_root == project_root
+
+
+def test_reconcile_all_scan_result_in_report(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """report.scan_result reflects whether scan config exists."""
+    from cc_codex_bridge.reconcile import reconcile_all
+    from cc_codex_bridge.scan import SCAN_CONFIG_FILENAME, ScanResult
+
+    codex_home = tmp_path / "codex-home"
+
+    # Without config.toml — scan_result should be empty ScanResult
+    report_no_config = reconcile_all(codex_home=codex_home)
+    assert report_no_config.scan_result is not None
+    assert report_no_config.scan_result.bridgeable == ()
+
+    # With config.toml — scan_result should be a ScanResult
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    bridge_home.mkdir(parents=True, exist_ok=True)
+    scan_dir = tmp_path / "scan-root"
+    scan_dir.mkdir(parents=True)
+    config_path = bridge_home / SCAN_CONFIG_FILENAME
+    config_path.write_text(f'scan_paths = ["{scan_dir}/*"]\n')
+
+    report_with_config = reconcile_all(codex_home=codex_home)
+    assert report_with_config.scan_result is not None
+    assert isinstance(report_with_config.scan_result, ScanResult)
+
+
 def test_uninstall_rejects_symlinked_registry(tmp_path: Path):
     """uninstall_all must fail on a symlinked global registry."""
     from cc_codex_bridge.reconcile import uninstall_all
