@@ -15,6 +15,7 @@ from cc_codex_bridge.model import (
     ClaudeShimDecision,
     DiscoveryResult,
     GeneratedAgentFile,
+    GeneratedPrompt,
     GeneratedSkill,
     ReconcileError,
     VendoredPluginResource,
@@ -58,6 +59,7 @@ class DesiredState:
     global_instructions: bytes | None = None
     project_skills: tuple[GeneratedSkill, ...] = ()
     global_agents: tuple[GeneratedAgentFile, ...] = ()
+    global_prompts: tuple[GeneratedPrompt, ...] = ()
     plugin_resources: tuple[VendoredPluginResource, ...] = ()
 
 
@@ -148,24 +150,6 @@ class _MutationPlan:
     registry_writes: tuple[_RegistryWrite, ...]
 
 
-def _normalise_command_skill_source_paths(
-    skills: tuple[GeneratedSkill, ...],
-) -> tuple[GeneratedSkill, ...]:
-    """Normalise command-derived skill source_paths for assign_skill_names.
-
-    Command-derived skills have file source_paths (e.g. .../commands/review.md)
-    while native skills have directory source_paths (.../skills/review/).
-    assign_skill_names groups by source_path.name, so we rewrite command
-    source_paths to use the stem as a pseudo-directory name.
-    """
-    return tuple(
-        replace(skill, source_path=skill.source_path.parent / f"cmd-{skill.source_path.stem}")
-        if skill.source_path.suffix == ".md"
-        else skill
-        for skill in skills
-    )
-
-
 def build_desired_state(
     discovery: DiscoveryResult,
     shim_decision: ClaudeShimDecision,
@@ -176,6 +160,7 @@ def build_desired_state(
     extra_project_files: Iterable[tuple[Path, bytes]] | None = None,
     project_skills: Iterable[GeneratedSkill] | None = None,
     global_agents: Iterable[GeneratedAgentFile] | None = None,
+    global_prompts: Iterable[GeneratedPrompt] | None = None,
     project_agent_files: Iterable[tuple[Path, bytes]] | None = None,
     plugin_resources: Iterable[VendoredPluginResource] | None = None,
 ) -> DesiredState:
@@ -239,6 +224,7 @@ def build_desired_state(
         global_instructions=global_instructions,
         project_skills=tuple(project_skills or ()),
         global_agents=tuple(global_agents or ()),
+        global_prompts=tuple(global_prompts or ()),
         plugin_resources=tuple(plugin_resources or ()),
     )
 
@@ -252,7 +238,7 @@ class ProjectBuildResult:
     shim_decision: ClaudeShimDecision
     agent_count: int
     skill_count: int
-    command_count: int
+    prompt_count: int
     exclusion_report: object  # ExclusionReport from exclusions module
     diagnostics: tuple  # AgentTranslationDiagnostic and SkillValidationDiagnostic items
 
@@ -287,9 +273,10 @@ def build_project_desired_state(
         translate_installed_agents_with_diagnostics,
         translate_standalone_agents,
     )
-    from cc_codex_bridge.translate_commands import (
-        translate_installed_commands,
-        translate_standalone_commands as translate_standalone_cmds,
+    from cc_codex_bridge.translate_prompts import (
+        assign_prompt_names,
+        translate_installed_commands as translate_installed_prompts,
+        translate_standalone_commands as translate_standalone_prompts,
     )
     from cc_codex_bridge.translate_skills import (
         assign_skill_names,
@@ -323,7 +310,7 @@ def build_project_desired_state(
             shim_decision=shim_decision,
             agent_count=0,
             skill_count=0,
-            command_count=0,
+            prompt_count=0,
             exclusion_report=exclusion_report,
             diagnostics=(),
         )
@@ -349,7 +336,7 @@ def build_project_desired_state(
             shim_decision=shim_decision,
             agent_count=0,
             skill_count=0,
-            command_count=0,
+            prompt_count=0,
             exclusion_report=exclusion_report,
             diagnostics=tuple(all_diagnostics),
         )
@@ -376,47 +363,43 @@ def build_project_desired_state(
     user_skill_result = translate_standalone_skills(result.user_skills, scope="user")
     project_skill_result = translate_standalone_skills(result.project_skills, scope="project")
 
-    # Translate commands into skills
-    plugin_command_result = translate_installed_commands(result.plugins, bridge_home=bridge_home_path)
-    user_command_result = translate_standalone_cmds(result.user_commands, scope="user")
-    project_command_result = translate_standalone_cmds(result.project_commands, scope="project")
+    # Translate commands into prompts
+    plugin_prompt_result = translate_installed_prompts(result.plugins, bridge_home=bridge_home_path)
+    user_prompt_result = translate_standalone_prompts(result.user_commands, scope="user")
+    project_prompt_result = translate_standalone_prompts(
+        result.project_commands,
+        scope="project",
+        project_dir_name=result.project.root.name,
+    )
 
-    # Command-derived skills have file source_paths (e.g. review.md) while
-    # skill-derived skills have directory source_paths.  assign_skill_names
-    # groups by source_path.name, so normalise command source_paths to use
-    # the stem as the directory name for correct grouping and collision
-    # resolution.
-    plugin_cmd_skills = _normalise_command_skill_source_paths(plugin_command_result.skills)
-    user_cmd_skills = _normalise_command_skill_source_paths(user_command_result.skills)
-    project_cmd_skills = _normalise_command_skill_source_paths(project_command_result.skills)
+    all_prompts = assign_prompt_names((
+        *plugin_prompt_result.prompts,
+        *user_prompt_result.prompts,
+        *project_prompt_result.prompts,
+    ))
 
     all_global_skills = assign_skill_names((
         *plugin_skill_result.skills,
         *user_skill_result.skills,
-        *plugin_cmd_skills,
-        *user_cmd_skills,
     ))
-    all_project_skills = (*project_skill_result.skills, *project_cmd_skills)
+    all_project_skills = project_skill_result.skills
 
     skill_diagnostics = (
         *plugin_skill_result.diagnostics,
         *user_skill_result.diagnostics,
         *project_skill_result.diagnostics,
     )
-    command_diagnostics = (
-        *plugin_command_result.diagnostics,
-        *user_command_result.diagnostics,
-        *project_command_result.diagnostics,
+    prompt_diagnostics = (
+        *plugin_prompt_result.diagnostics,
+        *user_prompt_result.diagnostics,
+        *project_prompt_result.diagnostics,
     )
-    all_diagnostics = (*all_diagnostics, *skill_diagnostics, *command_diagnostics)
+    all_diagnostics = (*all_diagnostics, *skill_diagnostics, *prompt_diagnostics)
 
     total_skill_count = len(all_global_skills) + len(all_project_skills)
-    command_count = (
-        len(plugin_command_result.skills)
-        + len(user_command_result.skills)
-        + len(project_command_result.skills)
-    )
-    # Collect and deduplicate plugin resources from skills and agents
+    prompt_count = len(all_prompts)
+
+    # Collect and deduplicate plugin resources from skills, agents, and prompts
     all_plugin_resources: dict[tuple[str, str, str], VendoredPluginResource] = {}
     for resource in plugin_skill_result.plugin_resources:
         key = (resource.marketplace, resource.plugin_name, resource.target_dir_name)
@@ -424,7 +407,7 @@ def build_project_desired_state(
     for resource in agent_result.plugin_resources:
         key = (resource.marketplace, resource.plugin_name, resource.target_dir_name)
         all_plugin_resources[key] = resource
-    for resource in plugin_command_result.plugin_resources:
+    for resource in plugin_prompt_result.plugin_resources:
         key = (resource.marketplace, resource.plugin_name, resource.target_dir_name)
         all_plugin_resources[key] = resource
     plugin_resources = tuple(sorted(
@@ -437,6 +420,7 @@ def build_project_desired_state(
         bridge_home=bridge_home,
         project_skills=all_project_skills,
         global_agents=global_agents,
+        global_prompts=all_prompts,
         project_agent_files=project_agent_files,
         plugin_resources=plugin_resources,
     )
@@ -447,7 +431,7 @@ def build_project_desired_state(
         shim_decision=shim_decision,
         agent_count=len(all_global_agents) + len(project_agents),
         skill_count=total_skill_count,
-        command_count=command_count,
+        prompt_count=prompt_count,
         exclusion_report=exclusion_report,
         diagnostics=tuple(all_diagnostics),
     )

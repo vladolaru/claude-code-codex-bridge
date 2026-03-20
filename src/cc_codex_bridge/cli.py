@@ -353,13 +353,13 @@ def main(argv: list[str] | None = None) -> int:
                 if args.json:
                     print(format_status_json(
                         None, build.exclusion_report,
-                        command_count=build.command_count,
+                        prompt_count=build.prompt_count,
                         diagnostics=agent_diags, skill_diagnostics=skill_diags,
                     ))
                 else:
                     print(format_status_report(
                         None, build.exclusion_report,
-                        command_count=build.command_count,
+                        prompt_count=build.prompt_count,
                         diagnostics=agent_diags, skill_diagnostics=skill_diags,
                     ))
                 return 0
@@ -371,7 +371,7 @@ def main(argv: list[str] | None = None) -> int:
                 build.shim_decision.action,
                 build.agent_count,
                 build.skill_count,
-                build.command_count,
+                build.prompt_count,
                 build.exclusion_report,
             )
             if skill_diags:
@@ -389,7 +389,7 @@ def main(argv: list[str] | None = None) -> int:
                 build.shim_decision.action,
                 build.agent_count,
                 build.skill_count,
-                build.command_count,
+                build.prompt_count,
                 build.exclusion_report,
             )
             if args.diff:
@@ -406,13 +406,13 @@ def main(argv: list[str] | None = None) -> int:
             if args.json:
                 print(format_status_json(
                     report, build.exclusion_report,
-                    command_count=build.command_count,
+                    prompt_count=build.prompt_count,
                     skill_diagnostics=skill_diags,
                 ))
             else:
                 print(format_status_report(
                     report, build.exclusion_report,
-                    command_count=build.command_count,
+                    prompt_count=build.prompt_count,
                     skill_diagnostics=skill_diags,
                 ))
             return 0
@@ -737,7 +737,7 @@ def _print_summary(
     shim_action: str,
     agent_count: int,
     skill_count: int,
-    command_count: int,
+    prompt_count: int,
     exclusion_report: ExclusionReport,
 ) -> None:
     """Print a human-readable discovery summary."""
@@ -747,7 +747,7 @@ def _print_summary(
     print(f"PLUGINS_FOUND: {len(result.plugins)}")
     print(f"GENERATED_AGENTS: {agent_count}")
     print(f"GENERATED_SKILLS: {skill_count}")
-    print(f"TRANSLATED_COMMANDS: {command_count}")
+    print(f"TRANSLATED_PROMPTS: {prompt_count}")
     for plugin in result.plugins:
         print(
             "PLUGIN: "
@@ -774,7 +774,7 @@ def _build_status_payload(
     report,
     exclusion_report: ExclusionReport,
     *,
-    command_count: int = 0,
+    prompt_count: int = 0,
     diagnostics=None,
     skill_diagnostics=None,
 ) -> dict[str, object]:
@@ -819,7 +819,7 @@ def _build_status_payload(
     from cc_codex_bridge import __version__
 
     return {
-        "command_count": command_count,
+        "prompt_count": prompt_count,
         "version": __version__,
         "status": status,
         "pending_change_count": pending_change_count,
@@ -837,13 +837,13 @@ def _build_status_payload(
 
 def format_status_json(
     report, exclusion_report: ExclusionReport,
-    *, command_count: int = 0, diagnostics=None, skill_diagnostics=None,
+    *, prompt_count: int = 0, diagnostics=None, skill_diagnostics=None,
 ) -> str:
     """Render status output as deterministic JSON."""
     return json.dumps(
         _build_status_payload(
             report, exclusion_report,
-            command_count=command_count,
+            prompt_count=prompt_count,
             diagnostics=diagnostics, skill_diagnostics=skill_diagnostics,
         ),
         indent=2,
@@ -853,12 +853,12 @@ def format_status_json(
 
 def format_status_report(
     report, exclusion_report: ExclusionReport,
-    *, command_count: int = 0, diagnostics=None, skill_diagnostics=None,
+    *, prompt_count: int = 0, diagnostics=None, skill_diagnostics=None,
 ) -> str:
     """Render status output as human-readable text."""
     payload = _build_status_payload(
         report, exclusion_report,
-        command_count=command_count,
+        prompt_count=prompt_count,
         diagnostics=diagnostics, skill_diagnostics=skill_diagnostics,
     )
     categorized = payload["categorized_changes"]
@@ -868,7 +868,7 @@ def format_status_report(
         f"VERSION: v{payload['version']}",
         f"STATUS: {payload['status']}",
         f"PENDING_CHANGES: {payload['pending_change_count']}",
-        f"TRANSLATED_COMMANDS: {payload['command_count']}",
+        f"TRANSLATED_PROMPTS: {payload['prompt_count']}",
         (
             "PROJECT_FILES: "
             f"create={len(project_files['create'])} "

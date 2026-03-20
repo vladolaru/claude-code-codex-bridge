@@ -272,10 +272,10 @@ def test_reconcile_is_idempotent_with_all_sources(make_project, tmp_path: Path, 
     assert (project_root / ".codex" / "agents" / "reviewer.toml").read_text() == project_agent_v1
 
 
-def test_plugin_commands_appear_as_global_skills(
+def test_plugin_commands_appear_as_global_prompts(
     make_project, make_plugin_version, tmp_path,
 ):
-    """Plugin commands are translated to skills and included in desired state."""
+    """Plugin commands are translated to prompts and included in desired state."""
     project_root, _ = make_project()
     cache_root, version_dir = make_plugin_version(
         "market", "tools", "1.0.0",
@@ -292,21 +292,19 @@ def test_plugin_commands_appear_as_global_skills(
     )
     assert build.desired_state is not None
 
-    skill_names = [s.install_dir_name for s in build.desired_state.skills]
-    assert "cmd-review" in skill_names
+    prompt_filenames = [p.filename for p in build.desired_state.global_prompts]
+    assert "review.md" in prompt_filenames
 
-    # Verify $ARGUMENTS was replaced
-    review_skill = next(s for s in build.desired_state.skills if s.install_dir_name == "cmd-review")
-    skill_md = next(f for f in review_skill.files if f.relative_path == Path("SKILL.md"))
-    content = skill_md.content.decode()
-    assert "$ARGUMENTS" not in content
-    assert "<use any user-provided details; otherwise infer from context>" in content
+    # Verify $ARGUMENTS passes through (prompts support it natively)
+    review_prompt = next(p for p in build.desired_state.global_prompts if p.filename == "review.md")
+    content = review_prompt.content.decode()
+    assert "$ARGUMENTS" in content
 
 
-def test_project_commands_appear_as_project_skills(
+def test_project_commands_appear_as_global_prompts(
     make_project, tmp_path,
 ):
-    """Project-level commands are translated to project-local skills."""
+    """Project-level commands are translated to prompts in desired state."""
     project_root, _ = make_project()
     commands_dir = project_root / ".claude" / "commands"
     commands_dir.mkdir(parents=True)
@@ -320,5 +318,7 @@ def test_project_commands_appear_as_project_skills(
     )
     assert build.desired_state is not None
 
-    project_skill_names = [s.install_dir_name for s in build.desired_state.project_skills]
-    assert "cmd-build" in project_skill_names
+    prompt_filenames = [p.filename for p in build.desired_state.global_prompts]
+    # Project-level prompts get the project dir name suffix
+    expected = f"build--{project_root.name}.md"
+    assert expected in prompt_filenames

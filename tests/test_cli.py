@@ -1644,8 +1644,8 @@ def test_reconcile_bootstrap_reports_error_on_symlinked_agents_md(tmp_path: Path
     assert "Error:" in captured.err
 
 
-def test_status_reports_command_count(make_project, tmp_path: Path, capsys):
-    """status output includes command count."""
+def test_status_reports_prompt_count(make_project, tmp_path: Path, capsys):
+    """status output includes prompt count."""
     project_root, _agents_md = make_project()
     claude_home = tmp_path / "claude-home"
     codex_home = tmp_path / "codex-home"
@@ -1668,11 +1668,11 @@ def test_status_reports_command_count(make_project, tmp_path: Path, capsys):
 
     assert exit_code == 0
     captured = capsys.readouterr()
-    assert "TRANSLATED_COMMANDS: 1" in captured.out
+    assert "TRANSLATED_PROMPTS: 1" in captured.out
 
 
-def test_status_json_includes_command_count(make_project, tmp_path: Path, capsys):
-    """status --json includes command_count field."""
+def test_status_json_includes_prompt_count(make_project, tmp_path: Path, capsys):
+    """status --json includes prompt_count field."""
     project_root, _agents_md = make_project()
     claude_home = tmp_path / "claude-home"
     codex_home = tmp_path / "codex-home"
@@ -1697,11 +1697,11 @@ def test_status_json_includes_command_count(make_project, tmp_path: Path, capsys
     assert exit_code == 0
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
-    assert payload["command_count"] == 1
+    assert payload["prompt_count"] == 1
 
 
-def test_validate_reports_command_count(make_project, tmp_path: Path, capsys):
-    """validate output includes command count."""
+def test_validate_reports_prompt_count(make_project, tmp_path: Path, capsys):
+    """validate output includes prompt count."""
     project_root, _agents_md = make_project()
     claude_home = tmp_path / "claude-home"
 
@@ -1728,7 +1728,7 @@ def test_validate_reports_command_count(make_project, tmp_path: Path, capsys):
 
     assert exit_code == 0
     captured = capsys.readouterr()
-    assert "TRANSLATED_COMMANDS: 2" in captured.out
+    assert "TRANSLATED_PROMPTS: 2" in captured.out
 
 
 def test_cli_exclude_command_flag(make_project, make_plugin_version, tmp_path: Path, capsys):
@@ -1767,7 +1767,7 @@ def test_cli_exclude_command_flag(make_project, make_plugin_version, tmp_path: P
     )
 
     assert exit_code == 0
-    # The excluded command should not produce a skill directory
-    assert not (codex_home / "skills" / "cmd-deploy").exists()
-    # The non-excluded command should still be generated
-    assert (codex_home / "skills" / "cmd-test").exists()
+    captured = capsys.readouterr()
+    # With one of two commands excluded, only 1 prompt should be translated
+    assert "TRANSLATED_PROMPTS: 1" in captured.out
+    assert "EXCLUDED_COMMANDS: 1" in captured.out
