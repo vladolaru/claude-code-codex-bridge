@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Bulk scan discovery via `~/.cc-codex-bridge/config.toml` with `scan_paths` and `exclude_paths` glob lists. Scan discovers git repos with Claude Code presence (`AGENTS.md`, `CLAUDE.md`, or `.claude/` directory) while rejecting symlinks, submodules, and worktrees.
+- `--all` flag for `reconcile`, `validate`, and `status` commands. Merges scan-discovered projects with registry projects and operates on the union.
+- `validate --all` for lightweight bulk project validation.
+- `status --all` for bulk sync state overview (supports `--json`).
+- Scan discovery reporting in `--all` output (text and JSON): bridgeable, not-bridgeable, and filtered candidates.
+
+### Changed
+
+- LaunchAgent plist now runs `reconcile --all` instead of the removed `reconcile-all` command.
+
+### Removed
+
+- `reconcile-all` subcommand (replaced by `reconcile --all`).
+
 ## [0.13.0] - 2026-03-19
 
 ### Added

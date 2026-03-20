@@ -87,7 +87,7 @@ If a behavior is described differently in multiple docs:
 
 - changing Claude Code behavior
 - hand-authored Codex-specific skills
-- filesystem-wide project discovery
+- filesystem-wide project discovery (scan-based discovery via `config.toml` is in scope; unbounded filesystem traversal is not)
 - watcher mode
 - automatic `launchctl bootstrap`
 - runtime execution of Claude commands (translated commands serve as context/instructions, not executable workflows)
@@ -291,6 +291,36 @@ Discovery lives in `src/cc_codex_bridge/discover.py`.
 ### Symlink rule
 
 Installed plugin version directories are resolved with `Path.resolve()`. If the installed path is a symlink into a working repo, the resolved repo path becomes the effective source path, while the installed path is still recorded.
+
+### Scan-based discovery
+
+Scan-based discovery lives in `src/cc_codex_bridge/scan.py` and enables bulk project operations via `--all` flags.
+
+**Config file:** `~/.cc-codex-bridge/config.toml` (user-authored, never overwritten by the bridge)
+
+```toml
+scan_paths = ["~/Work/a8c/*", "~/Work/a8c/.duplicates/*"]
+exclude_paths = ["~/Work/a8c/scratch"]
+```
+
+- `scan_paths`: shell-style glob patterns with `~` expansion
+- `exclude_paths`: glob patterns for directories to skip
+- both fields optional, unknown keys ignored
+- missing file means no scanning (backwards compatible)
+- malformed TOML is a hard error
+
+**Discovery pipeline:**
+
+1. expand `scan_paths` globs into candidate directories
+2. remove candidates matching `exclude_paths` globs
+3. reject symlinked directories
+4. reject directories without `.git/` directory (excludes submodules and worktrees where `.git` is a file)
+5. reject directories without Claude presence (`AGENTS.md`, `CLAUDE.md`, or `.claude/`)
+6. categorize: bridgeable (has `AGENTS.md` or `CLAUDE.md`) vs not-bridgeable (has `.claude/` only)
+
+The pipeline is deterministic: same filesystem state always produces the same sorted candidate set.
+
+`reconcile_all()` merges scan-discovered bridgeable projects with registry projects (set union, deduplicated by resolved path) before the per-project reconcile loop.
 
 ## 8. Translation Architecture
 
@@ -693,6 +723,8 @@ Current runtime module responsibilities:
   - self-contained Codex agent `.toml` file rendering and Claude-tool-to-sandbox-mode mapping
 - `registry.py`
   - global generated-skill, agent, and plugin resource ownership registry serialization, deterministic skill, agent, and plugin resource content hashing
+- `scan.py`
+  - scan-based project discovery: config loading from `config.toml`, glob expansion with tilde support, structural filtering (symlinks, submodules, worktrees, Claude presence), top-level `scan_for_projects()` entry point
 - `translate_skills.py`
   - Codex skill translation for plugins and standalone sources, plus relative-reference resolution, vendoring helpers, and collision-free name assignment via `assign_skill_names()`
 - `vendor_plugin.py`
@@ -737,6 +769,7 @@ The suite currently verifies:
 - plugin resource cleanup in clean and uninstall commands
 - project-level clean and machine-level uninstall
 - multi-project reconcile --all with missing project error handling
+- scan-based project discovery: config loading, glob expansion, exclude filtering, structural filters (symlinks, submodules, worktrees, git roots, Claude presence), scan/registry merge, deduplication
 - global registry projects list round-tripping and backwards compatibility
 - doctor reporting and release-bundle generation
 
