@@ -230,6 +230,26 @@ class GeneratedSkill:
 
 
 @dataclass(frozen=True)
+class GeneratedPrompt:
+    """Generated Codex prompt file derived from a Claude command."""
+
+    filename: str            # e.g., "review.md", "review--my-app.md"
+    content: bytes
+    source_path: Path
+    marketplace: str
+    plugin_name: str
+
+
+@dataclass(frozen=True)
+class PromptTranslationResult:
+    """Prompt translation result plus any diagnostics."""
+
+    prompts: tuple[GeneratedPrompt, ...]
+    diagnostics: tuple[SkillValidationDiagnostic, ...]
+    plugin_resources: tuple[VendoredPluginResource, ...] = ()
+
+
+@dataclass(frozen=True)
 class VendoredPluginResource:
     """One plugin resource directory to write under bridge home."""
 
