@@ -766,21 +766,20 @@ Log entries are stored as daily JSONL files at `~/.cc-codex-bridge/logs/YYYY-MM-
 
 ### Logged operations
 
-All state-changing CLI operations write a log entry after successful completion:
+State-changing CLI operations write a log entry after successful completion:
 
 - `reconcile` (single-project and `--all`)
 - `clean`
-- `uninstall`
 - `install-launchagent`
 
-Operations with no changes (e.g., an idempotent reconcile) are not logged.
+`uninstall` is excluded from logging because it removes bridge infrastructure including the logs directory. Operations with no changes (e.g., an idempotent reconcile) are not logged.
 
 ### Log entry schema
 
 Each JSON line contains:
 
 - `timestamp` — ISO 8601 datetime
-- `action` — the CLI command name (`reconcile`, `clean`, `uninstall`, `install-launchagent`)
+- `action` — the CLI command name (`reconcile`, `clean`, `install-launchagent`)
 - `project` — resolved project root path (or `global` for machine-level operations)
 - `changes` — array of `{type, artifact, path}` objects where:
   - `type` is `create`, `update`, or `remove`

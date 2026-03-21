@@ -149,6 +149,29 @@ cc-codex-bridge uninstall                      # remove all bridge artifacts fro
 cc-codex-bridge uninstall --dry-run            # preview what would be removed
 ```
 
+### Activity log
+
+State-changing operations (reconcile, clean, install-launchagent) are logged as daily JSONL files under `~/.cc-codex-bridge/logs/`.
+
+```bash
+cc-codex-bridge log show                     # last 7 days
+cc-codex-bridge log show --days 30           # last 30 days
+cc-codex-bridge log show --since 2025-01-01  # from a specific date
+cc-codex-bridge log show --project .         # filter by project
+cc-codex-bridge log show --action reconcile  # filter by action
+cc-codex-bridge log show --json              # raw JSONL output
+cc-codex-bridge log prune                    # manually prune expired logs
+```
+
+Configure log retention in `~/.cc-codex-bridge/config.toml`:
+
+```toml
+[log]
+log_retention_days = 90  # default
+```
+
+Expired logs are automatically pruned after each logged operation.
+
 ### Scheduled reconciliation (macOS)
 
 ```bash
