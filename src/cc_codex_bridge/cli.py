@@ -500,8 +500,12 @@ def _handle_log_command(args: argparse.Namespace) -> int:
         since = today - timedelta(days=args.days)
         until = today
     else:
-        since = date.fromisoformat(args.since) if args.since else today - timedelta(days=7)
-        until = date.fromisoformat(args.until) if args.until else today
+        try:
+            since = date.fromisoformat(args.since) if args.since else today - timedelta(days=7)
+            until = date.fromisoformat(args.until) if args.until else today
+        except ValueError as exc:
+            print(f"Error: invalid date: {exc}", file=sys.stderr)
+            return 1
 
     entries = read_log_entries(logs_dir=log_dir, since=since, until=until)
 
@@ -581,17 +585,6 @@ def _handle_uninstall_command(args: argparse.Namespace) -> int:
     except (ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
-
-    if not args.dry_run:
-        all_changes = tuple(
-            c for result in report.projects for c in result.changes
-        ) + report.global_removals
-        if all_changes:
-            _log_and_prune(
-                action="uninstall",
-                project="*",
-                changes=all_changes,
-            )
 
     if args.json:
         print(_format_uninstall_json(report))
