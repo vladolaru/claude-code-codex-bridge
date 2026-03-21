@@ -1771,3 +1771,86 @@ def test_cli_exclude_command_flag(make_project, make_plugin_version, tmp_path: P
     # With one of two commands excluded, only 1 prompt should be translated
     assert "TRANSLATED_PROMPTS: 1" in captured.out
     assert "EXCLUDED_COMMANDS: 1" in captured.out
+
+
+# --- log subcommand tests ---
+
+
+def test_log_show_no_entries(capsys):
+    """log show with no log files prints no-entries message."""
+    rc = cli.main(["log", "show"])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "No log entries" in captured.out
+
+
+def test_log_prune_no_files(capsys):
+    """log prune with no log files prints nothing-to-prune message."""
+    rc = cli.main(["log", "prune"])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "No log files to prune" in captured.out
+
+
+def test_log_show_days_conflicts_with_since(capsys):
+    """log show --days with --since is an error."""
+    rc = cli.main(["log", "show", "--days", "7", "--since", "2026-03-01"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "conflicts" in captured.err
+
+
+def test_log_show_days_conflicts_with_until(capsys):
+    """log show --days with --until is an error."""
+    rc = cli.main(["log", "show", "--days", "7", "--until", "2026-03-01"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "conflicts" in captured.err
+
+
+def test_log_show_invalid_since_date(capsys):
+    """log show --since with invalid date prints error instead of traceback."""
+    rc = cli.main(["log", "show", "--since", "not-a-date"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "invalid date" in captured.err
+
+
+def test_log_show_invalid_until_date(capsys):
+    """log show --until with invalid date prints error instead of traceback."""
+    rc = cli.main(["log", "show", "--until", "nope"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "invalid date" in captured.err
+
+
+def test_log_prune_negative_retention_days(capsys):
+    """log prune --retention-days with negative value is rejected."""
+    rc = cli.main(["log", "prune", "--retention-days", "-1"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "at least 1" in captured.err
+
+
+def test_log_prune_zero_retention_days(capsys):
+    """log prune --retention-days 0 is rejected."""
+    rc = cli.main(["log", "prune", "--retention-days", "0"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "at least 1" in captured.err
+
+
+def test_log_show_zero_days(capsys):
+    """log show --days 0 is rejected."""
+    rc = cli.main(["log", "show", "--days", "0"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "at least 1" in captured.err
+
+
+def test_log_show_negative_days(capsys):
+    """log show --days with negative value is rejected."""
+    rc = cli.main(["log", "show", "--days", "-1"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "at least 1" in captured.err

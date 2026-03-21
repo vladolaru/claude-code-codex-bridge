@@ -37,3 +37,13 @@ def plugin_resource_dir(
 ) -> Path:
     """Return the plugin resource directory under bridge home."""
     return bridge_home / "plugins" / f"{marketplace}-{plugin_name}"
+
+
+def logs_dir(*, bridge_home: Path) -> Path:
+    """Return the activity log directory under bridge home."""
+    return bridge_home / "logs"
+
+
+def config_path(*, bridge_home: Path) -> Path:
+    """Return the global config file path under bridge home."""
+    return bridge_home / "config.toml"

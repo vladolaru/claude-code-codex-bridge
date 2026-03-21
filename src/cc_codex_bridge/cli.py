@@ -243,6 +243,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override the LaunchAgents destination directory.",
     )
 
+    log_parser = subparsers.add_parser("log")
+    log_subparsers = log_parser.add_subparsers(dest="log_command", required=True)
+
+    log_show_parser = log_subparsers.add_parser("show")
+    log_show_parser.add_argument("--since", type=str, help="Start date (YYYY-MM-DD).")
+    log_show_parser.add_argument("--until", type=str, help="End date (YYYY-MM-DD).")
+    log_show_parser.add_argument("--days", type=int, help="Show last N days (conflicts with --since/--until).")
+    log_show_parser.add_argument("--project", type=Path, help="Filter by project path.")
+    log_show_parser.add_argument("--action", type=str, help="Filter by action type.")
+    log_show_parser.add_argument("--type", type=str, help="Filter by change type.")
+    log_show_parser.add_argument("--json", action="store_true", help="Raw JSONL output.")
+
+    log_prune_parser = log_subparsers.add_parser("prune")
+    log_prune_parser.add_argument("--retention-days", type=int, help="Override retention days for this prune.")
+
     return parser
 
 
@@ -250,6 +265,9 @@ def main(argv: list[str] | None = None) -> int:
     """Run the CLI and return a process exit code."""
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "log":
+        return _handle_log_command(args)
 
     if args.command == "clean":
         return _handle_clean_command(args)
@@ -307,6 +325,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     # Bootstrap: CLAUDE.md exists without AGENTS.md
+    did_bootstrap = False
     if build.shim_decision.action == "bootstrap":
         if args.command == "reconcile" and not args.dry_run:
             from cc_codex_bridge.claude_shim import execute_bootstrap
@@ -315,6 +334,7 @@ def main(argv: list[str] | None = None) -> int:
             except (ReconcileError, OSError, UnicodeError) as exc:
                 print(f"Error: {exc}", file=sys.stderr)
                 return 1
+            did_bootstrap = True
             try:
                 build = build_project_desired_state(
                     args.project,
@@ -384,6 +404,20 @@ def main(argv: list[str] | None = None) -> int:
                 report = diff_desired_state(build.desired_state)
             else:
                 report = reconcile_desired_state(build.desired_state)
+                from cc_codex_bridge.reconcile import Change
+                bootstrap_changes = ()
+                if did_bootstrap:
+                    bootstrap_changes = (
+                        Change(kind="create", path=build.discovery.project.agents_md_path, resource_kind="project_file"),
+                        Change(kind="update", path=build.discovery.project.root / "CLAUDE.md", resource_kind="project_file"),
+                    )
+                all_changes = bootstrap_changes + report.changes
+                if all_changes:
+                    _log_and_prune(
+                        action="reconcile",
+                        project=str(build.discovery.project.root),
+                        changes=all_changes,
+                    )
             _print_summary(
                 build.discovery,
                 build.shim_decision.action,
@@ -423,6 +457,101 @@ def main(argv: list[str] | None = None) -> int:
     raise AssertionError(f"Unhandled command dispatch path: {args.command}")
 
 
+def _log_and_prune(
+    *,
+    action: str,
+    project: str,
+    changes: tuple,
+) -> None:
+    """Write an activity log entry and auto-prune old logs."""
+    from cc_codex_bridge.activity_log import build_log_entry_from_changes, write_log_entry, prune_logs
+    from cc_codex_bridge.bridge_home import logs_dir, config_path
+    from cc_codex_bridge.config import load_config
+
+    try:
+        bridge_home = resolve_bridge_home()
+        cfg = load_config(config_path(bridge_home=bridge_home))
+        entry = build_log_entry_from_changes(action=action, project=project, changes=changes)
+        log_dir = logs_dir(bridge_home=bridge_home)
+        write_log_entry(entry, logs_dir=log_dir)
+        prune_logs(logs_dir=log_dir, retention_days=cfg.log_retention_days)
+    except OSError:
+        pass  # Logging is best-effort; never fail a successful operation
+
+
+def _handle_log_command(args: argparse.Namespace) -> int:
+    """Handle the log show/prune subcommands."""
+    from datetime import date, timedelta
+    from cc_codex_bridge.activity_log import (
+        read_log_entries, filter_entries, format_log_entries, prune_logs,
+    )
+    from cc_codex_bridge.bridge_home import logs_dir, config_path
+    from cc_codex_bridge.config import load_config
+
+    bridge_home = resolve_bridge_home()
+    log_dir = logs_dir(bridge_home=bridge_home)
+    cfg = load_config(config_path(bridge_home=bridge_home))
+
+    if args.log_command == "prune":
+        if args.retention_days is not None:
+            if args.retention_days < 1:
+                print("Error: --retention-days must be at least 1", file=sys.stderr)
+                return 1
+            retention = args.retention_days
+        else:
+            retention = cfg.log_retention_days
+        removed = prune_logs(logs_dir=log_dir, retention_days=retention)
+        if removed:
+            print(f"Pruned {len(removed)} log file(s).")
+            for path in removed:
+                print(f"  {path.name}")
+        else:
+            print("No log files to prune.")
+        return 0
+
+    # log show
+    if args.days is not None and (args.since or args.until):
+        print("Error: --days conflicts with --since/--until", file=sys.stderr)
+        return 1
+
+    today = date.today()
+    if args.days is not None:
+        if args.days < 1:
+            print("Error: --days must be at least 1", file=sys.stderr)
+            return 1
+        since = today - timedelta(days=args.days - 1)
+        until = today
+    else:
+        try:
+            if args.since:
+                since = date.fromisoformat(args.since)
+            elif args.until:
+                since = None  # open-ended start when only --until given
+            else:
+                since = today - timedelta(days=6)
+            until = date.fromisoformat(args.until) if args.until else today
+        except ValueError as exc:
+            print(f"Error: invalid date: {exc}", file=sys.stderr)
+            return 1
+
+    entries = read_log_entries(logs_dir=log_dir, since=since, until=until)
+
+    if args.project:
+        raw_project = str(args.project)
+        project_filter = raw_project if raw_project == "*" else str(Path(args.project).expanduser().resolve())
+    else:
+        project_filter = None
+    entries = filter_entries(
+        entries,
+        project=project_filter,
+        action=args.action,
+        change_type=args.type,
+    )
+
+    print(format_log_entries(entries, json_output=args.json))
+    return 0
+
+
 def _handle_clean_command(args: argparse.Namespace) -> int:
     """Handle the clean command."""
     bridge_home_path = resolve_bridge_home()
@@ -460,6 +589,11 @@ def _handle_clean_command(args: argparse.Namespace) -> int:
     if args.dry_run:
         print("Dry run — the following would be removed:")
     else:
+        _log_and_prune(
+            action="clean",
+            project=str(project_root),
+            changes=report.changes,
+        )
         print("Cleaned:")
 
     print(format_change_report(report))
@@ -512,6 +646,23 @@ def _handle_all_command(args: argparse.Namespace) -> int:
     except (ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+
+    if not dry_run:
+        from cc_codex_bridge.reconcile import Change
+        for r in report.results:
+            bootstrap_changes = ()
+            if r.bootstrapped:
+                bootstrap_changes = (
+                    Change(kind="create", path=r.project_root / "AGENTS.md", resource_kind="project_file"),
+                    Change(kind="update", path=r.project_root / "CLAUDE.md", resource_kind="project_file"),
+                )
+            all_changes = bootstrap_changes + r.report.changes
+            if all_changes:
+                _log_and_prune(
+                    action="reconcile",
+                    project=str(r.project_root),
+                    changes=all_changes,
+                )
 
     if use_json:
         print(_format_all_json(report))
@@ -718,10 +869,19 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
         sys.stdout.buffer.write(plist_bytes)
         return 0
 
+    from cc_codex_bridge.reconcile import Change
+    from cc_codex_bridge.install_launchagent import DEFAULT_LAUNCHAGENTS_DIR as _LA_DIR
+    la_root = Path(args.launchagents_dir or _LA_DIR).expanduser().resolve()
+    la_existed = (la_root / f"{label}.plist").exists()
     destination = install_launchagent(
         plist_bytes,
         label=label,
         launchagents_dir=args.launchagents_dir,
+    )
+    _log_and_prune(
+        action="install-launchagent",
+        project="*",
+        changes=(Change(kind="update" if la_existed else "create", path=destination, resource_kind="launchagent"),),
     )
     print(f"LAUNCHAGENT_LABEL: {label}")
     print(f"LAUNCHAGENT_PATH: {destination}")
