@@ -384,6 +384,12 @@ def main(argv: list[str] | None = None) -> int:
                 report = diff_desired_state(build.desired_state)
             else:
                 report = reconcile_desired_state(build.desired_state)
+                if report.changes:
+                    _log_and_prune(
+                        action="reconcile",
+                        project=str(build.discovery.project.root),
+                        changes=report.changes,
+                    )
             _print_summary(
                 build.discovery,
                 build.shim_decision.action,
@@ -421,6 +427,25 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     raise AssertionError(f"Unhandled command dispatch path: {args.command}")
+
+
+def _log_and_prune(
+    *,
+    action: str,
+    project: str,
+    changes: tuple,
+) -> None:
+    """Write an activity log entry and auto-prune old logs."""
+    from cc_codex_bridge.activity_log import build_log_entry_from_changes, write_log_entry, prune_logs
+    from cc_codex_bridge.bridge_home import logs_dir, config_path
+    from cc_codex_bridge.config import load_config
+
+    bridge_home = resolve_bridge_home()
+    cfg = load_config(config_path(bridge_home=bridge_home))
+    entry = build_log_entry_from_changes(action=action, project=project, changes=changes)
+    log_dir = logs_dir(bridge_home=bridge_home)
+    write_log_entry(entry, logs_dir=log_dir)
+    prune_logs(logs_dir=log_dir, retention_days=cfg.log_retention_days)
 
 
 def _handle_clean_command(args: argparse.Namespace) -> int:
@@ -512,6 +537,15 @@ def _handle_all_command(args: argparse.Namespace) -> int:
     except (ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+
+    if not dry_run:
+        for r in report.results:
+            if r.report.changes:
+                _log_and_prune(
+                    action="reconcile",
+                    project=str(r.project_root),
+                    changes=r.report.changes,
+                )
 
     if use_json:
         print(_format_all_json(report))

@@ -9,12 +9,14 @@ from pathlib import Path
 from cc_codex_bridge.activity_log import (
     LogEntry,
     LogChange,
+    build_log_entry_from_changes,
     write_log_entry,
     read_log_entries,
     filter_entries,
     format_log_entries,
     prune_logs,
 )
+from cc_codex_bridge.reconcile import Change
 
 
 def _make_entry(
@@ -230,3 +232,33 @@ def test_format_entries_json():
     output = format_log_entries([entry], json_output=True)
     data = json.loads(output.strip())
     assert data["action"] == "reconcile"
+
+
+def test_build_log_entry_from_reconcile_changes():
+    """build_log_entry_from_changes converts Change tuples into a LogEntry."""
+    changes = (
+        Change(kind="create", path=Path("/tmp/s"), resource_kind="skill"),
+        Change(kind="update", path=Path("/tmp/a.toml"), resource_kind="agent"),
+        Change(kind="remove", path=Path("/tmp/p.md"), resource_kind="prompt"),
+    )
+    entry = build_log_entry_from_changes(
+        action="reconcile",
+        project="/tmp/proj",
+        changes=changes,
+    )
+    assert entry.action == "reconcile"
+    assert entry.project == "/tmp/proj"
+    assert len(entry.changes) == 3
+    assert entry.changes[0].type == "create"
+    assert entry.changes[0].artifact == "skill"
+    assert entry.summary == {"created": 1, "updated": 1, "removed": 1}
+
+
+def test_build_log_entry_empty_changes():
+    """build_log_entry_from_changes with empty changes still creates entry."""
+    entry = build_log_entry_from_changes(
+        action="clean",
+        project="/tmp/proj",
+        changes=(),
+    )
+    assert len(entry.changes) == 0

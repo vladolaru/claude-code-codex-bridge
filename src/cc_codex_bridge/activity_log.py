@@ -60,6 +60,34 @@ class LogEntry:
         )
 
 
+def build_log_entry_from_changes(
+    *,
+    action: str,
+    project: str,
+    changes: tuple,
+) -> LogEntry:
+    """Build a LogEntry from reconcile Change objects.
+
+    Accepts any tuple of objects with ``.kind``, ``.resource_kind``, and
+    ``.path`` attributes (duck typing).  This avoids importing the
+    ``reconcile`` module and the circular-import risk that would entail.
+    """
+    log_changes = tuple(
+        LogChange(
+            type=c.kind,
+            artifact=c.resource_kind or "project_file",
+            path=str(c.path),
+        )
+        for c in changes
+    )
+    return LogEntry(
+        timestamp=datetime.now(),
+        action=action,
+        project=project,
+        changes=log_changes,
+    )
+
+
 _CHANGE_SYMBOLS = {"create": "+", "update": "~", "remove": "-"}
 
 
