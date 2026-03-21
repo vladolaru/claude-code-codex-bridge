@@ -32,7 +32,7 @@ def load_config(config_path: Path) -> BridgeConfig:
         return BridgeConfig()
 
     retention = log_section.get("log_retention_days", DEFAULT_LOG_RETENTION_DAYS)
-    if not isinstance(retention, int) or retention < 1:
+    if isinstance(retention, bool) or not isinstance(retention, int) or retention < 1:
         retention = DEFAULT_LOG_RETENTION_DAYS
 
     return BridgeConfig(log_retention_days=retention)

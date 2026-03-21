@@ -45,6 +45,14 @@ def test_load_config_partial_log_section(tmp_path):
     assert cfg.log_retention_days == 90
 
 
+def test_load_config_boolean_retention_falls_back(tmp_path):
+    """Boolean log_retention_days falls back to default (bool is subclass of int)."""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[log]\nlog_retention_days = true\n")
+    cfg = load_config(config_path)
+    assert cfg.log_retention_days == 90
+
+
 def test_bridge_config_defaults():
     """BridgeConfig with no args uses all defaults."""
     cfg = BridgeConfig()
