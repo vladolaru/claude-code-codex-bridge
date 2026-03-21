@@ -234,6 +234,12 @@ def test_format_entries_json():
     assert data["action"] == "reconcile"
 
 
+def test_format_entries_json_empty():
+    """format_log_entries with json_output=True and no entries returns empty string."""
+    output = format_log_entries([], json_output=True)
+    assert output == ""
+
+
 def test_build_log_entry_from_reconcile_changes():
     """build_log_entry_from_changes converts Change tuples into a LogEntry."""
     changes = (

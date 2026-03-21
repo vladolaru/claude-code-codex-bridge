@@ -93,11 +93,11 @@ _CHANGE_SYMBOLS = {"create": "+", "update": "~", "remove": "-"}
 
 def format_log_entries(entries: list[LogEntry], *, json_output: bool = False) -> str:
     """Format log entries for display."""
-    if not entries:
-        return "No log entries found."
-
     if json_output:
         return "\n".join(e.to_json_line() for e in entries)
+
+    if not entries:
+        return "No log entries found."
 
     lines: list[str] = []
     for entry in entries:
