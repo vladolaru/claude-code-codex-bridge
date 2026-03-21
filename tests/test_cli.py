@@ -1806,3 +1806,19 @@ def test_log_show_days_conflicts_with_until(capsys):
     assert rc == 1
     captured = capsys.readouterr()
     assert "conflicts" in captured.err
+
+
+def test_log_show_invalid_since_date(capsys):
+    """log show --since with invalid date prints error instead of traceback."""
+    rc = cli.main(["log", "show", "--since", "not-a-date"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "invalid date" in captured.err
+
+
+def test_log_show_invalid_until_date(capsys):
+    """log show --until with invalid date prints error instead of traceback."""
+    rc = cli.main(["log", "show", "--until", "nope"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "invalid date" in captured.err
