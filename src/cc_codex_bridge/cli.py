@@ -328,11 +328,20 @@ def main(argv: list[str] | None = None) -> int:
     if build.shim_decision.action == "bootstrap":
         if args.command == "reconcile" and not args.dry_run:
             from cc_codex_bridge.claude_shim import execute_bootstrap
+            from cc_codex_bridge.reconcile import Change
             try:
                 execute_bootstrap(build.discovery.project)
             except (ReconcileError, OSError, UnicodeError) as exc:
                 print(f"Error: {exc}", file=sys.stderr)
                 return 1
+            _log_and_prune(
+                action="reconcile",
+                project=str(build.discovery.project.root),
+                changes=(
+                    Change(kind="create", path=build.discovery.project.agents_md_path, resource_kind="project_file"),
+                    Change(kind="update", path=build.discovery.project.root / "CLAUDE.md", resource_kind="project_file"),
+                ),
+            )
             try:
                 build = build_project_desired_state(
                     args.project,
@@ -596,9 +605,13 @@ def _handle_uninstall_command(args: argparse.Namespace) -> int:
         return 1
 
     if not args.dry_run:
+        from cc_codex_bridge.reconcile import Change
         all_changes = tuple(
             c for result in report.projects for c in result.changes
-        ) + report.global_removals
+        ) + report.global_removals + tuple(
+            Change(kind="remove", path=r.path, resource_kind="launchagent")
+            for r in report.launchagent_removals
+        )
         if all_changes:
             _log_and_prune(
                 action="uninstall",
@@ -850,16 +863,19 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
         sys.stdout.buffer.write(plist_bytes)
         return 0
 
+    from cc_codex_bridge.reconcile import Change
+    from cc_codex_bridge.install_launchagent import DEFAULT_LAUNCHAGENTS_DIR as _LA_DIR
+    la_root = Path(args.launchagents_dir or _LA_DIR).expanduser().resolve()
+    la_existed = (la_root / f"{label}.plist").exists()
     destination = install_launchagent(
         plist_bytes,
         label=label,
         launchagents_dir=args.launchagents_dir,
     )
-    from cc_codex_bridge.reconcile import Change
     _log_and_prune(
         action="install-launchagent",
         project="*",
-        changes=(Change(kind="create", path=destination, resource_kind="launchagent"),),
+        changes=(Change(kind="update" if la_existed else "create", path=destination, resource_kind="launchagent"),),
     )
     print(f"LAUNCHAGENT_LABEL: {label}")
     print(f"LAUNCHAGENT_PATH: {destination}")
