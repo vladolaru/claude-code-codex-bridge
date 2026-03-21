@@ -49,3 +49,11 @@ def test_bridge_config_defaults():
     """BridgeConfig with no args uses all defaults."""
     cfg = BridgeConfig()
     assert cfg.log_retention_days == 90
+
+
+def test_load_config_malformed_toml(tmp_path):
+    """Malformed TOML returns defaults instead of crashing."""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[log\nbroken syntax")
+    cfg = load_config(config_path)
+    assert cfg.log_retention_days == 90

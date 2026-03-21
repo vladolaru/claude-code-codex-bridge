@@ -21,8 +21,11 @@ def load_config(config_path: Path) -> BridgeConfig:
     if not config_path.exists():
         return BridgeConfig()
 
-    with open(config_path, "rb") as f:
-        data = tomllib.load(f)
+    try:
+        with open(config_path, "rb") as f:
+            data = tomllib.load(f)
+    except tomllib.TOMLDecodeError:
+        return BridgeConfig()
 
     log_section = data.get("log", {})
     if not isinstance(log_section, dict):
