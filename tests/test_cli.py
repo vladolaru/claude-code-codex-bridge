@@ -1822,3 +1822,19 @@ def test_log_show_invalid_until_date(capsys):
     assert rc == 1
     captured = capsys.readouterr()
     assert "invalid date" in captured.err
+
+
+def test_log_prune_negative_retention_days(capsys):
+    """log prune --retention-days with negative value is rejected."""
+    rc = cli.main(["log", "prune", "--retention-days", "-1"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "at least 1" in captured.err
+
+
+def test_log_prune_zero_retention_days(capsys):
+    """log prune --retention-days 0 is rejected."""
+    rc = cli.main(["log", "prune", "--retention-days", "0"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "at least 1" in captured.err
