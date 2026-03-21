@@ -140,7 +140,11 @@ def read_log_entries(
             continue
         if until and file_date > until:
             continue
-        for line in log_file.read_text(encoding="utf-8").strip().split("\n"):
+        try:
+            file_content = log_file.read_text(encoding="utf-8")
+        except OSError:
+            continue  # Skip unreadable files
+        for line in file_content.strip().split("\n"):
             if line:
                 try:
                     entries.append(LogEntry.from_json_line(line))

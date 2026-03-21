@@ -118,6 +118,22 @@ def test_read_entries_skips_malformed_lines(tmp_path):
     assert entries[0].action == "reconcile"
 
 
+def test_read_entries_skips_unreadable_files(tmp_path):
+    """read_log_entries skips files with bad permissions instead of crashing."""
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    good_entry = _make_entry(timestamp=datetime(2026, 3, 21, 10, 0, 0))
+    write_log_entry(good_entry, logs_dir=logs_dir)
+    bad_file = logs_dir / "2026-03-20.jsonl"
+    bad_file.write_text('{"test": true}\n')
+    bad_file.chmod(0o000)
+
+    entries = read_log_entries(logs_dir=logs_dir)
+    assert len(entries) == 1
+    assert entries[0].action == "reconcile"
+    bad_file.chmod(0o644)  # cleanup
+
+
 def test_read_entries_skips_invalid_timestamps(tmp_path):
     """read_log_entries skips lines with malformed timestamps."""
     logs_dir = tmp_path / "logs"
