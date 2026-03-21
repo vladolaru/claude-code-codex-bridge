@@ -538,7 +538,7 @@ def _handle_log_command(args: argparse.Namespace) -> int:
 
     if args.project:
         raw_project = str(args.project)
-        project_filter = raw_project if raw_project == "*" else str(Path(args.project).resolve())
+        project_filter = raw_project if raw_project == "*" else str(Path(args.project).expanduser().resolve())
     else:
         project_filter = None
     entries = filter_entries(
