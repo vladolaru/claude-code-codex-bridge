@@ -11,6 +11,8 @@ from cc_codex_bridge.activity_log import (
     LogChange,
     write_log_entry,
     read_log_entries,
+    filter_entries,
+    prune_logs,
 )
 
 
@@ -97,3 +99,98 @@ def test_read_entries_empty_dir(tmp_path):
     """read_log_entries on empty or missing dir returns empty list."""
     entries = read_log_entries(logs_dir=tmp_path / "nope")
     assert entries == []
+
+
+def test_filter_by_project(tmp_path):
+    """filter_entries filters by project path."""
+    logs_dir = tmp_path / "logs"
+    ts = datetime(2026, 3, 21, 10, 0, 0)
+    write_log_entry(_make_entry(project="/a", timestamp=ts), logs_dir=logs_dir)
+    write_log_entry(_make_entry(project="/b", timestamp=ts), logs_dir=logs_dir)
+
+    entries = read_log_entries(logs_dir=logs_dir)
+    filtered = filter_entries(entries, project="/a")
+    assert len(filtered) == 1
+    assert filtered[0].project == "/a"
+
+
+def test_filter_by_action(tmp_path):
+    """filter_entries filters by action type."""
+    logs_dir = tmp_path / "logs"
+    ts = datetime(2026, 3, 21, 10, 0, 0)
+    write_log_entry(_make_entry(action="reconcile", timestamp=ts), logs_dir=logs_dir)
+    write_log_entry(_make_entry(action="clean", timestamp=ts), logs_dir=logs_dir)
+
+    entries = read_log_entries(logs_dir=logs_dir)
+    filtered = filter_entries(entries, action="clean")
+    assert len(filtered) == 1
+    assert filtered[0].action == "clean"
+
+
+def test_filter_by_change_type(tmp_path):
+    """filter_entries filters entries containing a specific change type."""
+    logs_dir = tmp_path / "logs"
+    ts = datetime(2026, 3, 21, 10, 0, 0)
+    create_entry = _make_entry(
+        changes=(LogChange(type="create", artifact="skill", path="/s"),),
+        timestamp=ts,
+    )
+    remove_entry = _make_entry(
+        action="clean",
+        changes=(LogChange(type="remove", artifact="skill", path="/s"),),
+        timestamp=ts,
+    )
+    write_log_entry(create_entry, logs_dir=logs_dir)
+    write_log_entry(remove_entry, logs_dir=logs_dir)
+
+    entries = read_log_entries(logs_dir=logs_dir)
+    filtered = filter_entries(entries, change_type="remove")
+    assert len(filtered) == 1
+    assert filtered[0].action == "clean"
+
+
+def test_filter_combined(tmp_path):
+    """filter_entries applies multiple filters with AND logic."""
+    logs_dir = tmp_path / "logs"
+    ts = datetime(2026, 3, 21, 10, 0, 0)
+    write_log_entry(_make_entry(action="reconcile", project="/a", timestamp=ts), logs_dir=logs_dir)
+    write_log_entry(_make_entry(action="reconcile", project="/b", timestamp=ts), logs_dir=logs_dir)
+    write_log_entry(_make_entry(action="clean", project="/a", timestamp=ts), logs_dir=logs_dir)
+
+    entries = read_log_entries(logs_dir=logs_dir)
+    filtered = filter_entries(entries, action="reconcile", project="/a")
+    assert len(filtered) == 1
+
+
+def test_prune_removes_old_files(tmp_path):
+    """prune_logs removes files older than retention days."""
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    (logs_dir / "2026-01-01.jsonl").write_text('{"test": true}\n')
+    (logs_dir / "2026-03-20.jsonl").write_text('{"test": true}\n')
+    (logs_dir / "2026-03-21.jsonl").write_text('{"test": true}\n')
+
+    removed = prune_logs(logs_dir=logs_dir, retention_days=30, today=date(2026, 3, 21))
+    assert len(removed) == 1
+    assert removed[0].name == "2026-01-01.jsonl"
+    assert not (logs_dir / "2026-01-01.jsonl").exists()
+    assert (logs_dir / "2026-03-20.jsonl").exists()
+    assert (logs_dir / "2026-03-21.jsonl").exists()
+
+
+def test_prune_empty_dir(tmp_path):
+    """prune_logs on missing dir returns empty list."""
+    removed = prune_logs(logs_dir=tmp_path / "nope", retention_days=90)
+    assert removed == []
+
+
+def test_prune_ignores_non_jsonl_files(tmp_path):
+    """prune_logs leaves non-JSONL files alone."""
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    (logs_dir / "2020-01-01.jsonl").write_text('{"test": true}\n')
+    (logs_dir / "notes.txt").write_text("keep me\n")
+
+    removed = prune_logs(logs_dir=logs_dir, retention_days=30, today=date(2026, 3, 21))
+    assert len(removed) == 1
+    assert (logs_dir / "notes.txt").exists()

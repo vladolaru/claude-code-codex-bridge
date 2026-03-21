@@ -96,6 +96,50 @@ def read_log_entries(
     return entries
 
 
+def filter_entries(
+    entries: list[LogEntry],
+    *,
+    project: str | None = None,
+    action: str | None = None,
+    change_type: str | None = None,
+) -> list[LogEntry]:
+    """Filter log entries by project, action, and/or change type (AND logic)."""
+    result = entries
+    if project is not None:
+        result = [e for e in result if e.project == project]
+    if action is not None:
+        result = [e for e in result if e.action == action]
+    if change_type is not None:
+        result = [e for e in result if any(c.type == change_type for c in e.changes)]
+    return result
+
+
+def prune_logs(
+    *,
+    logs_dir: Path,
+    retention_days: int,
+    today: date | None = None,
+) -> list[Path]:
+    """Delete log files older than retention_days. Returns list of removed paths."""
+    if not logs_dir.is_dir():
+        return []
+
+    if today is None:
+        today = date.today()
+
+    removed: list[Path] = []
+    for log_file in sorted(logs_dir.glob("*.jsonl")):
+        file_date = _parse_log_filename(log_file.name)
+        if file_date is None:
+            continue
+        age_days = (today - file_date).days
+        if age_days > retention_days:
+            log_file.unlink()
+            removed.append(log_file)
+
+    return removed
+
+
 def _parse_log_filename(filename: str) -> date | None:
     """Parse YYYY-MM-DD.jsonl into a date, or None if invalid."""
     if not filename.endswith(".jsonl"):
