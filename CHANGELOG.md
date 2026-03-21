@@ -6,8 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-03-21
+
 ### Added
 - Plugin-qualified references (`plugin:skill-name`, `plugin:command-name`) in generated content are rewritten to Codex equivalents (`$codex-name`)
+
+### Changed
+- Status output now categorizes pending changes into `PROJECT_FILES`, `SKILLS`, `AGENTS`, `PROMPTS`, and `GLOBAL` instead of lumping global artifacts into `PROJECT_FILES`
+
+### Fixed
+- `--all` mode no longer shows "No registered projects." when the scan summary already reported candidates
+- Scan config validation errors now reference the correct top-level key names (`scan_paths`, `exclude_paths`) instead of the incorrect `scan.` prefix
 
 ## [0.15.1] - 2026-03-21
 
