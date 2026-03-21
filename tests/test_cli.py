@@ -1838,3 +1838,19 @@ def test_log_prune_zero_retention_days(capsys):
     assert rc == 1
     captured = capsys.readouterr()
     assert "at least 1" in captured.err
+
+
+def test_log_show_zero_days(capsys):
+    """log show --days 0 is rejected."""
+    rc = cli.main(["log", "show", "--days", "0"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "at least 1" in captured.err
+
+
+def test_log_show_negative_days(capsys):
+    """log show --days with negative value is rejected."""
+    rc = cli.main(["log", "show", "--days", "-1"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "at least 1" in captured.err
