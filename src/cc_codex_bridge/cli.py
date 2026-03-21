@@ -595,6 +595,17 @@ def _handle_uninstall_command(args: argparse.Namespace) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
+    if not args.dry_run:
+        all_changes = tuple(
+            c for result in report.projects for c in result.changes
+        ) + report.global_removals
+        if all_changes:
+            _log_and_prune(
+                action="uninstall",
+                project="*",
+                changes=all_changes,
+            )
+
     if args.json:
         print(_format_uninstall_json(report))
     else:
