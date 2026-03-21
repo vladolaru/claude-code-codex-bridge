@@ -144,7 +144,7 @@ def read_log_entries(
             if line:
                 try:
                     entries.append(LogEntry.from_json_line(line))
-                except (json.JSONDecodeError, KeyError, TypeError):
+                except (json.JSONDecodeError, KeyError, TypeError, ValueError):
                     continue  # Skip malformed lines
 
     return entries
