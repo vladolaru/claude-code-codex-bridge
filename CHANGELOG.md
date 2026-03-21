@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Daily JSONL activity log for all state-changing CLI operations (reconcile, clean, uninstall, install-launchagent)
+- Global config file (`~/.cc-codex-bridge/config.toml`) with `[log] log_retention_days` setting (default: 90 days)
+- `log show` subcommand with filters: `--since`, `--until`, `--days`, `--project`, `--action`, `--type`, `--json`
+- `log prune` subcommand for manual log retention cleanup
+- Auto-prune of expired logs after every state-changing operation
+
 ## [0.16.0] - 2026-03-21
 
 ### Added

@@ -55,6 +55,7 @@ These are derived artifacts and must not become hand-maintained sources:
 - `~/.cc-codex-bridge/projects/<hash>/state.json`
 - `~/.cc-codex-bridge/registry.json`
 - `~/.cc-codex-bridge/plugins/<marketplace>-<plugin>/`
+- `~/.cc-codex-bridge/logs/YYYY-MM-DD.jsonl` (daily activity logs)
 
 ### Authority rule
 
@@ -83,6 +84,8 @@ If a behavior is described differently in multiple docs:
 - project-level artifact cleanup via `clean`
 - machine-level full artifact removal via `uninstall`
 - macOS LaunchAgent rendering and installation for scheduled reconcile runs
+- activity logging for state-changing operations with retention-based auto-prune
+- log viewing and manual pruning via `log show` and `log prune`
 
 ### Out of scope
 
@@ -163,6 +166,9 @@ These are internal state files stored under `~/.cc-codex-bridge/` (configurable 
   - written during reconciliation when skills or agents reference `$PLUGIN_ROOT` paths
   - paths in skill and agent content are rewritten to absolute vendored locations
   - transitive dependencies (e.g., scripts referencing `agents/shared/`) are detected and vendored automatically
+- `~/.cc-codex-bridge/logs/YYYY-MM-DD.jsonl`
+  - daily activity log files in newline-delimited JSON format
+  - one file per day, entries appended as operations occur
 
 ### Local-only rule
 
@@ -699,6 +705,19 @@ Exclusion IDs use part-count disambiguation: 1 part matches all scopes, 2 parts 
 
 All exclusion flags are repeatable. `.codex/bridge.toml` can define persistent exclusions, and CLI exclusions override config values for the same entity kind in the current run.
 
+### Log commands
+
+- `log show`
+  - display activity log entries from `~/.cc-codex-bridge/logs/`
+  - date range filters: `--since YYYY-MM-DD`, `--until YYYY-MM-DD`, `--days N`
+  - content filters: `--project PATH`, `--action NAME`, `--type TYPE`
+  - supports `--json` for JSONL output
+- `log prune`
+  - manually trigger retention cleanup using `log_retention_days` from config (default: 90)
+  - reports removed files or confirms no expired logs
+
+Log commands are utility commands independent of the reconcile pipeline.
+
 ### LaunchAgent commands
 
 - `print-launchagent`
@@ -737,12 +756,83 @@ The tool installs the plist file but does not run `launchctl` automatically.
 
 Per-project LaunchAgent plists are no longer generated. The legacy `build_launchagent_plist()` function is preserved for backwards compatibility but is not used by the CLI.
 
-## 12. Module Map
+## 12. Activity Log
+
+Activity logging lives in `src/cc_codex_bridge/activity_log.py`.
+
+### Storage
+
+Log entries are stored as daily JSONL files at `~/.cc-codex-bridge/logs/YYYY-MM-DD.jsonl`. Each line is a self-contained JSON object. New entries are appended to the current day's file. The logs directory is created on first write.
+
+### Logged operations
+
+All state-changing CLI operations write a log entry after successful completion:
+
+- `reconcile` (single-project and `--all`)
+- `clean`
+- `uninstall`
+- `install-launchagent`
+
+Operations with no changes (e.g., an idempotent reconcile) are not logged.
+
+### Log entry schema
+
+Each JSON line contains:
+
+- `timestamp` — ISO 8601 datetime
+- `action` — the CLI command name (`reconcile`, `clean`, `uninstall`, `install-launchagent`)
+- `project` — resolved project root path (or `global` for machine-level operations)
+- `changes` — array of `{type, artifact, path}` objects where:
+  - `type` is `create`, `update`, or `remove`
+  - `artifact` is `skill`, `agent`, `prompt`, `project_file`, or `plugin_resource`
+  - `path` is the absolute filesystem path of the changed artifact
+- `summary` — computed counts: `{created, updated, removed}`
+
+### Auto-prune
+
+After every state-changing operation, expired log files are automatically pruned based on the configured retention period. This keeps log storage bounded without manual intervention.
+
+### CLI access
+
+- `log show` reads and displays log entries with optional filters: `--since`, `--until`, `--days`, `--project`, `--action`, `--type`, `--json`
+- `log prune` manually triggers retention cleanup, reporting which files were removed
+
+## 13. Global Configuration
+
+Global configuration lives in `src/cc_codex_bridge/config.py`.
+
+### Config file
+
+`~/.cc-codex-bridge/config.toml` is a user-authored file that the bridge reads but never writes. The file is optional — all settings have defaults that apply when the file is missing.
+
+The config file serves two purposes:
+
+1. scan-based discovery configuration (`scan_paths`, `exclude_paths`) — loaded by `scan.py`
+2. activity log configuration (`[log]` section) — loaded by `config.py`
+
+### Current settings
+
+```toml
+[log]
+log_retention_days = 90   # default; minimum 1
+```
+
+- `log_retention_days` controls how many days of activity log files are retained before auto-prune removes them
+- non-integer or sub-1 values fall back to the default (90 days)
+- a missing `[log]` section or missing config file both produce the default
+
+### Design constraint
+
+The config file is shared between scan discovery and activity log configuration. Each module reads only the keys it needs and ignores the rest. Unknown keys are tolerated.
+
+## 14. Module Map
 
 Current runtime module responsibilities:
 
+- `activity_log.py`
+  - daily JSONL activity log: entry data model (`LogEntry`, `LogChange`), serialization, file I/O (write, read with date range), filtering (project, action, change type), retention pruning, and human-readable formatting
 - `bridge_home.py`
-  - bridge home directory resolution (`~/.cc-codex-bridge/`, configurable via `$CC_BRIDGE_HOME`), project-specific state path computation, and plugin resource path computation
+  - bridge home directory resolution (`~/.cc-codex-bridge/`, configurable via `$CC_BRIDGE_HOME`), project-specific state path computation, plugin resource path computation, and logs directory path
 - `cli.py`
   - argument parsing, command dispatch, summary/error reporting
 - `discover.py`
@@ -753,6 +843,8 @@ Current runtime module responsibilities:
   - exclusion config loading, validation, CLI-override resolution, and discovery filtering for plugins and standalone sources
 - `model.py`
   - core dataclasses and domain-specific error types
+- `config.py`
+  - global bridge configuration: `BridgeConfig` dataclass, TOML loading from `config.toml` `[log]` section, default value handling
 - `claude_shim.py`
   - `CLAUDE.md` ownership-safe shim planning
 - `frontmatter.py`
@@ -788,7 +880,7 @@ Current runtime module responsibilities:
 - `release_bundle.py`
   - GitHub Release installer asset generation for offline wheelhouse installs
 
-## 13. Testing Strategy
+## 15. Testing Strategy
 
 Tests are fixture-driven and isolated under `tests/`.
 
@@ -815,10 +907,12 @@ The suite currently verifies:
 - scan-based project discovery: config loading, glob expansion, exclude filtering, structural filters (symlinks, submodules, worktrees, git roots, Claude presence), scan/registry merge, deduplication
 - global registry projects list round-tripping and backwards compatibility
 - doctor reporting and release-bundle generation
+- activity log entry serialization, JSONL round-tripping, date-range reads, filtering, retention pruning, and human-readable formatting
+- global config loading: default fallback, valid TOML, missing file, invalid values
 
 The test suite is the executable check for the invariants described in this file.
 
-## 14. Current Constraints and Known Simplifications
+## 16. Current Constraints and Known Simplifications
 
 These are current implemented simplifications, not necessarily permanent design ideals:
 
@@ -834,7 +928,7 @@ These are current implemented simplifications, not necessarily permanent design 
 
 Any change to these constraints should update this file.
 
-## 15. Maintenance Rules
+## 17. Maintenance Rules
 
 When making architectural changes, update `DESIGN.md` in the same change if you alter any of:
 
