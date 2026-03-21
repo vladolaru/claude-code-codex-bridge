@@ -523,7 +523,12 @@ def _handle_log_command(args: argparse.Namespace) -> int:
         until = today
     else:
         try:
-            since = date.fromisoformat(args.since) if args.since else today - timedelta(days=6)
+            if args.since:
+                since = date.fromisoformat(args.since)
+            elif args.until:
+                since = None  # open-ended start when only --until given
+            else:
+                since = today - timedelta(days=6)
             until = date.fromisoformat(args.until) if args.until else today
         except ValueError as exc:
             print(f"Error: invalid date: {exc}", file=sys.stderr)
@@ -607,6 +612,21 @@ def _handle_uninstall_command(args: argparse.Namespace) -> int:
     except (ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+
+    if not args.dry_run:
+        from cc_codex_bridge.reconcile import Change
+        all_changes = tuple(
+            c for result in report.projects for c in result.changes
+        ) + report.global_removals + tuple(
+            Change(kind="remove", path=r.path, resource_kind="launchagent")
+            for r in report.launchagent_removals
+        )
+        if all_changes:
+            _log_and_prune(
+                action="uninstall",
+                project="*",
+                changes=all_changes,
+            )
 
     if args.json:
         print(_format_uninstall_json(report))
