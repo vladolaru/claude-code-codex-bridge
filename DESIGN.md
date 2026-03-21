@@ -534,6 +534,26 @@ Priority order for collision resolution:
 
 All generated prompts are installed to `~/.codex/prompts/` and tracked in the global registry under the `prompts` section.
 
+### 8.6 Reference rewriting
+
+`src/cc_codex_bridge/rewrite_references.py` rewrites plugin-qualified skill and command references in generated content to their Codex equivalents.
+
+After skill names (`assign_skill_names`) and prompt names (`assign_prompt_names`) are finalized, `build_reference_map()` constructs a lookup table:
+
+- plugin skills: `plugin_name:original_skill_name` → `$codex_skill_name`
+- plugin commands: `plugin_name:command_stem` → `$prompt_stem`
+
+Only plugin-scoped artifacts are included (marketplace not starting with `_`). User and project artifacts are excluded because their names are not plugin-qualified in source content.
+
+`rewrite_content()` applies exact byte-string replacement to generated content, processing keys longest-first to prevent partial matches. The rewrite applies to:
+
+- skill `SKILL.md` bodies (global and project)
+- agent `developer_instructions` (global and project)
+- prompt bodies
+- global instructions (`user_claude_md`)
+
+Agent references (`plugin:agent-name`) are not rewritten because agent invocation is structurally different between the two CLIs — a name-only rewrite without changing the invocation pattern would be misleading.
+
 ### Skill routing
 
 User-level and plugin skills are installed to the global Codex skill registry at `~/.codex/skills/`. Project-level skills are installed to project-local `.codex/skills/` directories and tracked as managed project skill directory names in the bridge state. Both global and project skills use exact directory-snapshot comparison for change detection.

@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Plugin-qualified references (`plugin:skill-name`, `plugin:command-name`) in generated content are rewritten to Codex equivalents (`$codex-name`)
+
 ## [0.15.1] - 2026-03-21
 
 ### Fixed
