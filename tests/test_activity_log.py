@@ -104,6 +104,20 @@ def test_read_entries_empty_dir(tmp_path):
     assert entries == []
 
 
+def test_read_entries_skips_malformed_lines(tmp_path):
+    """read_log_entries skips malformed JSONL lines instead of crashing."""
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    good_entry = _make_entry(timestamp=datetime(2026, 3, 21, 10, 0, 0))
+    good_line = good_entry.to_json_line()
+    content = f"not valid json\n{good_line}\n{{\"missing\": \"fields\"}}\n"
+    (logs_dir / "2026-03-21.jsonl").write_text(content)
+
+    entries = read_log_entries(logs_dir=logs_dir)
+    assert len(entries) == 1
+    assert entries[0].action == "reconcile"
+
+
 def test_filter_by_project(tmp_path):
     """filter_entries filters by project path."""
     logs_dir = tmp_path / "logs"
