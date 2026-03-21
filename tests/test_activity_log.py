@@ -181,6 +181,19 @@ def test_prune_removes_old_files(tmp_path):
     assert (logs_dir / "2026-03-21.jsonl").exists()
 
 
+def test_prune_boundary_keeps_n_days(tmp_path):
+    """prune_logs with retention_days=1 keeps only today, prunes yesterday."""
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    (logs_dir / "2026-03-20.jsonl").write_text('{"test": true}\n')
+    (logs_dir / "2026-03-21.jsonl").write_text('{"test": true}\n')
+
+    removed = prune_logs(logs_dir=logs_dir, retention_days=1, today=date(2026, 3, 21))
+    assert len(removed) == 1
+    assert removed[0].name == "2026-03-20.jsonl"
+    assert (logs_dir / "2026-03-21.jsonl").exists()
+
+
 def test_prune_empty_dir(tmp_path):
     """prune_logs on missing dir returns empty list."""
     removed = prune_logs(logs_dir=tmp_path / "nope", retention_days=90)

@@ -184,7 +184,7 @@ def prune_logs(
         if file_date is None:
             continue
         age_days = (today - file_date).days
-        if age_days > retention_days:
+        if age_days >= retention_days:
             log_file.unlink()
             removed.append(log_file)
 
