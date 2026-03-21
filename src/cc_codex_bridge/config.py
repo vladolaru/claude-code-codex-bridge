@@ -24,7 +24,7 @@ def load_config(config_path: Path) -> BridgeConfig:
     try:
         with open(config_path, "rb") as f:
             data = tomllib.load(f)
-    except tomllib.TOMLDecodeError:
+    except (tomllib.TOMLDecodeError, OSError, UnicodeDecodeError):
         return BridgeConfig()
 
     log_section = data.get("log", {})

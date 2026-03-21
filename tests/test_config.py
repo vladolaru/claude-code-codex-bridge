@@ -65,3 +65,21 @@ def test_load_config_malformed_toml(tmp_path):
     config_path.write_text("[log\nbroken syntax")
     cfg = load_config(config_path)
     assert cfg.log_retention_days == 90
+
+
+def test_load_config_directory_instead_of_file(tmp_path):
+    """Config path that is a directory returns defaults instead of crashing."""
+    config_path = tmp_path / "config.toml"
+    config_path.mkdir()
+    cfg = load_config(config_path)
+    assert cfg.log_retention_days == 90
+
+
+def test_load_config_unreadable_file(tmp_path):
+    """Config file with bad permissions returns defaults instead of crashing."""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[log]\nlog_retention_days = 30\n")
+    config_path.chmod(0o000)
+    cfg = load_config(config_path)
+    assert cfg.log_retention_days == 90
+    config_path.chmod(0o644)  # cleanup
