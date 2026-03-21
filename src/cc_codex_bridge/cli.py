@@ -243,6 +243,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override the LaunchAgents destination directory.",
     )
 
+    log_parser = subparsers.add_parser("log")
+    log_subparsers = log_parser.add_subparsers(dest="log_command", required=True)
+
+    log_show_parser = log_subparsers.add_parser("show")
+    log_show_parser.add_argument("--since", type=str, help="Start date (YYYY-MM-DD).")
+    log_show_parser.add_argument("--until", type=str, help="End date (YYYY-MM-DD).")
+    log_show_parser.add_argument("--days", type=int, help="Show last N days (conflicts with --since/--until).")
+    log_show_parser.add_argument("--project", type=Path, help="Filter by project path.")
+    log_show_parser.add_argument("--action", type=str, help="Filter by action type.")
+    log_show_parser.add_argument("--type", type=str, help="Filter by change type.")
+    log_show_parser.add_argument("--json", action="store_true", help="Raw JSONL output.")
+
+    log_prune_parser = log_subparsers.add_parser("prune")
+    log_prune_parser.add_argument("--retention-days", type=int, help="Override retention days for this prune.")
+
     return parser
 
 
@@ -250,6 +265,9 @@ def main(argv: list[str] | None = None) -> int:
     """Run the CLI and return a process exit code."""
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "log":
+        return _handle_log_command(args)
 
     if args.command == "clean":
         return _handle_clean_command(args)
@@ -446,6 +464,57 @@ def _log_and_prune(
     log_dir = logs_dir(bridge_home=bridge_home)
     write_log_entry(entry, logs_dir=log_dir)
     prune_logs(logs_dir=log_dir, retention_days=cfg.log_retention_days)
+
+
+def _handle_log_command(args: argparse.Namespace) -> int:
+    """Handle the log show/prune subcommands."""
+    from datetime import date, timedelta
+    from cc_codex_bridge.activity_log import (
+        read_log_entries, filter_entries, format_log_entries, prune_logs,
+    )
+    from cc_codex_bridge.bridge_home import logs_dir, config_path
+    from cc_codex_bridge.config import load_config
+
+    bridge_home = resolve_bridge_home()
+    log_dir = logs_dir(bridge_home=bridge_home)
+    cfg = load_config(config_path(bridge_home=bridge_home))
+
+    if args.log_command == "prune":
+        retention = args.retention_days if args.retention_days else cfg.log_retention_days
+        removed = prune_logs(logs_dir=log_dir, retention_days=retention)
+        if removed:
+            print(f"Pruned {len(removed)} log file(s).")
+            for path in removed:
+                print(f"  {path.name}")
+        else:
+            print("No log files to prune.")
+        return 0
+
+    # log show
+    if args.days is not None and (args.since or args.until):
+        print("Error: --days conflicts with --since/--until", file=sys.stderr)
+        return 1
+
+    today = date.today()
+    if args.days is not None:
+        since = today - timedelta(days=args.days)
+        until = today
+    else:
+        since = date.fromisoformat(args.since) if args.since else today - timedelta(days=7)
+        until = date.fromisoformat(args.until) if args.until else today
+
+    entries = read_log_entries(logs_dir=log_dir, since=since, until=until)
+
+    project_filter = str(Path(args.project).resolve()) if args.project else None
+    entries = filter_entries(
+        entries,
+        project=project_filter,
+        action=args.action,
+        change_type=args.type,
+    )
+
+    print(format_log_entries(entries, json_output=args.json))
+    return 0
 
 
 def _handle_clean_command(args: argparse.Namespace) -> int:
