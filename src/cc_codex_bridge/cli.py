@@ -458,12 +458,15 @@ def _log_and_prune(
     from cc_codex_bridge.bridge_home import logs_dir, config_path
     from cc_codex_bridge.config import load_config
 
-    bridge_home = resolve_bridge_home()
-    cfg = load_config(config_path(bridge_home=bridge_home))
-    entry = build_log_entry_from_changes(action=action, project=project, changes=changes)
-    log_dir = logs_dir(bridge_home=bridge_home)
-    write_log_entry(entry, logs_dir=log_dir)
-    prune_logs(logs_dir=log_dir, retention_days=cfg.log_retention_days)
+    try:
+        bridge_home = resolve_bridge_home()
+        cfg = load_config(config_path(bridge_home=bridge_home))
+        entry = build_log_entry_from_changes(action=action, project=project, changes=changes)
+        log_dir = logs_dir(bridge_home=bridge_home)
+        write_log_entry(entry, logs_dir=log_dir)
+        prune_logs(logs_dir=log_dir, retention_days=cfg.log_retention_days)
+    except OSError:
+        pass  # Logging is best-effort; never fail a successful operation
 
 
 def _handle_log_command(args: argparse.Namespace) -> int:
@@ -480,7 +483,13 @@ def _handle_log_command(args: argparse.Namespace) -> int:
     cfg = load_config(config_path(bridge_home=bridge_home))
 
     if args.log_command == "prune":
-        retention = args.retention_days if args.retention_days else cfg.log_retention_days
+        if args.retention_days is not None:
+            if args.retention_days < 1:
+                print("Error: --retention-days must be at least 1", file=sys.stderr)
+                return 1
+            retention = args.retention_days
+        else:
+            retention = cfg.log_retention_days
         removed = prune_logs(logs_dir=log_dir, retention_days=retention)
         if removed:
             print(f"Pruned {len(removed)} log file(s).")
@@ -497,11 +506,11 @@ def _handle_log_command(args: argparse.Namespace) -> int:
 
     today = date.today()
     if args.days is not None:
-        since = today - timedelta(days=args.days)
+        since = today - timedelta(days=max(args.days - 1, 0))
         until = today
     else:
         try:
-            since = date.fromisoformat(args.since) if args.since else today - timedelta(days=7)
+            since = date.fromisoformat(args.since) if args.since else today - timedelta(days=6)
             until = date.fromisoformat(args.until) if args.until else today
         except ValueError as exc:
             print(f"Error: invalid date: {exc}", file=sys.stderr)
