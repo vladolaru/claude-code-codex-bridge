@@ -515,7 +515,10 @@ def _handle_log_command(args: argparse.Namespace) -> int:
 
     today = date.today()
     if args.days is not None:
-        since = today - timedelta(days=max(args.days - 1, 0))
+        if args.days < 1:
+            print("Error: --days must be at least 1", file=sys.stderr)
+            return 1
+        since = today - timedelta(days=args.days - 1)
         until = today
     else:
         try:
@@ -650,12 +653,20 @@ def _handle_all_command(args: argparse.Namespace) -> int:
         return 1
 
     if not dry_run:
+        from cc_codex_bridge.reconcile import Change
         for r in report.results:
-            if r.report.changes:
+            bootstrap_changes = ()
+            if r.bootstrapped:
+                bootstrap_changes = (
+                    Change(kind="create", path=r.project_root / "AGENTS.md", resource_kind="project_file"),
+                    Change(kind="update", path=r.project_root / "CLAUDE.md", resource_kind="project_file"),
+                )
+            all_changes = bootstrap_changes + r.report.changes
+            if all_changes:
                 _log_and_prune(
                     action="reconcile",
                     project=str(r.project_root),
-                    changes=r.report.changes,
+                    changes=all_changes,
                 )
 
     if use_json:

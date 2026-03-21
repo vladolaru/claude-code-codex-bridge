@@ -806,6 +806,7 @@ class ReconcileAllProjectResult:
 
     project_root: Path
     report: ReconcileReport
+    bootstrapped: bool = False
 
 
 @dataclass(frozen=True)
@@ -878,10 +879,12 @@ def reconcile_all(
                 exclude_agents=exclude_agents,
                 exclude_commands=exclude_commands,
             )
+            did_bootstrap = False
             if build.shim_decision.action == "bootstrap":
                 if not dry_run:
                     from cc_codex_bridge.claude_shim import execute_bootstrap
                     execute_bootstrap(build.discovery.project)
+                    did_bootstrap = True
                     build = build_project_desired_state(
                         project_root,
                         codex_home=codex_home_path,
@@ -918,7 +921,9 @@ def reconcile_all(
             else:
                 report = reconcile_desired_state(build.desired_state)
 
-            results.append(ReconcileAllProjectResult(project_root=project_root, report=report))
+            results.append(ReconcileAllProjectResult(
+                project_root=project_root, report=report, bootstrapped=did_bootstrap,
+            ))
         except Exception as exc:
             errors.append(ReconcileAllError(project_root=project_root, error=str(exc)))
 
