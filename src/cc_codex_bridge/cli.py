@@ -485,6 +485,11 @@ def _handle_clean_command(args: argparse.Namespace) -> int:
     if args.dry_run:
         print("Dry run — the following would be removed:")
     else:
+        _log_and_prune(
+            action="clean",
+            project=str(project_root),
+            changes=report.changes,
+        )
         print("Cleaned:")
 
     print(format_change_report(report))
@@ -507,6 +512,17 @@ def _handle_uninstall_command(args: argparse.Namespace) -> int:
     except (ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+
+    if not args.dry_run:
+        all_changes = tuple(
+            c for result in report.projects for c in result.changes
+        ) + report.global_removals
+        if all_changes:
+            _log_and_prune(
+                action="uninstall",
+                project="*",
+                changes=all_changes,
+            )
 
     if args.json:
         print(_format_uninstall_json(report))
@@ -756,6 +772,12 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
         plist_bytes,
         label=label,
         launchagents_dir=args.launchagents_dir,
+    )
+    from cc_codex_bridge.reconcile import Change
+    _log_and_prune(
+        action="install-launchagent",
+        project="*",
+        changes=(Change(kind="create", path=destination, resource_kind="launchagent"),),
     )
     print(f"LAUNCHAGENT_LABEL: {label}")
     print(f"LAUNCHAGENT_PATH: {destination}")
