@@ -4093,3 +4093,43 @@ def test_reconcile_seeds_config_stub(
     from cc_codex_bridge.scan import load_scan_config
     config = load_scan_config(bridge_home)
     assert config.scan_paths == ()
+
+
+def test_reconcile_rewrites_plugin_references_in_skills(
+    make_project, make_plugin_version, tmp_path: Path,
+):
+    """Plugin-qualified references in skill content are rewritten to $codex-name."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "superpowers", "1.0.0",
+        skill_names=("brainstorming", "writing-plans"),
+    )
+
+    skill_md = version_dir / "skills" / "brainstorming" / "SKILL.md"
+    skill_md.write_text(
+        "---\nname: brainstorming\ndescription: Brainstorm ideas\n---\n\n"
+        "After brainstorming, use superpowers:writing-plans to create a plan.\n"
+    )
+    (version_dir / "skills" / "writing-plans" / "SKILL.md").write_text(
+        "---\nname: writing-plans\ndescription: Write plans\n---\n\nWrite plans.\n"
+    )
+
+    codex_home = tmp_path / "codex-home"
+
+    build = build_project_desired_state(
+        project_root, codex_home=codex_home,
+        cache_dir=cache_root,
+    )
+    assert build.desired_state is not None
+
+    brainstorming_skill = next(
+        s for s in build.desired_state.skills
+        if s.codex_skill_name == "brainstorming"
+    )
+    skill_md_file = next(
+        f for f in brainstorming_skill.files if f.relative_path == Path("SKILL.md")
+    )
+    content = skill_md_file.content.decode()
+
+    assert "superpowers:writing-plans" not in content
+    assert "$writing-plans" in content

@@ -245,6 +245,67 @@ class ProjectBuildResult:
     diagnostics: tuple  # AgentTranslationDiagnostic and SkillValidationDiagnostic items
 
 
+def _rewrite_skill_references(
+    skills: tuple[GeneratedSkill, ...],
+    reference_map: dict[str, str],
+) -> tuple[GeneratedSkill, ...]:
+    """Rewrite plugin-qualified references in skill file content."""
+    from cc_codex_bridge.rewrite_references import rewrite_content
+
+    result: list[GeneratedSkill] = []
+    for skill in skills:
+        new_files: list[object] = []
+        changed = False
+        for f in skill.files:
+            rewritten = rewrite_content(f.content, reference_map)
+            if rewritten != f.content:
+                changed = True
+                new_files.append(replace(f, content=rewritten))
+            else:
+                new_files.append(f)
+        if changed:
+            result.append(replace(skill, files=tuple(new_files)))
+        else:
+            result.append(skill)
+    return tuple(result)
+
+
+def _rewrite_agent_references(
+    agents: tuple[GeneratedAgentFile, ...],
+    reference_map: dict[str, str],
+) -> tuple[GeneratedAgentFile, ...]:
+    """Rewrite plugin-qualified references in agent developer_instructions."""
+    from cc_codex_bridge.rewrite_references import rewrite_content
+
+    result: list[GeneratedAgentFile] = []
+    for agent in agents:
+        rewritten = rewrite_content(
+            agent.developer_instructions.encode(), reference_map,
+        ).decode()
+        if rewritten != agent.developer_instructions:
+            result.append(replace(agent, developer_instructions=rewritten))
+        else:
+            result.append(agent)
+    return tuple(result)
+
+
+def _rewrite_prompt_references(
+    prompts: tuple[GeneratedPrompt, ...],
+    reference_map: dict[str, str],
+) -> tuple[GeneratedPrompt, ...]:
+    """Rewrite plugin-qualified references in prompt content."""
+    from cc_codex_bridge.rewrite_references import rewrite_content
+
+    result: list[GeneratedPrompt] = []
+    for prompt in prompts:
+        rewritten = rewrite_content(prompt.content, reference_map)
+        if rewritten != prompt.content:
+            result.append(replace(prompt, content=rewritten))
+        else:
+            result.append(prompt)
+    return tuple(result)
+
+
 def build_project_desired_state(
     project_root: str | Path | None = None,
     *,
@@ -349,18 +410,6 @@ def build_project_desired_state(
     project_agents = project_agent_result.agents
     global_agents = all_global_agents
 
-    # Render project-local agent .toml files
-    project_agent_files: list[tuple[Path, bytes]] = []
-    for agent in project_agents:
-        relpath = AGENTS_RELATIVE_ROOT / agent.install_filename
-        content = render_agent_toml(
-            agent.agent_name,
-            agent.description,
-            agent.developer_instructions,
-            sandbox_mode=agent.sandbox_mode,
-        )
-        project_agent_files.append((relpath, content.encode()))
-
     plugin_skill_result = translate_installed_skills(result.plugins, bridge_home=bridge_home_path)
     user_skill_result = translate_standalone_skills(result.user_skills, scope="user")
     project_skill_result = translate_standalone_skills(result.project_skills, scope="project")
@@ -385,6 +434,40 @@ def build_project_desired_state(
         *user_skill_result.skills,
     ))
     all_project_skills = project_skill_result.skills
+
+    # Rewrite plugin-qualified references in generated content
+    from cc_codex_bridge.rewrite_references import build_reference_map, rewrite_content
+
+    reference_map = build_reference_map(
+        skills=(*all_global_skills, *all_project_skills),
+        prompts=all_prompts,
+    )
+
+    if reference_map:
+        all_global_skills = _rewrite_skill_references(all_global_skills, reference_map)
+        all_project_skills = _rewrite_skill_references(all_project_skills, reference_map)
+        global_agents = _rewrite_agent_references(global_agents, reference_map)
+        project_agents = _rewrite_agent_references(project_agents, reference_map)
+        all_prompts = _rewrite_prompt_references(all_prompts, reference_map)
+
+        if result.user_claude_md is not None:
+            rewritten_md = rewrite_content(
+                result.user_claude_md.encode(), reference_map,
+            ).decode()
+            if rewritten_md != result.user_claude_md:
+                result = replace(result, user_claude_md=rewritten_md)
+
+    # Render project-local agent .toml files (after reference rewriting)
+    project_agent_files: list[tuple[Path, bytes]] = []
+    for agent in project_agents:
+        relpath = AGENTS_RELATIVE_ROOT / agent.install_filename
+        content = render_agent_toml(
+            agent.agent_name,
+            agent.description,
+            agent.developer_instructions,
+            sandbox_mode=agent.sandbox_mode,
+        )
+        project_agent_files.append((relpath, content.encode()))
 
     skill_diagnostics = (
         *plugin_skill_result.diagnostics,
