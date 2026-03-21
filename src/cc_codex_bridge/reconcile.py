@@ -1065,6 +1065,11 @@ def uninstall_all(
         if plugins_dir.exists():
             shutil.rmtree(plugins_dir)
 
+        # Remove activity logs
+        logs_dir = bridge_home_path / "logs"
+        if logs_dir.exists():
+            shutil.rmtree(logs_dir)
+
         # Remove bridge home directory if empty
         if bridge_home_path.exists():
             _cleanup_empty_parents(bridge_home_path / "projects", bridge_home_path)
