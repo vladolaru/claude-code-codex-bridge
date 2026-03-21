@@ -536,7 +536,11 @@ def _handle_log_command(args: argparse.Namespace) -> int:
 
     entries = read_log_entries(logs_dir=log_dir, since=since, until=until)
 
-    project_filter = str(Path(args.project).resolve()) if args.project else None
+    if args.project:
+        raw_project = str(args.project)
+        project_filter = raw_project if raw_project == "*" else str(Path(args.project).resolve())
+    else:
+        project_filter = None
     entries = filter_entries(
         entries,
         project=project_filter,
@@ -612,21 +616,6 @@ def _handle_uninstall_command(args: argparse.Namespace) -> int:
     except (ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
-
-    if not args.dry_run:
-        from cc_codex_bridge.reconcile import Change
-        all_changes = tuple(
-            c for result in report.projects for c in result.changes
-        ) + report.global_removals + tuple(
-            Change(kind="remove", path=r.path, resource_kind="launchagent")
-            for r in report.launchagent_removals
-        )
-        if all_changes:
-            _log_and_prune(
-                action="uninstall",
-                project="*",
-                changes=all_changes,
-            )
 
     if args.json:
         print(_format_uninstall_json(report))
