@@ -325,23 +325,16 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     # Bootstrap: CLAUDE.md exists without AGENTS.md
+    did_bootstrap = False
     if build.shim_decision.action == "bootstrap":
         if args.command == "reconcile" and not args.dry_run:
             from cc_codex_bridge.claude_shim import execute_bootstrap
-            from cc_codex_bridge.reconcile import Change
             try:
                 execute_bootstrap(build.discovery.project)
             except (ReconcileError, OSError, UnicodeError) as exc:
                 print(f"Error: {exc}", file=sys.stderr)
                 return 1
-            _log_and_prune(
-                action="reconcile",
-                project=str(build.discovery.project.root),
-                changes=(
-                    Change(kind="create", path=build.discovery.project.agents_md_path, resource_kind="project_file"),
-                    Change(kind="update", path=build.discovery.project.root / "CLAUDE.md", resource_kind="project_file"),
-                ),
-            )
+            did_bootstrap = True
             try:
                 build = build_project_desired_state(
                     args.project,
@@ -411,11 +404,19 @@ def main(argv: list[str] | None = None) -> int:
                 report = diff_desired_state(build.desired_state)
             else:
                 report = reconcile_desired_state(build.desired_state)
-                if report.changes:
+                from cc_codex_bridge.reconcile import Change
+                bootstrap_changes = ()
+                if did_bootstrap:
+                    bootstrap_changes = (
+                        Change(kind="create", path=build.discovery.project.agents_md_path, resource_kind="project_file"),
+                        Change(kind="update", path=build.discovery.project.root / "CLAUDE.md", resource_kind="project_file"),
+                    )
+                all_changes = bootstrap_changes + report.changes
+                if all_changes:
                     _log_and_prune(
                         action="reconcile",
                         project=str(build.discovery.project.root),
-                        changes=report.changes,
+                        changes=all_changes,
                     )
             _print_summary(
                 build.discovery,
@@ -606,21 +607,6 @@ def _handle_uninstall_command(args: argparse.Namespace) -> int:
     except (ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
-
-    if not args.dry_run:
-        from cc_codex_bridge.reconcile import Change
-        all_changes = tuple(
-            c for result in report.projects for c in result.changes
-        ) + report.global_removals + tuple(
-            Change(kind="remove", path=r.path, resource_kind="launchagent")
-            for r in report.launchagent_removals
-        )
-        if all_changes:
-            _log_and_prune(
-                action="uninstall",
-                project="*",
-                changes=all_changes,
-            )
 
     if args.json:
         print(_format_uninstall_json(report))
