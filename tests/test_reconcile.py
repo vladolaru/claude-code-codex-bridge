@@ -4133,3 +4133,114 @@ def test_reconcile_rewrites_plugin_references_in_skills(
 
     assert "superpowers:writing-plans" not in content
     assert "$writing-plans" in content
+
+
+def test_reconcile_rewrites_plugin_references_in_prompts(
+    make_project, make_plugin_version, tmp_path: Path,
+):
+    """Plugin-qualified references in prompt content are rewritten."""
+    from cc_codex_bridge.reconcile import build_project_desired_state
+
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version("market", "tools", "1.0.0",
+        skill_names=("review",))
+
+    (version_dir / "skills" / "review" / "SKILL.md").write_text(
+        "---\nname: review\ndescription: Review\n---\n\nReview.\n"
+    )
+    commands_dir = version_dir / "commands"
+    commands_dir.mkdir()
+    (commands_dir / "pr-review.md").write_text(
+        "---\ndescription: 'PR review'\n---\n\n"
+        "Run tools:review skill before submitting.\n"
+    )
+
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "bridge-home"
+
+    build = build_project_desired_state(
+        project_root, codex_home=codex_home, bridge_home=bridge_home,
+        cache_dir=cache_root,
+    )
+    assert build.desired_state is not None
+
+    pr_review_prompt = next(
+        p for p in build.desired_state.global_prompts
+        if "pr-review" in p.filename
+    )
+    content = pr_review_prompt.content.decode()
+    assert "tools:review" not in content
+    assert "$review" in content
+
+
+def test_reconcile_rewrites_plugin_references_in_agents(
+    make_project, make_plugin_version, tmp_path: Path,
+):
+    """Plugin-qualified references in agent instructions are rewritten."""
+    from cc_codex_bridge.reconcile import build_project_desired_state
+
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version("market", "superpowers", "1.0.0",
+        skill_names=("brainstorming",))
+
+    (version_dir / "skills" / "brainstorming" / "SKILL.md").write_text(
+        "---\nname: brainstorming\ndescription: Brainstorm\n---\n\nBrainstorm.\n"
+    )
+    agents_dir = version_dir / "agents"
+    agents_dir.mkdir()
+    (agents_dir / "planner.md").write_text(
+        "---\nname: planner\ndescription: Plans things\n---\n\n"
+        "Use superpowers:brainstorming before planning.\n"
+    )
+
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "bridge-home"
+
+    build = build_project_desired_state(
+        project_root, codex_home=codex_home, bridge_home=bridge_home,
+        cache_dir=cache_root,
+    )
+    assert build.desired_state is not None
+
+    planner_agent = next(
+        a for a in build.desired_state.global_agents
+        if "planner" in a.agent_name
+    )
+    assert "superpowers:brainstorming" not in planner_agent.developer_instructions
+    assert "$brainstorming" in planner_agent.developer_instructions
+
+
+def test_reconcile_rewrites_plugin_references_in_global_instructions(
+    make_project, make_plugin_version, tmp_path: Path,
+):
+    """Plugin-qualified references in global instructions are rewritten."""
+    from cc_codex_bridge.reconcile import build_project_desired_state
+
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version("market", "superpowers", "1.0.0",
+        skill_names=("writing-plans",))
+
+    (version_dir / "skills" / "writing-plans" / "SKILL.md").write_text(
+        "---\nname: writing-plans\ndescription: Write plans\n---\n\nWrite plans.\n"
+    )
+
+    # Create user-level CLAUDE.md with a plugin reference
+    claude_home = tmp_path / "claude-home"
+    claude_home.mkdir()
+    (claude_home / "CLAUDE.md").write_text(
+        "# Instructions\n\nAlways use superpowers:writing-plans before implementation.\n"
+    )
+
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "bridge-home"
+
+    build = build_project_desired_state(
+        project_root, codex_home=codex_home, bridge_home=bridge_home,
+        cache_dir=cache_root, claude_home=claude_home,
+    )
+    assert build.desired_state is not None
+    assert build.desired_state.global_instructions is not None
+
+    instructions = build.desired_state.global_instructions.decode()
+    assert "superpowers:writing-plans" not in instructions
+    assert "$writing-plans" in instructions
