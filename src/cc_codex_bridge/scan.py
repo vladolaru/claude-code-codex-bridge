@@ -84,7 +84,7 @@ def _read_string_list(table: dict[str, object], key: str, config_path: Path) -> 
         return []
     if not isinstance(raw, list) or any(not isinstance(item, str) for item in raw):
         raise ReconcileError(
-            f"`scan.{key}` must be a list of strings in: {config_path}"
+            f"`{key}` must be a list of strings in: {config_path}"
         )
     return [item.strip() for item in raw if item.strip()]
 

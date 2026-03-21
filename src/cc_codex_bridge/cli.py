@@ -591,7 +591,11 @@ def _format_all_report(report, *, dry_run: bool = False) -> str:
     for e in report.errors:
         lines.append(f"ERROR: {e.project_root} — {e.error}")
 
-    if not report.results and not report.errors:
+    has_scan_output = (
+        scan is not None
+        and (scan.bridgeable or scan.not_bridgeable or scan.filtered)
+    )
+    if not report.results and not report.errors and not has_scan_output:
         lines.append("No registered projects.")
 
     return "\n".join(lines)
@@ -788,6 +792,9 @@ def _build_status_payload(
     categorized_changes: dict[str, dict[str, list[str]]] = {
         "project_files": {"create": [], "update": [], "remove": []},
         "skills": {"create": [], "update": [], "remove": []},
+        "agents": {"create": [], "update": [], "remove": []},
+        "prompts": {"create": [], "update": [], "remove": []},
+        "global": {"create": [], "update": [], "remove": []},
     }
     pending_change_count = 0
     status = "invalid" if diagnostics else "in_sync"
@@ -806,7 +813,16 @@ def _build_status_payload(
     else:
         rendered_diagnostics = []
         for change in report.changes:
-            category = "skills" if change.resource_kind in ("skill", "project_skill") else "project_files"
+            if change.resource_kind in ("skill", "project_skill"):
+                category = "skills"
+            elif change.resource_kind == "agent":
+                category = "agents"
+            elif change.resource_kind == "prompt":
+                category = "prompts"
+            elif change.resource_kind in ("global_instructions", "state", "plugin_resource"):
+                category = "global"
+            else:
+                category = "project_files"
             categorized_changes[category][change.kind].append(str(change.path))
         pending_change_count = len(report.changes)
         status = "in_sync" if not report.changes else "pending_changes"
@@ -870,6 +886,9 @@ def format_status_report(
     categorized = payload["categorized_changes"]
     project_files = categorized["project_files"]
     skills = categorized["skills"]
+    agents = categorized["agents"]
+    prompts = categorized["prompts"]
+    global_changes = categorized["global"]
     lines = [
         f"VERSION: v{payload['version']}",
         f"STATUS: {payload['status']}",
@@ -886,6 +905,24 @@ def format_status_report(
             f"create={len(skills['create'])} "
             f"update={len(skills['update'])} "
             f"remove={len(skills['remove'])}"
+        ),
+        (
+            "AGENTS: "
+            f"create={len(agents['create'])} "
+            f"update={len(agents['update'])} "
+            f"remove={len(agents['remove'])}"
+        ),
+        (
+            "PROMPTS: "
+            f"create={len(prompts['create'])} "
+            f"update={len(prompts['update'])} "
+            f"remove={len(prompts['remove'])}"
+        ),
+        (
+            "GLOBAL: "
+            f"create={len(global_changes['create'])} "
+            f"update={len(global_changes['update'])} "
+            f"remove={len(global_changes['remove'])}"
         ),
         (
             "EXCLUDED: "
