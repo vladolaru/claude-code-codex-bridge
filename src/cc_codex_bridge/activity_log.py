@@ -192,7 +192,10 @@ def prune_logs(
             continue
         age_days = (today - file_date).days
         if age_days >= retention_days:
-            log_file.unlink()
+            try:
+                log_file.unlink()
+            except OSError:
+                continue  # Skip undeletable files
             removed.append(log_file)
 
     return removed
