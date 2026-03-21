@@ -12,6 +12,7 @@ from cc_codex_bridge.activity_log import (
     write_log_entry,
     read_log_entries,
     filter_entries,
+    format_log_entries,
     prune_logs,
 )
 
@@ -194,3 +195,38 @@ def test_prune_ignores_non_jsonl_files(tmp_path):
     removed = prune_logs(logs_dir=logs_dir, retention_days=30, today=date(2026, 3, 21))
     assert len(removed) == 1
     assert (logs_dir / "notes.txt").exists()
+
+
+def test_format_entries_human_readable(tmp_path):
+    """format_log_entries produces human-readable output."""
+    entry = _make_entry(
+        action="reconcile",
+        project="/proj",
+        changes=(
+            LogChange(type="create", artifact="skill", path="/s1"),
+            LogChange(type="update", artifact="agent", path="/a1"),
+            LogChange(type="remove", artifact="prompt", path="/p1"),
+        ),
+        timestamp=datetime(2026, 3, 21, 14, 32, 7),
+    )
+    output = format_log_entries([entry])
+    assert "2026-03-21 14:32:07" in output
+    assert "reconcile" in output
+    assert "/proj" in output
+    assert "+ skill" in output
+    assert "~ agent" in output
+    assert "- prompt" in output
+
+
+def test_format_entries_empty():
+    """format_log_entries with no entries returns a no-entries message."""
+    output = format_log_entries([])
+    assert "No log entries" in output
+
+
+def test_format_entries_json():
+    """format_log_entries with json_output=True returns JSONL."""
+    entry = _make_entry()
+    output = format_log_entries([entry], json_output=True)
+    data = json.loads(output.strip())
+    assert data["action"] == "reconcile"

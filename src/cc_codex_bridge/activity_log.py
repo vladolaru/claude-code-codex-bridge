@@ -60,6 +60,29 @@ class LogEntry:
         )
 
 
+_CHANGE_SYMBOLS = {"create": "+", "update": "~", "remove": "-"}
+
+
+def format_log_entries(entries: list[LogEntry], *, json_output: bool = False) -> str:
+    """Format log entries for display."""
+    if not entries:
+        return "No log entries found."
+
+    if json_output:
+        return "\n".join(e.to_json_line() for e in entries)
+
+    lines: list[str] = []
+    for entry in entries:
+        ts = entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        lines.append(f"{ts}  {entry.action:<20s} {entry.project}")
+        for change in entry.changes:
+            symbol = _CHANGE_SYMBOLS.get(change.type, "?")
+            lines.append(f"  {symbol} {change.artifact:<16s} {change.path}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
+
+
 def write_log_entry(entry: LogEntry, *, logs_dir: Path) -> None:
     """Append a log entry to the daily JSONL file. No-op if no changes."""
     if not entry.changes:
