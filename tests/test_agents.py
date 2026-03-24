@@ -784,6 +784,49 @@ def test_render_agent_toml_escapes_long_quote_runs():
     assert parsed["developer_instructions"] == body
 
 
+def test_render_agent_toml_escapes_backslashes_in_body():
+    """Backslashes in developer_instructions are escaped for TOML multiline strings."""
+    body = (
+        'Use `content: "\\2197"` for arrows.\n'
+        'Search with: `git grep -n "foo\\|bar"`\n'
+        'Regular path: C:\\Users\\test\n'
+    )
+    result = render_agent_toml("backslash-agent", "Has backslashes", body)
+    # Must parse as valid TOML
+    parsed = tomllib.loads(result)
+    assert parsed["developer_instructions"] == body
+    assert parsed["name"] == "backslash-agent"
+
+
+def test_render_agent_toml_escapes_backslashes_with_quotes():
+    """Backslashes combined with quotes are both escaped correctly."""
+    body = 'Example: \\"quoted\\" and \\"""triple\\"""\n'
+    result = render_agent_toml("mixed-agent", "Mixed escapes", body)
+    parsed = tomllib.loads(result)
+    assert parsed["developer_instructions"] == body
+
+
+def test_render_agent_toml_escapes_control_characters():
+    """Control characters in developer_instructions are escaped as \\uXXXX."""
+    # null, bell, form feed, delete — all disallowed as bare bytes in TOML
+    body = "before\x00null\x07bell\x0cformfeed\x7fdelete\nafter\n"
+    result = render_agent_toml("ctrl-agent", "Has control chars", body)
+    # Must parse as valid TOML
+    parsed = tomllib.loads(result)
+    assert parsed["developer_instructions"] == body
+    assert parsed["name"] == "ctrl-agent"
+
+
+def test_render_agent_toml_preserves_allowed_whitespace():
+    """Tabs and newlines are NOT escaped — they're allowed in multiline basic strings."""
+    body = "line one\n\ttabbed\nline three\n"
+    result = render_agent_toml("ws-agent", "Whitespace", body)
+    parsed = tomllib.loads(result)
+    assert parsed["developer_instructions"] == body
+    # Verify tab is literal, not escaped
+    assert "\\t" not in result.split('developer_instructions = """')[1].split('"""')[0]
+
+
 def test_derive_sandbox_mode_write_tools():
     """Write-capable tools produce workspace-write."""
     assert derive_sandbox_mode(("Read", "Bash", "Write")) == "workspace-write"

@@ -58,14 +58,37 @@ def _escape_toml_string(value: str) -> str:
     )
 
 
+# Control characters that must be escaped in TOML basic strings.
+# Tab (\t), newline (\n), and carriage return (\r) are allowed literally
+# in multiline basic strings; everything else in U+0000–001F and U+007F
+# must use a \uXXXX escape.
+_TOML_CONTROL_CHAR_ESCAPES: dict[str, str] = {
+    chr(c): f"\\u{c:04X}" for c in
+    (*range(0x00, 0x09), 0x0B, 0x0C, *range(0x0E, 0x20), 0x7F)
+}
+
+
 def _escape_toml_multiline_string(value: str) -> str:
     """Escape a string for TOML multiline basic string context.
 
-    In a multiline basic string (delimited by triple double-quotes),
-    runs of three or more consecutive unescaped double-quotes would
-    prematurely close the string.  We break such runs by backslash-
-    escaping every third consecutive quote.
+    In a multiline basic string (delimited by triple double-quotes):
+    - Backslashes must be escaped (``\\`` → ``\\\\``) because TOML
+      interprets ``\\x`` as an escape sequence and rejects unknown ones.
+    - Control characters (U+0000–0008, U+000B, U+000C, U+000E–001F,
+      U+007F) must be escaped as ``\\uXXXX`` because TOML rejects them
+      as bare bytes.
+    - Runs of three or more consecutive unescaped double-quotes would
+      prematurely close the string.  We break such runs by backslash-
+      escaping every third consecutive quote.
     """
+    # Escape backslashes first (before we introduce our own backslashes
+    # for quote and control-character escaping).
+    value = value.replace("\\", "\\\\")
+
+    # Escape disallowed control characters.
+    for char, escape in _TOML_CONTROL_CHAR_ESCAPES.items():
+        value = value.replace(char, escape)
+
     result: list[str] = []
     consecutive_quotes = 0
     for char in value:
