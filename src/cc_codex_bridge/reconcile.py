@@ -80,6 +80,7 @@ class ReconcileReport:
 
     changes: tuple[Change, ...]
     applied: bool
+    ownership_released: bool = False
 
 
 @dataclass(frozen=True)
@@ -764,7 +765,11 @@ def clean_project(
             _assert_path_contained(change.path, project_root_path, label="Clean target")
 
     if dry_run:
-        return ReconcileReport(changes=tuple(changes), applied=False)
+        return ReconcileReport(
+            changes=tuple(changes),
+            applied=False,
+            ownership_released=registry_changed,
+        )
 
     # Apply removals — state file last to preserve cleanup atomicity
     for change in changes:
@@ -797,7 +802,11 @@ def clean_project(
     state_path.unlink(missing_ok=True)
     _cleanup_empty_parents(state_path.parent, bridge_home_path)
 
-    return ReconcileReport(changes=tuple(changes), applied=True)
+    return ReconcileReport(
+        changes=tuple(changes),
+        applied=True,
+        ownership_released=registry_changed,
+    )
 
 
 @dataclass(frozen=True)

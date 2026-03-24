@@ -583,7 +583,10 @@ def _handle_clean_command(args: argparse.Namespace) -> int:
         return 1
 
     if not report.changes:
-        print("Nothing to clean.")
+        if report.ownership_released:
+            print("Ownership released (no files removed — other projects still reference the artifacts).")
+        else:
+            print("Nothing to clean.")
         return 0
 
     if args.dry_run:
@@ -814,7 +817,7 @@ def _format_uninstall_report(report, *, dry_run: bool = False) -> str:
                 suffix = f" ({change.resource_kind})" if change.resource_kind else ""
                 lines.append(f"REMOVE: {change.path}{suffix}")
             if not result.changes:
-                lines.append("Nothing to clean.")
+                lines.append("Ownership released (no files removed).")
         lines.append("")
 
     if report.global_removals or report.launchagent_removals:

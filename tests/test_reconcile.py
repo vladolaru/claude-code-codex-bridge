@@ -1896,6 +1896,7 @@ def test_clean_releases_last_owner_skill(
     bridge_home = tmp_path / "home" / ".cc-codex-bridge"
     report = clean_project(project_root, bridge_home=bridge_home)
     assert report.applied is True
+    assert report.ownership_released is True
     assert not skill_dir.exists()
 
     # Registry should be empty or not have this skill
@@ -1930,6 +1931,8 @@ def test_clean_releases_shared_skill_preserves_for_other_owner(
     bridge_home = tmp_path / "home" / ".cc-codex-bridge"
     report = clean_project(project_a, bridge_home=bridge_home)
     assert report.applied is True
+    # No files removed (project B still owns everything), but ownership was released
+    assert report.ownership_released is True
 
     # Skill directory still exists — project B still owns it
     assert skill_dir.exists()
@@ -1954,6 +1957,7 @@ def test_clean_no_state_is_noop(make_project, tmp_path: Path):
     report = clean_project(project_root, bridge_home=bridge_home)
     assert report.applied is True
     assert len(report.changes) == 0
+    assert report.ownership_released is False
 
 
 def test_clean_dry_run_no_side_effects(
