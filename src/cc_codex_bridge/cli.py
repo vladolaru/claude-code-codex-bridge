@@ -131,7 +131,16 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = _subparsers
     subparsers.add_parser = _add_parser  # type: ignore[method-assign]
 
-    reconcile_parser = subparsers.add_parser("reconcile", parents=[common])
+    reconcile_parser = subparsers.add_parser(
+        "reconcile",
+        parents=[common],
+        description=(
+            "Sync Codex artifacts with the current Claude Code plugin state. "
+            "Discovers installed plugins, translates skills/agents/commands into "
+            "Codex-compatible files, and writes them to ~/.codex/ and the project. "
+            "Safe to run repeatedly — only changed files are updated."
+        ),
+    )
     reconcile_parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -142,9 +151,33 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show unified diffs between current and desired file contents (requires --dry-run).",
     )
-    validate_parser = subparsers.add_parser("validate", parents=[common])
-    status_parser = subparsers.add_parser("status", parents=[common])
-    clean_parser = subparsers.add_parser("clean")
+    validate_parser = subparsers.add_parser(
+        "validate",
+        parents=[common],
+        description=(
+            "Check that installed Claude Code plugins translate cleanly into "
+            "Codex artifacts. Reports plugin counts, skill/agent/prompt totals, "
+            "and any translation warnings. Does not write or modify any files."
+        ),
+    )
+    status_parser = subparsers.add_parser(
+        "status",
+        parents=[common],
+        description=(
+            "Compare the current Codex artifacts on disk with what reconcile "
+            "would produce. Reports whether the project is in sync and lists "
+            "any pending creates, updates, or removals. Does not write or modify any files."
+        ),
+    )
+    clean_parser = subparsers.add_parser(
+        "clean",
+        description=(
+            "Remove all bridge-generated Codex artifacts for one project. "
+            "Releases the project's ownership of shared global skills, agents, "
+            "and prompts — artifacts still owned by other projects are preserved. "
+            "Deletes the project's bridge state file."
+        ),
+    )
     clean_parser.add_argument(
         "--project",
         type=Path,
@@ -160,7 +193,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show what would be removed without deleting anything.",
     )
-    uninstall_parser = subparsers.add_parser("uninstall")
+    uninstall_parser = subparsers.add_parser(
+        "uninstall",
+        description=(
+            "Remove the entire bridge from this machine. Cleans all registered "
+            "projects, removes all global Codex artifacts (skills, agents, prompts, "
+            "AGENTS.md), unloads the LaunchAgent if installed, and deletes the "
+            "bridge home directory (~/.cc-codex-bridge)."
+        ),
+    )
     uninstall_parser.add_argument(
         "--codex-home",
         type=Path,
@@ -181,7 +222,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="LaunchAgents directory to scan (default: ~/Library/LaunchAgents).",
     )
-    doctor_parser = subparsers.add_parser("doctor")
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        description=(
+            "Run environment health checks. Verifies that the claude CLI is "
+            "installed and accessible, plugins are discoverable, the Codex home "
+            "directory exists, and the LaunchAgent (if installed) is correctly "
+            "configured. Reports pass/warn/fail for each check."
+        ),
+    )
     doctor_parser.add_argument(
         "--claude-home",
         type=Path,
@@ -276,20 +325,47 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory for LaunchAgent stdout/stderr logs (default: ~/.cc-codex-bridge/logs).",
     )
 
-    subparsers.add_parser("print-launchagent", parents=[launchagent_common])
-    install_parser = subparsers.add_parser("install-launchagent", parents=[launchagent_common])
+    subparsers.add_parser(
+        "print-launchagent",
+        parents=[launchagent_common],
+        description=(
+            "Print a macOS LaunchAgent plist to stdout without installing it. "
+            "The plist configures launchd to run 'cc-codex-bridge reconcile --all' "
+            "on a recurring interval, keeping Codex artifacts in sync automatically. "
+            "Pipe to a file or inspect before using install-launchagent."
+        ),
+    )
+    install_parser = subparsers.add_parser(
+        "install-launchagent",
+        parents=[launchagent_common],
+        description=(
+            "Install a macOS LaunchAgent that runs 'cc-codex-bridge reconcile --all' "
+            "on a recurring interval. Writes the plist to ~/Library/LaunchAgents and "
+            "loads it via launchd. Re-running updates the plist and reloads the agent."
+        ),
+    )
     install_parser.add_argument(
         "--launchagents-dir",
         type=Path,
         help="LaunchAgents destination directory (default: ~/Library/LaunchAgents).",
     )
 
-    log_parser = subparsers.add_parser("log")
+    log_parser = subparsers.add_parser(
+        "log",
+        description="View and manage the bridge activity log.",
+    )
     log_subparsers = log_parser.add_subparsers(dest="log_command", required=True)
     _raw_log_add = log_subparsers.add_parser
     log_subparsers.add_parser = lambda *a, **kw: (kw.setdefault("formatter_class", _AutoWidthHelpFormatter), _raw_log_add(*a, **kw))[1]  # type: ignore[method-assign]
 
-    log_show_parser = log_subparsers.add_parser("show")
+    log_show_parser = log_subparsers.add_parser(
+        "show",
+        description=(
+            "Display activity log entries. Shows reconcile, clean, and "
+            "install-launchagent operations with their file-level changes. "
+            "Defaults to the last 7 days."
+        ),
+    )
     log_show_parser.add_argument("--since", type=str, help="Start date, inclusive (YYYY-MM-DD).")
     log_show_parser.add_argument("--until", type=str, help="End date, inclusive (YYYY-MM-DD).")
     log_show_parser.add_argument("--days", type=int, help="Show last N days (default: 7). Cannot combine with --since/--until.")
@@ -298,7 +374,13 @@ def build_parser() -> argparse.ArgumentParser:
     log_show_parser.add_argument("--type", type=str, help="Filter by change type (create, update, remove).")
     log_show_parser.add_argument("--json", action="store_true", help="Emit raw JSONL instead of formatted table.")
 
-    log_prune_parser = log_subparsers.add_parser("prune")
+    log_prune_parser = log_subparsers.add_parser(
+        "prune",
+        description=(
+            "Delete activity log files older than the retention period. "
+            "Also runs automatically after every logged operation."
+        ),
+    )
     log_prune_parser.add_argument("--retention-days", type=int, help="Days to keep (default: from config.toml, typically 90).")
 
     return parser
