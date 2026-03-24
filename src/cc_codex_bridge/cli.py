@@ -52,6 +52,37 @@ PIPELINE_COMMANDS = {"reconcile", "validate", "status"}
 LAUNCHAGENT_COMMANDS = {"print-launchagent", "install-launchagent"}
 UTILITY_COMMANDS = {"doctor"}
 
+_MIN_HELP_POSITION = 24
+_HELP_GAP = 4  # spaces between the longest flag+metavar and the help text
+
+
+class _AutoWidthHelpFormatter(argparse.HelpFormatter):
+    """HelpFormatter that sizes max_help_position from actual actions.
+
+    The default HelpFormatter hard-codes max_help_position=24, which
+    forces help text onto a new line when the flag+metavar exceeds ~20
+    chars.  This subclass lets it grow to fit, capped at half the
+    terminal width.
+    """
+
+    def __init__(self, prog: str, **kwargs: object) -> None:
+        # Start with a generous max_help_position; format_help will
+        # clamp it after _action_max_length is known.
+        kwargs.setdefault("max_help_position", 52)
+        super().__init__(prog, **kwargs)  # type: ignore[arg-type]
+
+    def format_help(self) -> str:
+        # After all actions have been added, _action_max_length holds
+        # the widest invocation string.  Clamp max_help_position to
+        # that width + a small gap, bounded by [_MIN_HELP_POSITION,
+        # width // 2].
+        ideal = self._action_max_length + _HELP_GAP
+        self._max_help_position = min(
+            max(ideal, _MIN_HELP_POSITION),
+            self._width // 2,
+        )
+        return super().format_help()
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI parser."""
@@ -82,6 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cc-codex-bridge",
         description=f"cc-codex-bridge v{__version__} — Generate Codex bridge artifacts from installed Claude Code plugins.",
+        formatter_class=_AutoWidthHelpFormatter,
     )
     parser.add_argument(
         "-v", "--version",
@@ -89,7 +121,16 @@ def build_parser() -> argparse.ArgumentParser:
         version=f"%(prog)s v{__version__}",
     )
 
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    _subparsers = parser.add_subparsers(dest="command", required=True)
+    _raw_add = _subparsers.add_parser
+
+    def _add_parser(*args, **kwargs):
+        kwargs.setdefault("formatter_class", _AutoWidthHelpFormatter)
+        return _raw_add(*args, **kwargs)
+
+    subparsers = _subparsers
+    subparsers.add_parser = _add_parser  # type: ignore[method-assign]
+
     reconcile_parser = subparsers.add_parser("reconcile", parents=[common])
     reconcile_parser.add_argument(
         "--dry-run",
@@ -245,6 +286,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     log_parser = subparsers.add_parser("log")
     log_subparsers = log_parser.add_subparsers(dest="log_command", required=True)
+    _raw_log_add = log_subparsers.add_parser
+    log_subparsers.add_parser = lambda *a, **kw: (kw.setdefault("formatter_class", _AutoWidthHelpFormatter), _raw_log_add(*a, **kw))[1]  # type: ignore[method-assign]
 
     log_show_parser = log_subparsers.add_parser("show")
     log_show_parser.add_argument("--since", type=str, help="Start date (YYYY-MM-DD).")
