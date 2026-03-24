@@ -133,7 +133,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog="cc-codex-bridge",
-        description=f"cc-codex-bridge v{__version__} — Generate Codex bridge artifacts from installed Claude Code plugins.",
+        description=f"cc-codex-bridge v{__version__} — Bridge your local Claude Code setup into Codex so both tools stay equally effective.",
         formatter_class=_AutoWidthHelpFormatter,
     )
     parser.add_argument(
@@ -157,11 +157,12 @@ def build_parser() -> argparse.ArgumentParser:
     reconcile_parser = subparsers.add_parser(
         "reconcile",
         parents=[common],
-        help="Sync Codex artifacts with installed Claude Code plugins",
+        help="Sync Codex artifacts with the current Claude Code setup",
         description=(
-            "Sync Codex artifacts with the current Claude Code plugin state. "
-            "Discovers installed plugins, translates skills/agents/commands into "
-            "Codex-compatible files, and writes them to ~/.codex/ and the project. "
+            "Sync Codex artifacts with the current Claude Code setup. "
+            "Discovers installed plugins, user-level and project-level "
+            "skills/agents/commands, translates them into Codex-compatible "
+            "files, and writes them to ~/.codex/ and the project. "
             "Safe to run repeatedly — only changed files are updated."
         ),
     )
