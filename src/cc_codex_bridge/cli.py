@@ -83,6 +83,17 @@ class _AutoWidthHelpFormatter(argparse.HelpFormatter):
         )
         return super().format_help()
 
+    def start_section(self, heading: str | None) -> None:
+        # Capitalize section headings: "options" -> "Options", etc.
+        if heading:
+            heading = heading[0].upper() + heading[1:]
+        super().start_section(heading)
+
+    def _format_usage(self, usage, actions, groups, prefix):
+        if prefix is None:
+            prefix = "Usage: "
+        return super()._format_usage(usage, actions, groups, prefix)
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI parser."""
@@ -121,7 +132,9 @@ def build_parser() -> argparse.ArgumentParser:
         version=f"%(prog)s v{__version__}",
     )
 
-    _subparsers = parser.add_subparsers(dest="command", required=True)
+    _subparsers = parser.add_subparsers(
+        dest="command", required=True, title="Commands", metavar="COMMAND",
+    )
     _raw_add = _subparsers.add_parser
 
     def _add_parser(*args, **kwargs):
@@ -134,6 +147,7 @@ def build_parser() -> argparse.ArgumentParser:
     reconcile_parser = subparsers.add_parser(
         "reconcile",
         parents=[common],
+        help="Sync Codex artifacts with installed Claude Code plugins",
         description=(
             "Sync Codex artifacts with the current Claude Code plugin state. "
             "Discovers installed plugins, translates skills/agents/commands into "
@@ -154,6 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
     validate_parser = subparsers.add_parser(
         "validate",
         parents=[common],
+        help="Check that plugins translate cleanly without writing files",
         description=(
             "Check that installed Claude Code plugins translate cleanly into "
             "Codex artifacts. Reports plugin counts, skill/agent/prompt totals, "
@@ -163,6 +178,7 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser = subparsers.add_parser(
         "status",
         parents=[common],
+        help="Show sync status and pending changes",
         description=(
             "Compare the current Codex artifacts on disk with what reconcile "
             "would produce. Reports whether the project is in sync and lists "
@@ -171,6 +187,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     clean_parser = subparsers.add_parser(
         "clean",
+        help="Remove bridge artifacts for one project",
         description=(
             "Remove all bridge-generated Codex artifacts for one project. "
             "Releases the project's ownership of shared global skills, agents, "
@@ -195,6 +212,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     uninstall_parser = subparsers.add_parser(
         "uninstall",
+        help="Remove the entire bridge from this machine",
         description=(
             "Remove the entire bridge from this machine. Cleans all registered "
             "projects, removes all global Codex artifacts (skills, agents, prompts, "
@@ -224,6 +242,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     doctor_parser = subparsers.add_parser(
         "doctor",
+        help="Run environment health checks",
         description=(
             "Run environment health checks. Verifies that the claude CLI is "
             "installed and accessible, plugins are discoverable, the Codex home "
@@ -328,6 +347,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "print-launchagent",
         parents=[launchagent_common],
+        help="Print a LaunchAgent plist to stdout",
         description=(
             "Print a macOS LaunchAgent plist to stdout without installing it. "
             "The plist configures launchd to run 'cc-codex-bridge reconcile --all' "
@@ -338,6 +358,7 @@ def build_parser() -> argparse.ArgumentParser:
     install_parser = subparsers.add_parser(
         "install-launchagent",
         parents=[launchagent_common],
+        help="Install a LaunchAgent for automatic reconcile",
         description=(
             "Install a macOS LaunchAgent that runs 'cc-codex-bridge reconcile --all' "
             "on a recurring interval. Writes the plist to ~/Library/LaunchAgents and "
@@ -352,14 +373,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     log_parser = subparsers.add_parser(
         "log",
+        help="View and manage the activity log",
         description="View and manage the bridge activity log.",
     )
-    log_subparsers = log_parser.add_subparsers(dest="log_command", required=True)
+    log_subparsers = log_parser.add_subparsers(
+        dest="log_command", required=True, title="Commands", metavar="COMMAND",
+    )
     _raw_log_add = log_subparsers.add_parser
     log_subparsers.add_parser = lambda *a, **kw: (kw.setdefault("formatter_class", _AutoWidthHelpFormatter), _raw_log_add(*a, **kw))[1]  # type: ignore[method-assign]
 
     log_show_parser = log_subparsers.add_parser(
         "show",
+        help="Display activity log entries",
         description=(
             "Display activity log entries. Shows reconcile, clean, and "
             "install-launchagent operations with their file-level changes. "
@@ -376,6 +401,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     log_prune_parser = log_subparsers.add_parser(
         "prune",
+        help="Delete old log files past the retention period",
         description=(
             "Delete activity log files older than the retention period. "
             "Also runs automatically after every logged operation."
