@@ -90,22 +90,22 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument(
         "--project",
         type=Path,
-        help="Project path to resolve instead of the current working directory.",
+        help="Target project directory (default: current working directory).",
     )
     common.add_argument(
         "--cache-dir",
         type=Path,
-        help="Override the Claude plugin cache path (mainly for testing).",
+        help="Claude plugin cache directory (default: ~/.claude/plugins/cache).",
     )
     common.add_argument(
         "--claude-home",
         type=Path,
-        help="Override the Claude home path (~/.claude) for discovery.",
+        help="Claude home directory (default: ~/.claude).",
     )
     common.add_argument(
         "--codex-home",
         type=Path,
-        help="Override the Codex home path (mainly for testing).",
+        help="Codex home directory (default: ~/.codex).",
     )
 
     from cc_codex_bridge import __version__
@@ -135,12 +135,12 @@ def build_parser() -> argparse.ArgumentParser:
     reconcile_parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Compute reconcile changes without writing.",
+        help="Show what would change without writing any files.",
     )
     reconcile_parser.add_argument(
         "--diff",
         action="store_true",
-        help="Include unified text diffs for managed .md/.toml/.json files (requires --dry-run).",
+        help="Show unified diffs between current and desired file contents (requires --dry-run).",
     )
     validate_parser = subparsers.add_parser("validate", parents=[common])
     status_parser = subparsers.add_parser("status", parents=[common])
@@ -148,105 +148,105 @@ def build_parser() -> argparse.ArgumentParser:
     clean_parser.add_argument(
         "--project",
         type=Path,
-        help="Project path to resolve instead of the current working directory.",
+        help="Target project directory (default: current working directory).",
     )
     clean_parser.add_argument(
         "--codex-home",
         type=Path,
-        help="Override the Codex home path (mainly for testing).",
+        help="Codex home directory (default: ~/.codex). Note: clean uses the path recorded in bridge state, not this value.",
     )
     clean_parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Preview what would be removed without deleting anything.",
+        help="Show what would be removed without deleting anything.",
     )
     uninstall_parser = subparsers.add_parser("uninstall")
     uninstall_parser.add_argument(
         "--codex-home",
         type=Path,
-        help="Override the Codex home path (mainly for testing).",
+        help="Codex home directory (default: ~/.codex).",
     )
     uninstall_parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Preview what would be removed without deleting anything.",
+        help="Show what would be removed without deleting anything.",
     )
     uninstall_parser.add_argument(
         "--json",
         action="store_true",
-        help="Emit structured JSON output (dry-run only).",
+        help="Emit JSON output instead of human-readable text (requires --dry-run).",
     )
     uninstall_parser.add_argument(
         "--launchagents-dir",
         type=Path,
-        help="Override the LaunchAgents directory to scan.",
+        help="LaunchAgents directory to scan (default: ~/Library/LaunchAgents).",
     )
     doctor_parser = subparsers.add_parser("doctor")
     doctor_parser.add_argument(
         "--claude-home",
         type=Path,
-        help="Override the Claude home path (~/.claude) for discovery.",
+        help="Claude home directory (default: ~/.claude).",
     )
     doctor_parser.add_argument(
         "--cache-dir",
         type=Path,
-        help="Override the Claude plugin cache path (mainly for testing).",
+        help="Claude plugin cache directory (default: ~/.claude/plugins/cache).",
     )
     doctor_parser.add_argument(
         "--codex-home",
         type=Path,
-        help="Override the Codex home path (mainly for testing).",
+        help="Codex home directory (default: ~/.codex).",
     )
     doctor_parser.add_argument(
         "--json",
         action="store_true",
-        help="Emit doctor results as JSON instead of human-readable text.",
+        help="Emit JSON output instead of human-readable text.",
     )
     doctor_parser.add_argument(
         "--launchagents-dir",
         type=Path,
-        help="Override the LaunchAgents directory checked by doctor.",
+        help="LaunchAgents directory to check (default: ~/Library/LaunchAgents).",
     )
     for pipeline_parser in (reconcile_parser, validate_parser, status_parser):
         pipeline_parser.add_argument(
             "--all",
             action="store_true",
             default=False,
-            help="Operate on all projects from registry and scan config.",
+            help="Operate on all registered projects and scan-config paths.",
         )
         pipeline_parser.add_argument(
             "--exclude-plugin",
             action="append",
             default=None,
-            help="Exclude one plugin (`marketplace/plugin`) from sync. Repeatable.",
+            help="Skip a plugin (format: marketplace/plugin). Repeatable.",
         )
         pipeline_parser.add_argument(
             "--exclude-skill",
             action="append",
             default=None,
-            help="Exclude one skill (`marketplace/plugin/skill`) from sync. Repeatable.",
+            help="Skip a skill (format: marketplace/plugin/skill). Repeatable.",
         )
         pipeline_parser.add_argument(
             "--exclude-agent",
             action="append",
             default=None,
-            help="Exclude one agent (`marketplace/plugin/agent.md`) from sync. Repeatable.",
+            help="Skip an agent (format: marketplace/plugin/agent.md). Repeatable.",
         )
         pipeline_parser.add_argument(
             "--exclude-command",
             action="append",
             default=None,
-            help="Exclude one command from sync (repeatable; name, scope/name, or marketplace/plugin/name).",
+            help="Skip a command (format: name, scope/name, or marketplace/plugin/name). Repeatable.",
         )
     reconcile_parser.add_argument(
         "--json",
         action="store_true",
-        help="Emit structured JSON output (--all mode only).",
+        help="Emit JSON output instead of human-readable text (requires --all).",
     )
     status_parser.add_argument(
         "--json",
         action="store_true",
-        help="Emit status as JSON instead of human-readable text.",
+        help="Emit JSON output instead of human-readable text.",
     )
 
     launchagent_common = argparse.ArgumentParser(add_help=False)
@@ -254,26 +254,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--interval",
         type=int,
         default=DEFAULT_START_INTERVAL,
-        help="LaunchAgent StartInterval in seconds.",
+        help=f"Reconcile interval in seconds (default: {DEFAULT_START_INTERVAL}).",
     )
     launchagent_common.add_argument(
         "--label",
-        help="Override the generated LaunchAgent label.",
+        help=f"LaunchAgent label (default: {GLOBAL_LAUNCHAGENT_LABEL}).",
     )
     launchagent_common.add_argument(
         "--python-executable",
         type=Path,
-        help="Override the Python executable used by the LaunchAgent.",
+        help="Python interpreter for the LaunchAgent (default: auto-detected).",
     )
     launchagent_common.add_argument(
         "--cli-path",
         type=Path,
-        help="Override the CLI script path used by the LaunchAgent.",
+        help="Path to cc-codex-bridge script (default: auto-detected).",
     )
     launchagent_common.add_argument(
         "--logs-dir",
         type=Path,
-        help="Override the LaunchAgent log directory.",
+        help="Directory for LaunchAgent stdout/stderr logs (default: ~/.cc-codex-bridge/logs).",
     )
 
     subparsers.add_parser("print-launchagent", parents=[launchagent_common])
@@ -281,7 +281,7 @@ def build_parser() -> argparse.ArgumentParser:
     install_parser.add_argument(
         "--launchagents-dir",
         type=Path,
-        help="Override the LaunchAgents destination directory.",
+        help="LaunchAgents destination directory (default: ~/Library/LaunchAgents).",
     )
 
     log_parser = subparsers.add_parser("log")
@@ -290,16 +290,16 @@ def build_parser() -> argparse.ArgumentParser:
     log_subparsers.add_parser = lambda *a, **kw: (kw.setdefault("formatter_class", _AutoWidthHelpFormatter), _raw_log_add(*a, **kw))[1]  # type: ignore[method-assign]
 
     log_show_parser = log_subparsers.add_parser("show")
-    log_show_parser.add_argument("--since", type=str, help="Start date (YYYY-MM-DD).")
-    log_show_parser.add_argument("--until", type=str, help="End date (YYYY-MM-DD).")
-    log_show_parser.add_argument("--days", type=int, help="Show last N days (conflicts with --since/--until).")
-    log_show_parser.add_argument("--project", type=Path, help="Filter by project path.")
-    log_show_parser.add_argument("--action", type=str, help="Filter by action type.")
-    log_show_parser.add_argument("--type", type=str, help="Filter by change type.")
-    log_show_parser.add_argument("--json", action="store_true", help="Raw JSONL output.")
+    log_show_parser.add_argument("--since", type=str, help="Start date, inclusive (YYYY-MM-DD).")
+    log_show_parser.add_argument("--until", type=str, help="End date, inclusive (YYYY-MM-DD).")
+    log_show_parser.add_argument("--days", type=int, help="Show last N days (default: 7). Cannot combine with --since/--until.")
+    log_show_parser.add_argument("--project", type=Path, help="Filter to entries for this project path.")
+    log_show_parser.add_argument("--action", type=str, help="Filter by action (reconcile, clean, install-launchagent).")
+    log_show_parser.add_argument("--type", type=str, help="Filter by change type (create, update, remove).")
+    log_show_parser.add_argument("--json", action="store_true", help="Emit raw JSONL instead of formatted table.")
 
     log_prune_parser = log_subparsers.add_parser("prune")
-    log_prune_parser.add_argument("--retention-days", type=int, help="Override retention days for this prune.")
+    log_prune_parser.add_argument("--retention-days", type=int, help="Days to keep (default: from config.toml, typically 90).")
 
     return parser
 
