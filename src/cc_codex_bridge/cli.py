@@ -97,6 +97,9 @@ class _AutoWidthHelpFormatter(argparse.HelpFormatter):
             for choice_action in action._get_subactions():
                 parts.append(self._format_action(choice_action))
             return self._join_parts(parts)
+        # Capitalize argparse's default help strings.
+        if action.help and action.help[0].islower():
+            action.help = action.help[0].upper() + action.help[1:]
         return super()._format_action(action)
 
     def _format_usage(self, usage, actions, groups, prefix):
