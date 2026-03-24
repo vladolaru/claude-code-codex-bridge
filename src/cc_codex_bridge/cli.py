@@ -89,6 +89,16 @@ class _AutoWidthHelpFormatter(argparse.HelpFormatter):
             heading = heading[0].upper() + heading[1:]
         super().start_section(heading)
 
+    def _format_action(self, action: argparse.Action) -> str:
+        # Skip the subparser group's own metavar line (e.g. "COMMAND")
+        # so that only the individual command entries appear.
+        if isinstance(action, argparse._SubParsersAction):
+            parts = []
+            for choice_action in action._get_subactions():
+                parts.append(self._format_action(choice_action))
+            return self._join_parts(parts)
+        return super()._format_action(action)
+
     def _format_usage(self, usage, actions, groups, prefix):
         if prefix is None:
             prefix = "Usage: "
