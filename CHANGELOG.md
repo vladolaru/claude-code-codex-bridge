@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.17.1] - 2026-03-23
+
+### Fixed
+- Generated agent `.toml` files now escape backslashes and TOML-disallowed control characters in `developer_instructions`, fixing Codex CLI parse errors on agents with grep patterns (`\|`), CSS Unicode escapes (`\2197`), or similar content
+- `clean` command now reports "Ownership released" instead of the misleading "Nothing to clean." when a co-owner project is cleaned without deleting shared artifacts
+
 ## [0.17.0] - 2026-03-21
 
 ### Added
