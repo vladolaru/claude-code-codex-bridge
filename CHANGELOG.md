@@ -4,7 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.17.2] - 2026-03-23
+## [Unreleased]
+
+### Added
+- Every command and subcommand now shows a description paragraph in `--help` output explaining what it does and when to use it
+
+### Changed
+- All `--help` flag descriptions rewritten for precision: defaults shown for every overridable value, valid filter values documented, consistent phrasing across commands
 
 ### Fixed
 - CLI help text alignment now auto-sizes per subcommand instead of wrapping descriptions onto the next line for longer flags like `--exclude-command`
