@@ -4,13 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.17.3] - 2026-03-24
 
 ### Added
-- Every command and subcommand now shows a description paragraph in `--help` output explaining what it does and when to use it
+- Every command and subcommand now shows a description paragraph in `--help` explaining what it does and when to use it
+- Top-level help shows a `Commands:` section with one-line descriptions instead of the argparse default "positional arguments" group
+- Section headings capitalized throughout (`Usage:`, `Options:`, `Commands:`)
 
 ### Changed
 - All `--help` flag descriptions rewritten for precision: defaults shown for every overridable value, valid filter values documented, consistent phrasing across commands
+- Top-level description updated to "Bridge your local Claude Code setup into Codex so both tools stay equally effective"
+- All help text descriptions start with a capital letter, including argparse built-in flags
 
 ### Fixed
 - CLI help text alignment now auto-sizes per subcommand instead of wrapping descriptions onto the next line for longer flags like `--exclude-command`
