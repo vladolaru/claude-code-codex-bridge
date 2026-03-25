@@ -34,19 +34,26 @@ def select_from_list(
     if not items:
         return None
 
+    print()
     for idx, item in enumerate(items, start=1):
         print(f"  {idx}. {item}")
+    print()
 
     try:
         for _ in range(max_attempts):
-            raw = input(prompt)
+            raw = input(f"{prompt} [1-{len(items)}]: ").strip()
+            if not raw:
+                continue
             try:
                 choice = int(raw)
             except ValueError:
+                print(f"  Enter a number between 1 and {len(items)}.")
                 continue
             if 1 <= choice <= len(items):
                 return items[choice - 1]
+            print(f"  Enter a number between 1 and {len(items)}.")
     except (EOFError, KeyboardInterrupt):
+        print()
         return None
 
     return None
