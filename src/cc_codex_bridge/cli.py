@@ -732,12 +732,16 @@ def main(argv: list[str] | None = None) -> int:
                 if args.json:
                     print(format_status_json(
                         None, build.exclusion_report,
+                        agent_count=build.agent_count,
+                        skill_count=build.skill_count,
                         prompt_count=build.prompt_count,
                         diagnostics=agent_diags, skill_diagnostics=skill_diags,
                     ))
                 else:
                     print(format_status_report(
                         None, build.exclusion_report,
+                        agent_count=build.agent_count,
+                        skill_count=build.skill_count,
                         prompt_count=build.prompt_count,
                         diagnostics=agent_diags, skill_diagnostics=skill_diags,
                     ))
@@ -822,12 +826,16 @@ def main(argv: list[str] | None = None) -> int:
             if args.json:
                 print(format_status_json(
                     report, build.exclusion_report,
+                    agent_count=build.agent_count,
+                    skill_count=build.skill_count,
                     prompt_count=build.prompt_count,
                     skill_diagnostics=skill_diags,
                 ))
             else:
                 print(format_status_report(
                     report, build.exclusion_report,
+                    agent_count=build.agent_count,
+                    skill_count=build.skill_count,
                     prompt_count=build.prompt_count,
                     skill_diagnostics=skill_diags,
                 ))
@@ -1721,6 +1729,9 @@ def _print_summary(
     exclusion_report: ExclusionReport,
 ) -> None:
     """Print a human-readable discovery summary."""
+    from cc_codex_bridge import __version__
+
+    print(f"VERSION: v{__version__}")
     print(f"PROJECT_ROOT: {result.project.root}")
     print(f"AGENTS_MD: {result.project.agents_md_path}")
     print(f"CLAUDE_MD_ACTION: {shim_action}")
@@ -1754,6 +1765,8 @@ def _build_status_payload(
     report,
     exclusion_report: ExclusionReport,
     *,
+    agent_count: int = 0,
+    skill_count: int = 0,
     prompt_count: int = 0,
     diagnostics=None,
     skill_diagnostics=None,
@@ -1811,6 +1824,8 @@ def _build_status_payload(
     from cc_codex_bridge import __version__
 
     return {
+        "agent_count": agent_count,
+        "skill_count": skill_count,
         "prompt_count": prompt_count,
         "version": __version__,
         "status": status,
@@ -1829,12 +1844,14 @@ def _build_status_payload(
 
 def format_status_json(
     report, exclusion_report: ExclusionReport,
-    *, prompt_count: int = 0, diagnostics=None, skill_diagnostics=None,
+    *, agent_count: int = 0, skill_count: int = 0, prompt_count: int = 0,
+    diagnostics=None, skill_diagnostics=None,
 ) -> str:
     """Render status output as deterministic JSON."""
     return json.dumps(
         _build_status_payload(
             report, exclusion_report,
+            agent_count=agent_count, skill_count=skill_count,
             prompt_count=prompt_count,
             diagnostics=diagnostics, skill_diagnostics=skill_diagnostics,
         ),
@@ -1845,11 +1862,13 @@ def format_status_json(
 
 def format_status_report(
     report, exclusion_report: ExclusionReport,
-    *, prompt_count: int = 0, diagnostics=None, skill_diagnostics=None,
+    *, agent_count: int = 0, skill_count: int = 0, prompt_count: int = 0,
+    diagnostics=None, skill_diagnostics=None,
 ) -> str:
     """Render status output as human-readable text."""
     payload = _build_status_payload(
         report, exclusion_report,
+        agent_count=agent_count, skill_count=skill_count,
         prompt_count=prompt_count,
         diagnostics=diagnostics, skill_diagnostics=skill_diagnostics,
     )
@@ -1863,6 +1882,8 @@ def format_status_report(
         f"VERSION: v{payload['version']}",
         f"STATUS: {payload['status']}",
         f"PENDING_CHANGES: {payload['pending_change_count']}",
+        f"GENERATED_AGENTS: {payload['agent_count']}",
+        f"GENERATED_SKILLS: {payload['skill_count']}",
         f"TRANSLATED_PROMPTS: {payload['prompt_count']}",
         (
             "PROJECT_FILES: "
@@ -1918,6 +1939,24 @@ def format_status_report(
         lines.append(f"SKILL_UPDATE: {path}")
     for path in skills["remove"]:
         lines.append(f"SKILL_REMOVE: {path}")
+    for path in agents["create"]:
+        lines.append(f"AGENT_CREATE: {path}")
+    for path in agents["update"]:
+        lines.append(f"AGENT_UPDATE: {path}")
+    for path in agents["remove"]:
+        lines.append(f"AGENT_REMOVE: {path}")
+    for path in prompts["create"]:
+        lines.append(f"PROMPT_CREATE: {path}")
+    for path in prompts["update"]:
+        lines.append(f"PROMPT_UPDATE: {path}")
+    for path in prompts["remove"]:
+        lines.append(f"PROMPT_REMOVE: {path}")
+    for path in global_changes["create"]:
+        lines.append(f"GLOBAL_CREATE: {path}")
+    for path in global_changes["update"]:
+        lines.append(f"GLOBAL_UPDATE: {path}")
+    for path in global_changes["remove"]:
+        lines.append(f"GLOBAL_REMOVE: {path}")
     for plugin_id in payload["excluded"]["plugins"]:
         lines.append(f"EXCLUDED_PLUGIN: {plugin_id}")
     for skill_id in payload["excluded"]["skills"]:

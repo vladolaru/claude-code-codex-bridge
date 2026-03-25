@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.3] - 2026-03-26
+
+### Fixed
+- `status` plain text output now includes `GENERATED_AGENTS` and `GENERATED_SKILLS` counts (previously only showed `TRANSLATED_PROMPTS`)
+- `status` plain text output now enumerates individual paths for agent, prompt, and global changes (previously only enumerated project file and skill paths)
+- `validate` and `reconcile` plain text output now includes `VERSION` line, matching JSON output and `status` command
+
 ## [0.19.2] - 2026-03-26
 
 ### Added
