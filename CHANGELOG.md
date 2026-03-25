@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.19.0] - 2026-03-25
 
 ### Added
 - `config show` command — displays effective config with source attribution (global/project/default)
@@ -15,6 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Interactive guided flows for all config mutations when values are omitted (TTY-only)
 - `doctor` now includes a config health check section
 - `tomli-w` runtime dependency for TOML writing
+
+### Changed
+- CLI help groups commands by purpose: core workflow → configuration → inspection → cleanup → automation
 
 ## [0.18.0] - 2026-03-25
 
