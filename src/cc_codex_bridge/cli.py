@@ -1038,8 +1038,7 @@ def _handle_config_scan(args: argparse.Namespace) -> int:
                 return 1
             pattern = interactive.prompt_for_value("Scan path pattern: ")
             if pattern is None:
-                print("Cancelled.", file=sys.stderr)
-                return 1
+                return 0
 
         result = handle_scan_add(pattern=pattern, config_path=cfg_path)
         print(result.message)
@@ -1061,8 +1060,7 @@ def _handle_config_scan(args: argparse.Namespace) -> int:
                 prompt="Select scan path to remove:",
             )
             if pattern is None:
-                print("Cancelled.", file=sys.stderr)
-                return 1
+                return 0
 
         result = handle_scan_remove(pattern=pattern, config_path=cfg_path)
         print(result.message)
@@ -1181,38 +1179,47 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
             print(f"Error: discovery failed: {exc}", file=sys.stderr)
             return 1
 
-        kind = getattr(args, "kind", None)
+        cli_kind = getattr(args, "kind", None)
         entity_id = getattr(args, "entity_id", None)
 
-        if kind is None:
-            if not interactive.is_interactive():
-                print("Error: kind required (not running interactively).", file=sys.stderr)
-                return 1
-            kind = interactive.select_from_list(
-                sorted(KIND_TO_KEY.keys()),
-                prompt="Select entity kind:",
-                clear_on_select=True,
-            )
+        # Interactive loop: ESC at entity level goes back to kind selection.
+        kind = cli_kind
+        while True:
             if kind is None:
-                print("Cancelled.", file=sys.stderr)
-                return 1
+                if not interactive.is_interactive():
+                    print("Error: kind required (not running interactively).", file=sys.stderr)
+                    return 1
+                kind = interactive.select_from_list(
+                    sorted(KIND_TO_KEY.keys()),
+                    prompt="Select entity kind:",
+                    clear_on_select=True,
+                )
+                if kind is None:
+                    # ESC at kind level → exit
+                    return 0
 
-        if entity_id is None:
-            discoverable = list_discoverable_entities(discovery)
-            candidates = discoverable.get(kind, [])
-            if not candidates:
-                print(f"No discoverable {kind}s found.", file=sys.stderr)
-                return 1
-            if not interactive.is_interactive():
-                print("Error: entity_id required (not running interactively).", file=sys.stderr)
-                return 1
-            entity_id = interactive.select_from_list(
-                candidates,
-                prompt=f"Select {kind} to exclude:",
-            )
             if entity_id is None:
-                print("Cancelled.", file=sys.stderr)
-                return 1
+                discoverable = list_discoverable_entities(discovery)
+                candidates = discoverable.get(kind, [])
+                if not candidates:
+                    print(f"No discoverable {kind}s found.", file=sys.stderr)
+                    return 1
+                if not interactive.is_interactive():
+                    print("Error: entity_id required (not running interactively).", file=sys.stderr)
+                    return 1
+                entity_id = interactive.select_from_list(
+                    candidates,
+                    prompt=f"Select {kind} to exclude:",
+                )
+                if entity_id is None:
+                    if cli_kind is not None:
+                        # Kind was provided on CLI, ESC → exit
+                        return 0
+                    # Kind was interactive, ESC → go back to kind selection
+                    kind = None
+                    continue
+
+            break
 
         result = handle_exclude_add(
             kind=kind,
@@ -1246,8 +1253,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
                 return 1
             chosen = interactive.select_from_list(flat, prompt="Select exclusion to remove:")
             if chosen is None:
-                print("Cancelled.", file=sys.stderr)
-                return 1
+                return 0
             idx = flat.index(chosen)
             kind, entity_id = flat_map[idx]
 
@@ -1267,8 +1273,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
                 prompt=f"Select {kind} exclusion to remove:",
             )
             if entity_id is None:
-                print("Cancelled.", file=sys.stderr)
-                return 1
+                return 0
 
         result = handle_exclude_remove(
             kind=kind,
