@@ -1191,6 +1191,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
             kind = interactive.select_from_list(
                 sorted(KIND_TO_KEY.keys()),
                 prompt="Select entity kind:",
+                clear_on_select=True,
             )
             if kind is None:
                 print("Cancelled.", file=sys.stderr)
