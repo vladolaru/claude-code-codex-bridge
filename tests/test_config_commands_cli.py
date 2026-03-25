@@ -45,3 +45,19 @@ def test_config_exclude_list_empty():
     """config exclude list works with no exclusions."""
     exit_code = cli.main(["config", "exclude", "list", "--global"])
     assert exit_code == 0
+
+
+def test_config_scan_list_json(tmp_path):
+    """config scan list --json emits valid JSON."""
+    import json
+    from cc_codex_bridge import cli
+    exit_code = cli.main(["config", "scan", "list", "--json"])
+    assert exit_code == 0
+
+
+def test_config_exclude_list_json():
+    """config exclude list --json --global emits valid JSON."""
+    import json
+    from cc_codex_bridge import cli
+    exit_code = cli.main(["config", "exclude", "list", "--global", "--json"])
+    assert exit_code == 0

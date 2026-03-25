@@ -238,7 +238,12 @@ def build_parser() -> argparse.ArgumentParser:
     reconcile_parser.add_argument(
         "--json",
         action="store_true",
-        help="Emit JSON output instead of human-readable text (requires --all).",
+        help="Emit JSON output instead of human-readable text.",
+    )
+    validate_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON output instead of human-readable text.",
     )
     status_parser.add_argument(
         "--json",
@@ -348,10 +353,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Pattern to remove (interactive selection if omitted).",
     )
 
-    config_scan_subparsers.add_parser(
+    scan_list_parser = config_scan_subparsers.add_parser(
         "list",
         help="List configured scan paths",
         description="Display current scan_paths and exclude_paths from config.toml.",
+    )
+    scan_list_parser.add_argument(
+        "--json", dest="json", action="store_true", help="Output as JSON",
     )
 
     # -- config exclude subcommands --
@@ -400,6 +408,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     exclude_list_parser.add_argument("--global", dest="force_global", action="store_true")
     exclude_list_parser.add_argument("--project", type=Path)
+    exclude_list_parser.add_argument(
+        "--json", dest="json", action="store_true", help="Output as JSON",
+    )
 
     # -- config log subcommands --
     config_log_parser = config_subparsers.add_parser(
@@ -516,6 +527,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Show what would be removed without deleting anything.",
+    )
+    clean_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON output instead of human-readable text.",
     )
     uninstall_parser = subparsers.add_parser(
         "uninstall",
@@ -648,10 +664,6 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return _handle_all_command(args)
 
-    if args.command == "reconcile" and getattr(args, "json", False):
-        print("Error: --json is only supported with --all for reconcile", file=sys.stderr)
-        return 1
-
     if args.command == "reconcile" and args.diff and not args.dry_run:
         print("Error: --diff requires --dry-run for reconcile", file=sys.stderr)
         return 1
@@ -733,17 +745,28 @@ def main(argv: list[str] | None = None) -> int:
             raise TranslationError(format_agent_translation_diagnostics(agent_diags))
 
         if args.command == "validate":
-            _print_summary(
-                build.discovery,
-                build.shim_decision.action,
-                build.agent_count,
-                build.skill_count,
-                build.prompt_count,
-                build.exclusion_report,
-            )
-            if skill_diags:
-                print("\nSkill validation warnings:", file=sys.stderr)
-                print(format_skill_validation_diagnostics(skill_diags), file=sys.stderr)
+            if getattr(args, "json", False):
+                print(format_validate_json(
+                    build.discovery,
+                    build.shim_decision.action,
+                    build.agent_count,
+                    build.skill_count,
+                    build.prompt_count,
+                    build.exclusion_report,
+                    skill_diagnostics=skill_diags,
+                ))
+            else:
+                _print_summary(
+                    build.discovery,
+                    build.shim_decision.action,
+                    build.agent_count,
+                    build.skill_count,
+                    build.prompt_count,
+                    build.exclusion_report,
+                )
+                if skill_diags:
+                    print("\nSkill validation warnings:", file=sys.stderr)
+                    print(format_skill_validation_diagnostics(skill_diags), file=sys.stderr)
             return 0
 
         if args.command == "reconcile":
@@ -765,21 +788,33 @@ def main(argv: list[str] | None = None) -> int:
                         project=str(build.discovery.project.root),
                         changes=all_changes,
                     )
-            _print_summary(
-                build.discovery,
-                build.shim_decision.action,
-                build.agent_count,
-                build.skill_count,
-                build.prompt_count,
-                build.exclusion_report,
-            )
-            if args.diff:
-                print(format_diff_report(build.desired_state, report))
+            if getattr(args, "json", False):
+                print(format_reconcile_json(
+                    report,
+                    build.discovery,
+                    build.shim_decision.action,
+                    build.agent_count,
+                    build.skill_count,
+                    build.prompt_count,
+                    build.exclusion_report,
+                    skill_diagnostics=skill_diags,
+                ))
             else:
-                print(format_change_report(report))
-            if skill_diags:
-                print("\nSkill validation warnings:", file=sys.stderr)
-                print(format_skill_validation_diagnostics(skill_diags), file=sys.stderr)
+                _print_summary(
+                    build.discovery,
+                    build.shim_decision.action,
+                    build.agent_count,
+                    build.skill_count,
+                    build.prompt_count,
+                    build.exclusion_report,
+                )
+                if args.diff:
+                    print(format_diff_report(build.desired_state, report))
+                else:
+                    print(format_change_report(report))
+                if skill_diags:
+                    print("\nSkill validation warnings:", file=sys.stderr)
+                    print(format_skill_validation_diagnostics(skill_diags), file=sys.stderr)
             return 0
 
         if args.command == "status":
@@ -1068,6 +1103,13 @@ def _handle_config_scan(args: argparse.Namespace) -> int:
 
     if scan_command == "list":
         listing = handle_scan_list(config_path=cfg_path)
+        if getattr(args, "json", False):
+            data = {
+                "scan_paths": list(listing.paths),
+                "exclude_paths": list(listing.exclude_paths),
+            }
+            print(json.dumps(data, indent=2))
+            return 0
         if listing.paths:
             print("Scan paths:")
             for p in listing.paths:
@@ -1153,6 +1195,13 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
     # -- list --
     if subcmd == "list":
         result = handle_exclude_list(config_path=scope.config_path)
+        if getattr(args, "json", False):
+            data = {
+                key: list(getattr(result, key))
+                for key in KIND_TO_KEY.values()
+            }
+            print(json.dumps(data, indent=2))
+            return 0
         any_found = False
         for kind, key in KIND_TO_KEY.items():
             entries = getattr(result, key)
@@ -1332,24 +1381,32 @@ def _handle_clean_command(args: argparse.Namespace) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
+    use_json = getattr(args, "json", False)
+
     if not report.changes:
-        if report.ownership_released:
+        if use_json:
+            print(format_clean_json(report, project_root=project_root, dry_run=args.dry_run))
+        elif report.ownership_released:
             print("Ownership released (no files removed — other projects still reference the artifacts).")
         else:
             print("Nothing to clean.")
         return 0
 
-    if args.dry_run:
-        print("Dry run — the following would be removed:")
-    else:
+    if not args.dry_run:
         _log_and_prune(
             action="clean",
             project=str(project_root),
             changes=report.changes,
         )
-        print("Cleaned:")
 
-    print(format_change_report(report))
+    if use_json:
+        print(format_clean_json(report, project_root=project_root, dry_run=args.dry_run))
+    else:
+        if args.dry_run:
+            print("Dry run — the following would be removed:")
+        else:
+            print("Cleaned:")
+        print(format_change_report(report))
     return 0
 
 
@@ -1870,6 +1927,141 @@ def format_status_report(
     for command_id in payload["excluded"]["commands"]:
         lines.append(f"EXCLUDED_COMMAND: {command_id}")
     return "\n".join(lines)
+
+
+def format_validate_json(
+    discovery_result,
+    shim_action: str,
+    agent_count: int,
+    skill_count: int,
+    prompt_count: int,
+    exclusion_report: ExclusionReport,
+    *,
+    skill_diagnostics=None,
+) -> str:
+    """Render validate output as deterministic JSON."""
+    from cc_codex_bridge import __version__
+
+    payload: dict[str, object] = {
+        "version": __version__,
+        "project_root": str(discovery_result.project.root),
+        "agents_md": str(discovery_result.project.agents_md_path),
+        "claude_md_action": shim_action,
+        "plugins": [
+            {
+                "id": f"{p.marketplace}/{p.plugin_name}",
+                "version": p.version_text,
+                "source_path": str(p.source_path),
+                "skills": len(p.skills),
+                "agents": len(p.agents),
+            }
+            for p in discovery_result.plugins
+        ],
+        "plugin_count": len(discovery_result.plugins),
+        "agent_count": agent_count,
+        "skill_count": skill_count,
+        "prompt_count": prompt_count,
+        "excluded": {
+            "plugins": list(exclusion_report.plugins),
+            "skills": list(exclusion_report.skills),
+            "agents": list(exclusion_report.agents),
+            "commands": list(exclusion_report.commands),
+        },
+        "skill_warnings": [
+            {
+                "kind": "skill_validation",
+                "source_path": str(d.source_path),
+                "skill_name": d.skill_name,
+                "warnings": list(d.warnings),
+                "message": format_skill_validation_diagnostics((d,)),
+            }
+            for d in (skill_diagnostics or ())
+        ],
+    }
+    return json.dumps(payload, indent=2, sort_keys=True)
+
+
+def format_reconcile_json(
+    report,
+    discovery_result,
+    shim_action: str,
+    agent_count: int,
+    skill_count: int,
+    prompt_count: int,
+    exclusion_report: ExclusionReport,
+    *,
+    skill_diagnostics=None,
+) -> str:
+    """Render single-project reconcile output as deterministic JSON."""
+    from cc_codex_bridge import __version__
+
+    changes = [
+        {
+            "kind": c.kind,
+            "path": str(c.path),
+            "resource_kind": c.resource_kind,
+        }
+        for c in report.changes
+    ]
+
+    payload: dict[str, object] = {
+        "version": __version__,
+        "project_root": str(discovery_result.project.root),
+        "applied": report.applied,
+        "change_count": len(report.changes),
+        "changes": changes,
+        "plugin_count": len(discovery_result.plugins),
+        "agent_count": agent_count,
+        "skill_count": skill_count,
+        "prompt_count": prompt_count,
+        "excluded": {
+            "plugins": list(exclusion_report.plugins),
+            "skills": list(exclusion_report.skills),
+            "agents": list(exclusion_report.agents),
+            "commands": list(exclusion_report.commands),
+        },
+        "skill_warnings": [
+            {
+                "kind": "skill_validation",
+                "source_path": str(d.source_path),
+                "skill_name": d.skill_name,
+                "warnings": list(d.warnings),
+                "message": format_skill_validation_diagnostics((d,)),
+            }
+            for d in (skill_diagnostics or ())
+        ],
+    }
+    return json.dumps(payload, indent=2, sort_keys=True)
+
+
+def format_clean_json(
+    report,
+    *,
+    project_root: Path,
+    dry_run: bool = False,
+) -> str:
+    """Render clean output as deterministic JSON."""
+    from cc_codex_bridge import __version__
+
+    changes = [
+        {
+            "kind": c.kind,
+            "path": str(c.path),
+            "resource_kind": c.resource_kind,
+        }
+        for c in report.changes
+    ]
+
+    payload: dict[str, object] = {
+        "version": __version__,
+        "project_root": str(project_root),
+        "dry_run": dry_run,
+        "applied": report.applied,
+        "change_count": len(report.changes),
+        "changes": changes,
+        "ownership_released": report.ownership_released,
+    }
+    return json.dumps(payload, indent=2, sort_keys=True)
 
 
 if __name__ == "__main__":

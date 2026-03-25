@@ -1862,3 +1862,79 @@ def test_log_show_negative_days(capsys):
     assert rc == 1
     captured = capsys.readouterr()
     assert "at least 1" in captured.err
+
+
+def test_validate_json_output(make_project, make_plugin_version, capsys):
+    """validate --json emits valid JSON with expected fields."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "tools", "1.0.0", skill_names=("review",))
+    exit_code = cli.main([
+        "validate", "--json", "--project", str(project_root), "--cache-dir", str(cache_root),
+    ])
+    assert exit_code == 0
+    data = json.loads(capsys.readouterr().out)
+    assert "plugins" in data or "plugin_count" in data
+    assert "skill_count" in data
+    assert "agent_count" in data
+    assert "prompt_count" in data
+    assert "excluded" in data
+    assert "project_root" in data
+
+
+def test_clean_json_output(make_project, make_plugin_version, tmp_path, capsys):
+    """clean --json emits valid JSON."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "tools", "1.0.0", skill_names=("review",))
+    codex_home = tmp_path / "codex-home"
+    cli.main(["reconcile", "--project", str(project_root), "--cache-dir", str(cache_root), "--codex-home", str(codex_home)])
+    capsys.readouterr()  # discard
+    exit_code = cli.main(["clean", "--json", "--project", str(project_root)])
+    assert exit_code == 0
+    data = json.loads(capsys.readouterr().out)
+    assert isinstance(data, dict)
+    assert "project_root" in data
+    assert "changes" in data
+    assert "dry_run" in data
+
+
+def test_clean_json_nothing_to_clean(make_project, capsys):
+    """clean --json emits valid JSON even when nothing to clean."""
+    project_root, _ = make_project()
+    exit_code = cli.main(["clean", "--json", "--project", str(project_root)])
+    assert exit_code == 0
+    data = json.loads(capsys.readouterr().out)
+    assert isinstance(data, dict)
+    assert data["change_count"] == 0
+
+
+def test_reconcile_single_project_json(make_project, make_plugin_version, tmp_path, capsys):
+    """reconcile --json works without --all."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "tools", "1.0.0", skill_names=("review",))
+    codex_home = tmp_path / "codex-home"
+    exit_code = cli.main([
+        "reconcile", "--json", "--project", str(project_root),
+        "--cache-dir", str(cache_root), "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+    data = json.loads(capsys.readouterr().out)
+    assert isinstance(data, dict)
+    assert "project_root" in data
+    assert "changes" in data
+    assert "applied" in data
+    assert "skill_count" in data
+
+
+def test_reconcile_single_project_dry_run_json(make_project, make_plugin_version, tmp_path, capsys):
+    """reconcile --dry-run --json works without --all."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "tools", "1.0.0", skill_names=("review",))
+    codex_home = tmp_path / "codex-home"
+    exit_code = cli.main([
+        "reconcile", "--dry-run", "--json", "--project", str(project_root),
+        "--cache-dir", str(cache_root), "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+    data = json.loads(capsys.readouterr().out)
+    assert isinstance(data, dict)
+    assert data["applied"] is False
