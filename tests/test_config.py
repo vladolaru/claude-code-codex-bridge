@@ -83,3 +83,33 @@ def test_load_config_unreadable_file(tmp_path):
     cfg = load_config(config_path)
     assert cfg.log_retention_days == 90
     config_path.chmod(0o644)  # cleanup
+
+
+def test_load_config_reads_global_exclusions(tmp_path):
+    """Global [exclude] section is parsed into SyncExclusions."""
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        '[exclude]\n'
+        'plugins = ["vladolaru-claude-code-plugins/yoloing-safe"]\n'
+        'skills = ["some-skill"]\n'
+    )
+    cfg = load_config(config_file)
+    assert cfg.exclude.plugins == ("vladolaru-claude-code-plugins/yoloing-safe",)
+    assert cfg.exclude.skills == ("some-skill",)
+    assert cfg.exclude.agents == ()
+    assert cfg.exclude.commands == ()
+
+
+def test_load_config_returns_empty_exclusions_when_missing(tmp_path):
+    """Missing [exclude] section yields empty SyncExclusions."""
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[log]\nlog_retention_days = 30\n')
+    cfg = load_config(config_file)
+    assert cfg.exclude.plugins == ()
+    assert cfg.exclude.skills == ()
+
+
+def test_load_config_returns_empty_exclusions_when_no_file(tmp_path):
+    """Non-existent config file yields empty SyncExclusions."""
+    cfg = load_config(tmp_path / "missing.toml")
+    assert cfg.exclude.plugins == ()

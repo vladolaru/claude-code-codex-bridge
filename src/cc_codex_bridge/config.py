@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from cc_codex_bridge.exclusions import SyncExclusions, _normalize_id_list, _read_string_list
+
 DEFAULT_LOG_RETENTION_DAYS = 90
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -14,6 +19,7 @@ class BridgeConfig:
     """Validated global bridge configuration."""
 
     log_retention_days: int = DEFAULT_LOG_RETENTION_DAYS
+    exclude: SyncExclusions = SyncExclusions()
 
 
 def load_config(config_path: Path) -> BridgeConfig:
@@ -29,10 +35,47 @@ def load_config(config_path: Path) -> BridgeConfig:
 
     log_section = data.get("log", {})
     if not isinstance(log_section, dict):
-        return BridgeConfig()
+        log_section = {}
 
     retention = log_section.get("log_retention_days", DEFAULT_LOG_RETENTION_DAYS)
     if isinstance(retention, bool) or not isinstance(retention, int) or retention < 1:
         retention = DEFAULT_LOG_RETENTION_DAYS
 
-    return BridgeConfig(log_retention_days=retention)
+    exclusions = _parse_exclusions(data, config_path)
+
+    return BridgeConfig(log_retention_days=retention, exclude=exclusions)
+
+
+def _parse_exclusions(data: dict[str, object], config_path: Path) -> SyncExclusions:
+    """Parse the ``[exclude]`` table from global config, falling back to empty on errors."""
+    try:
+        exclude_table = data.get("exclude", {})
+        if not isinstance(exclude_table, dict):
+            _log.warning("Global config `exclude` is not a table in: %s", config_path)
+            return SyncExclusions()
+
+        return SyncExclusions(
+            plugins=_normalize_id_list(
+                _read_string_list(exclude_table, "plugins", config_path),
+                kind="plugin",
+            ),
+            skills=_normalize_id_list(
+                _read_string_list(exclude_table, "skills", config_path),
+                kind="skill",
+            ),
+            agents=_normalize_id_list(
+                _read_string_list(exclude_table, "agents", config_path),
+                kind="agent",
+            ),
+            commands=_normalize_id_list(
+                _read_string_list(exclude_table, "commands", config_path),
+                kind="command",
+            ),
+        )
+    except Exception:
+        _log.warning(
+            "Failed to parse [exclude] section in %s; using empty exclusions",
+            config_path,
+            exc_info=True,
+        )
+        return SyncExclusions()
