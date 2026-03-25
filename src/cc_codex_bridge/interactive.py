@@ -34,14 +34,13 @@ def select_from_list(
     if not items:
         return None
 
-    print()
+    print(f"\n{prompt}")
     for idx, item in enumerate(items, start=1):
         print(f"  {idx}. {item}")
-    print()
 
     try:
         for _ in range(max_attempts):
-            raw = input(f"{prompt} [1-{len(items)}]: ").strip()
+            raw = input(f"Enter choice [1-{len(items)}]: ").strip()
             if not raw:
                 continue
             try:
