@@ -52,6 +52,8 @@ def select_from_list(
         for _ in range(max_attempts):
             raw = _input_with_escape(f"Enter choice [1-{len(items)}]: ")
             if raw is _ESCAPE:
+                # ESC already cleared the input line; clear the list above it.
+                _clear_lines(lines_printed + extra_lines)
                 return None
             raw = raw.strip()
             extra_lines += 1  # the input line itself
