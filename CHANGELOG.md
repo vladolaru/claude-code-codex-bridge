@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.2] - 2026-03-26
+
+### Added
+- `--json` support on `validate`, `clean`, single-project `reconcile`, `config scan list`, and `config exclude list` — all commands now support structured JSON output
+
+### Changed
+- `--exclude-*` flags removed from `status` and `validate` (exclusions on read-only commands are now driven solely by config files; flags remain on `reconcile`)
+- `--codex-home` removed from `validate` (read-only, never writes to codex) and `clean` (reads codex home from bridge state)
+- `reconcile --json` no longer requires `--all`
+
 ## [0.19.1] - 2026-03-25
 
 ### Changed
