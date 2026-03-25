@@ -1058,7 +1058,7 @@ def _handle_config_scan(args: argparse.Namespace) -> int:
                 return 1
             pattern = interactive.select_from_list(
                 list(current.paths),
-                prompt="Select pattern to remove: ",
+                prompt="Select scan path to remove:",
             )
             if pattern is None:
                 print("Cancelled.", file=sys.stderr)
@@ -1190,7 +1190,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
                 return 1
             kind = interactive.select_from_list(
                 sorted(KIND_TO_KEY.keys()),
-                prompt="Select entity kind: ",
+                prompt="Select entity kind:",
             )
             if kind is None:
                 print("Cancelled.", file=sys.stderr)
@@ -1207,7 +1207,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
                 return 1
             entity_id = interactive.select_from_list(
                 candidates,
-                prompt=f"Select {kind} to exclude: ",
+                prompt=f"Select {kind} to exclude:",
             )
             if entity_id is None:
                 print("Cancelled.", file=sys.stderr)
@@ -1243,7 +1243,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
             if not interactive.is_interactive():
                 print("Error: kind and entity_id required (not running interactively).", file=sys.stderr)
                 return 1
-            chosen = interactive.select_from_list(flat, prompt="Select exclusion to remove: ")
+            chosen = interactive.select_from_list(flat, prompt="Select exclusion to remove:")
             if chosen is None:
                 print("Cancelled.", file=sys.stderr)
                 return 1
@@ -1263,7 +1263,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
                 return 1
             entity_id = interactive.select_from_list(
                 entries,
-                prompt=f"Select {kind} to remove: ",
+                prompt=f"Select {kind} exclusion to remove:",
             )
             if entity_id is None:
                 print("Cancelled.", file=sys.stderr)
