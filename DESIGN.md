@@ -86,6 +86,9 @@ If a behavior is described differently in multiple docs:
 - macOS LaunchAgent rendering and installation for scheduled reconcile runs
 - activity logging for state-changing operations with retention-based auto-prune
 - log viewing and manual pruning via `log show` and `log prune`
+- CLI-native config management via `config` subcommands (show, check, scan, exclude, log)
+- strict inline validation of config mutations against current discovery state
+- interactive guided flows when config values are omitted (TTY-only)
 
 ### Out of scope
 
@@ -807,7 +810,7 @@ Global configuration lives in `src/cc_codex_bridge/config.py`.
 
 ### Config file
 
-`~/.cc-codex-bridge/config.toml` is a user-authored file that the bridge reads but never writes. The file is optional — all settings have defaults that apply when the file is missing.
+`~/.cc-codex-bridge/config.toml` is a user-authored file that the bridge reads and — since the `config` CLI commands — also writes. The file is optional — all settings have defaults that apply when the file is missing.
 
 The config file serves three purposes:
 
@@ -834,9 +837,29 @@ commands = []
 - `[exclude]` lists are unioned with per-project `.codex/bridge.toml` exclusions; CLI `--exclude-*` flags replace the merged set for that kind
 - malformed `[exclude]` values are silently ignored (logged as warnings) and fall back to empty exclusions
 
+### CLI config commands
+
+The `config` subcommand group provides CLI-native flows for viewing, validating, and mutating bridge configuration.
+
+**Scope resolution:** commands auto-detect whether to target the global config (`~/.cc-codex-bridge/config.toml`) or the project config (`.codex/bridge.toml`) based on whether the CWD is inside a project with `AGENTS.md`. The `--global` flag forces global scope.
+
+**Subcommand tree:**
+
+- `config show` — display effective config with source attribution (default/global/project)
+- `config check` — audit config files against current environment
+- `config scan add/remove/list` — manage scan path globs (global-only)
+- `config exclude add/remove/list` — manage sync exclusions with discovery-backed validation
+- `config log set-retention` — set log retention period (global-only)
+
+**Validation model:** every mutation validates strictly against current state. Invalid values are refused (exit 1), not written with warnings. `config exclude add` runs the discovery pipeline to verify entity existence.
+
+**Interactive mode:** when a required value is omitted and stdin is a TTY, commands offer numbered selection lists or text prompts. Non-TTY invocations error with "missing required argument" instead of hanging.
+
+**TOML writing:** uses `tomli-w` for config writes. Comments are not preserved on write.
+
 ### Design constraint
 
-The config file is shared between scan discovery and activity log configuration. Each module reads only the keys it needs and ignores the rest. Unknown keys are tolerated.
+The config file is shared between scan discovery and activity log configuration. Each module reads only the keys it needs and ignores the rest. Unknown keys are tolerated (but flagged by `config check`).
 
 ## 14. Module Map
 
@@ -858,6 +881,20 @@ Current runtime module responsibilities:
   - core dataclasses and domain-specific error types
 - `config.py`
   - global bridge configuration: `BridgeConfig` dataclass, TOML loading from `config.toml` `[log]` section, default value handling
+- `config_check.py`
+  - config validation: TOML well-formedness, scan path resolution, unknown key detection, global-only key rejection for project configs
+- `config_exclude_commands.py`
+  - config exclude subcommand handlers: discovery-backed add/remove/list for plugin/skill/agent/command exclusions
+- `config_scan_commands.py`
+  - config scan subcommand handlers: glob-validated add/remove/list for scan paths
+- `config_scope.py`
+  - config scope resolution: auto-detects global vs project config target based on AGENTS.md presence, `--global` override
+- `config_show.py`
+  - config show formatting: human-readable and JSON output with source attribution (default/global/project)
+- `config_writer.py`
+  - TOML read-modify-write helpers using `tomli-w`: read, write, add/remove from string lists, set nested values
+- `interactive.py`
+  - interactive CLI helpers: numbered list selection, text value prompts, TTY detection
 - `claude_shim.py`
   - `CLAUDE.md` ownership-safe shim planning
 - `frontmatter.py`

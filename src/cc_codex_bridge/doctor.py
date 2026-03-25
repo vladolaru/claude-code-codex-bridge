@@ -37,6 +37,7 @@ def run_doctor(
     python_executable: str | Path | None = None,
     python_version: tuple[int, ...] | None = None,
     path_env: str | None = None,
+    bridge_home: str | Path | None = None,
 ) -> tuple[DoctorCheck, ...]:
     """Run the machine-level doctor checks."""
     resolved_python = Path(python_executable or sys.executable).expanduser().resolve()
@@ -50,6 +51,9 @@ def run_doctor(
     ).expanduser().resolve()
     effective_path = path_env if path_env is not None else os.environ.get("PATH", "")
 
+    from cc_codex_bridge.bridge_home import resolve_bridge_home
+    resolved_bridge_home = Path(bridge_home).expanduser().resolve() if bridge_home else resolve_bridge_home()
+
     return (
         _check_python(resolved_python, version_info),
         _check_claude_cli(),
@@ -57,6 +61,7 @@ def run_doctor(
         _check_codex_home(resolved_codex_home),
         _check_launchagents_dir(resolved_launchagents_dir),
         _check_command_on_path(command_name, effective_path),
+        _check_config(resolved_bridge_home),
     )
 
 
@@ -350,4 +355,27 @@ def _check_command_on_path(command_name: str, path_env: str) -> DoctorCheck:
         name="command_path",
         status="ok",
         message=f"`{command_name}` resolves to {Path(resolved).resolve()}",
+    )
+
+
+def _check_config(bridge_home: Path) -> DoctorCheck:
+    """Check that the global bridge config is valid."""
+    from cc_codex_bridge.config_check import check_global_config
+
+    config_path = bridge_home / "config.toml"
+    results = check_global_config(config_path, bridge_home=bridge_home)
+    failures = [r for r in results if not r.passed]
+
+    if failures:
+        messages = "; ".join(f"{r.label}: {r.message}" for r in failures)
+        return DoctorCheck(
+            name="config",
+            status="warning",
+            message=f"Config issues: {messages}",
+        )
+
+    return DoctorCheck(
+        name="config",
+        status="ok",
+        message=f"Global config is valid at {config_path}",
     )

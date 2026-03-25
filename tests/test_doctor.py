@@ -129,6 +129,7 @@ def test_doctor_cli_supports_json_output(
         "codex_home",
         "launchagents_dir",
         "command_path",
+        "config",
     }
 
 
@@ -162,3 +163,41 @@ def test_run_doctor_includes_claude_cli_check(tmp_path: Path):
     )
     check_names = {c.name for c in checks}
     assert "claude_cli" in check_names
+
+
+def test_run_doctor_includes_config_check(tmp_path: Path):
+    """Doctor includes a config health check in results."""
+    bridge_home = tmp_path / "bridge-home"
+    bridge_home.mkdir()
+    checks = run_doctor(
+        cache_dir=tmp_path / "missing-cache",
+        codex_home=tmp_path / "codex",
+        launchagents_dir=tmp_path / "LaunchAgents",
+        python_version=(3, 11, 9),
+        python_executable=tmp_path / "python3",
+        path_env="",
+        bridge_home=bridge_home,
+    )
+    check_names = {c.name for c in checks}
+    assert "config" in check_names
+    config_check = next(c for c in checks if c.name == "config")
+    assert config_check.status == "ok"
+
+
+def test_run_doctor_config_check_warns_on_invalid_toml(tmp_path: Path):
+    """Doctor config check reports warning when config.toml has invalid TOML."""
+    bridge_home = tmp_path / "bridge-home"
+    bridge_home.mkdir()
+    config_file = bridge_home / "config.toml"
+    config_file.write_text("invalid toml [[[ content", encoding="utf-8")
+    checks = run_doctor(
+        cache_dir=tmp_path / "missing-cache",
+        codex_home=tmp_path / "codex",
+        launchagents_dir=tmp_path / "LaunchAgents",
+        python_version=(3, 11, 9),
+        python_executable=tmp_path / "python3",
+        path_env="",
+        bridge_home=bridge_home,
+    )
+    config_check = next(c for c in checks if c.name == "config")
+    assert config_check.status == "warning"

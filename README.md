@@ -172,6 +172,35 @@ log_retention_days = 90  # default
 
 Expired logs are automatically pruned after each logged operation.
 
+### Configuration
+
+```bash
+cc-codex-bridge config show                       # display effective config
+cc-codex-bridge config show --global              # global config only
+cc-codex-bridge config show --json                # machine-readable output
+cc-codex-bridge config check                      # audit config against environment
+
+cc-codex-bridge config scan add "~/Work/a8c/*"    # add a scan path
+cc-codex-bridge config scan remove "~/Work/a8c/*" # remove a scan path
+cc-codex-bridge config scan list                  # list current scan paths
+
+cc-codex-bridge config exclude add skill security-reviewer   # add exclusion
+cc-codex-bridge config exclude add plugin market/plugin      # add plugin exclusion
+cc-codex-bridge config exclude remove skill security-reviewer
+cc-codex-bridge config exclude list               # list current exclusions
+
+cc-codex-bridge config log set-retention 30       # set log retention to 30 days
+```
+
+Omit values for interactive guided flows (requires a terminal):
+
+```bash
+cc-codex-bridge config exclude add                # pick kind, then entity
+cc-codex-bridge config scan add                   # prompted for glob
+```
+
+Config commands auto-detect scope: inside a project targets `.codex/bridge.toml`, otherwise `~/.cc-codex-bridge/config.toml`. Use `--global` to force global scope.
+
 ### Scheduled reconciliation (macOS)
 
 ```bash

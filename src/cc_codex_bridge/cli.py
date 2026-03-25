@@ -423,6 +423,193 @@ def build_parser() -> argparse.ArgumentParser:
     )
     log_prune_parser.add_argument("--retention-days", type=int, help="Days to keep (default: from config.toml, typically 90).")
 
+    # -- config subcommand group --
+    config_parser = subparsers.add_parser(
+        "config",
+        help="View and manage bridge configuration",
+        description="View, validate, and manage bridge configuration.",
+    )
+    config_subparsers = config_parser.add_subparsers(
+        dest="config_command", required=True, title="Commands", metavar="COMMAND",
+    )
+    _raw_config_add = config_subparsers.add_parser
+    config_subparsers.add_parser = lambda *a, **kw: (  # type: ignore[method-assign]
+        kw.setdefault("formatter_class", _AutoWidthHelpFormatter),
+        _raw_config_add(*a, **kw),
+    )[1]
+
+    config_show_parser = config_subparsers.add_parser(
+        "show",
+        help="Display effective configuration with source attribution",
+        description=(
+            "Display the effective bridge configuration. Shows all values "
+            "with attribution indicating whether each comes from the global "
+            "config, project config, or defaults. When inside a project, "
+            "shows merged view by default."
+        ),
+    )
+    config_show_parser.add_argument(
+        "--global",
+        dest="force_global",
+        action="store_true",
+        help="Show only global configuration.",
+    )
+    config_show_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON output.",
+    )
+    config_show_parser.add_argument(
+        "--project",
+        type=Path,
+        help="Target project directory (default: current working directory).",
+    )
+
+    config_check_parser = config_subparsers.add_parser(
+        "check",
+        help="Validate configuration files",
+        description=(
+            "Validate bridge configuration files. Checks TOML well-formedness, "
+            "unknown keys, scan path expansion, and project-level misplacement "
+            "of global-only keys. Reports issues found or confirms all checks pass."
+        ),
+    )
+    config_check_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON output.",
+    )
+    config_check_parser.add_argument(
+        "--project",
+        type=Path,
+        help="Target project directory (default: current working directory).",
+    )
+    config_check_parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        help="Claude plugin cache directory (default: ~/.claude/plugins/cache).",
+    )
+    config_check_parser.add_argument(
+        "--claude-home",
+        type=Path,
+        help="Claude home directory (default: ~/.claude).",
+    )
+
+    # -- config scan subcommand group --
+    config_scan_parser = config_subparsers.add_parser(
+        "scan",
+        help="Manage scan paths for bulk project discovery",
+        description="Add, remove, or list scan path patterns used by reconcile --all.",
+    )
+    config_scan_subparsers = config_scan_parser.add_subparsers(
+        dest="scan_command", required=True, title="Commands", metavar="COMMAND",
+    )
+    _raw_scan_add = config_scan_subparsers.add_parser
+    config_scan_subparsers.add_parser = lambda *a, **kw: (  # type: ignore[method-assign]
+        kw.setdefault("formatter_class", _AutoWidthHelpFormatter),
+        _raw_scan_add(*a, **kw),
+    )[1]
+
+    scan_add_parser = config_scan_subparsers.add_parser(
+        "add",
+        help="Add a scan path pattern",
+        description=(
+            "Add a scan path glob pattern. The pattern is expanded to verify "
+            "at least one directory matches, then stored in config.toml."
+        ),
+    )
+    scan_add_parser.add_argument(
+        "pattern",
+        nargs="?",
+        help="Glob pattern matching project directories (interactive prompt if omitted).",
+    )
+
+    scan_remove_parser = config_scan_subparsers.add_parser(
+        "remove",
+        help="Remove a scan path pattern",
+        description="Remove a scan path pattern from config.toml.",
+    )
+    scan_remove_parser.add_argument(
+        "pattern",
+        nargs="?",
+        help="Pattern to remove (interactive selection if omitted).",
+    )
+
+    config_scan_subparsers.add_parser(
+        "list",
+        help="List configured scan paths",
+        description="Display current scan_paths and exclude_paths from config.toml.",
+    )
+
+    # -- config log subcommands --
+    config_log_parser = config_subparsers.add_parser(
+        "log",
+        help="Manage log configuration",
+        description="Configure activity log settings.",
+    )
+    config_log_subparsers = config_log_parser.add_subparsers(
+        dest="config_log_command", required=True, title="Commands", metavar="COMMAND",
+    )
+    _raw_config_log_add = config_log_subparsers.add_parser
+    config_log_subparsers.add_parser = lambda *a, **kw: (  # type: ignore[method-assign]
+        kw.setdefault("formatter_class", _AutoWidthHelpFormatter),
+        _raw_config_log_add(*a, **kw),
+    )[1]
+
+    retention_parser = config_log_subparsers.add_parser(
+        "set-retention", help="Set log retention period in days",
+    )
+    retention_parser.add_argument(
+        "days", nargs="?", type=int, help="Number of days to retain logs.",
+    )
+
+    # -- config exclude subcommands --
+    config_exclude_parser = config_subparsers.add_parser(
+        "exclude",
+        help="Manage sync exclusions",
+        description=(
+            "Add, remove, or list exclusions for plugins, skills, agents, "
+            "and commands. Excluded entities are skipped during reconcile."
+        ),
+    )
+    config_exclude_subparsers = config_exclude_parser.add_subparsers(
+        dest="config_exclude_command", required=True, title="Commands", metavar="COMMAND",
+    )
+    _raw_config_exclude_add = config_exclude_subparsers.add_parser
+    config_exclude_subparsers.add_parser = lambda *a, **kw: (  # type: ignore[method-assign]
+        kw.setdefault("formatter_class", _AutoWidthHelpFormatter),
+        _raw_config_exclude_add(*a, **kw),
+    )[1]
+
+    exclude_add_parser = config_exclude_subparsers.add_parser(
+        "add", help="Add an exclusion",
+    )
+    exclude_add_parser.add_argument(
+        "kind", nargs="?", choices=["plugin", "skill", "agent", "command"],
+        help="Entity kind to exclude.",
+    )
+    exclude_add_parser.add_argument("entity_id", nargs="?", help="Entity ID to exclude.")
+    exclude_add_parser.add_argument("--global", dest="force_global", action="store_true")
+    exclude_add_parser.add_argument("--project", type=Path)
+    exclude_add_parser.add_argument("--cache-dir", type=Path)
+    exclude_add_parser.add_argument("--claude-home", type=Path)
+
+    exclude_remove_parser = config_exclude_subparsers.add_parser(
+        "remove", help="Remove an exclusion",
+    )
+    exclude_remove_parser.add_argument(
+        "kind", nargs="?", choices=["plugin", "skill", "agent", "command"],
+    )
+    exclude_remove_parser.add_argument("entity_id", nargs="?")
+    exclude_remove_parser.add_argument("--global", dest="force_global", action="store_true")
+    exclude_remove_parser.add_argument("--project", type=Path)
+
+    exclude_list_parser = config_exclude_subparsers.add_parser(
+        "list", help="Show current exclusions",
+    )
+    exclude_list_parser.add_argument("--global", dest="force_global", action="store_true")
+    exclude_list_parser.add_argument("--project", type=Path)
+
     return parser
 
 
@@ -430,6 +617,9 @@ def main(argv: list[str] | None = None) -> int:
     """Run the CLI and return a process exit code."""
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "config":
+        return _handle_config_command(args)
 
     if args.command == "log":
         return _handle_log_command(args)
@@ -715,6 +905,387 @@ def _handle_log_command(args: argparse.Namespace) -> int:
 
     print(format_log_entries(entries, json_output=args.json))
     return 0
+
+
+def _handle_config_command(args: argparse.Namespace) -> int:
+    """Handle all config subcommands."""
+    if args.config_command == "show":
+        return _handle_config_show(args)
+    if args.config_command == "check":
+        return _handle_config_check(args)
+    if args.config_command == "scan":
+        return _handle_config_scan(args)
+    if args.config_command == "log":
+        return _handle_config_log(args)
+    if args.config_command == "exclude":
+        return _handle_config_exclude(args)
+    print(f"Error: unknown config command `{args.config_command}`", file=sys.stderr)
+    return 1
+
+
+def _handle_config_show(args: argparse.Namespace) -> int:
+    """Handle config show."""
+    from cc_codex_bridge.config import load_config
+    from cc_codex_bridge.config_scope import resolve_config_scope
+    from cc_codex_bridge.config_show import format_config_show, format_config_show_json
+    from cc_codex_bridge.exclusions import load_project_exclusions
+    from cc_codex_bridge.scan import load_scan_config
+
+    bridge_home = resolve_bridge_home()
+    scope = resolve_config_scope(
+        force_global=getattr(args, "force_global", False),
+        project_dir=getattr(args, "project", None),
+        bridge_home=bridge_home,
+    )
+
+    global_cfg = load_config(bridge_home / "config.toml")
+
+    try:
+        scan_cfg = load_scan_config(bridge_home)
+    except Exception:
+        scan_cfg = None
+
+    project_exclusions = None
+    if scope.target == "project" and scope.project_root:
+        try:
+            project_exclusions = load_project_exclusions(scope.project_root)
+        except Exception:
+            pass
+
+    display_scope = "global" if scope.target == "global" else "merged"
+    if getattr(args, "force_global", False):
+        display_scope = "global"
+
+    scan_paths = scan_cfg.scan_paths if scan_cfg else ()
+    exclude_paths = scan_cfg.exclude_paths if scan_cfg else ()
+
+    if getattr(args, "json", False):
+        print(format_config_show_json(
+            global_config=global_cfg,
+            project_exclusions=project_exclusions,
+            scan_paths=scan_paths,
+            exclude_paths=exclude_paths,
+            scope=display_scope,
+        ))
+    else:
+        print(format_config_show(
+            global_config=global_cfg,
+            project_exclusions=project_exclusions,
+            scan_paths=scan_paths,
+            exclude_paths=exclude_paths,
+            scope=display_scope,
+        ))
+    return 0
+
+
+def _handle_config_check(args: argparse.Namespace) -> int:
+    """Handle config check."""
+    from cc_codex_bridge.config_check import (
+        check_global_config,
+        check_project_config,
+        format_check_report,
+        format_check_report_json,
+    )
+    from cc_codex_bridge.config_scope import resolve_config_scope
+
+    bridge_home = resolve_bridge_home()
+    global_config_path = bridge_home / "config.toml"
+    global_results = check_global_config(global_config_path, bridge_home=bridge_home)
+
+    scope = resolve_config_scope(
+        force_global=False,
+        project_dir=getattr(args, "project", None),
+        bridge_home=bridge_home,
+    )
+    project_results = None
+    if scope.target == "project" and scope.project_root:
+        project_results = check_project_config(scope.config_path)
+
+    if getattr(args, "json", False):
+        print(format_check_report_json(global_results, project_results or []))
+    else:
+        print(format_check_report("global", global_results))
+        if project_results is not None:
+            print()
+            print(format_check_report(f"project ({scope.config_path})", project_results))
+        total_issues = sum(1 for r in global_results if not r.passed)
+        if project_results:
+            total_issues += sum(1 for r in project_results if not r.passed)
+        print()
+        if total_issues:
+            print(f"{total_issues} issue(s) found.")
+        else:
+            print("All checks passed.")
+
+    has_failures = any(not r.passed for r in global_results)
+    if project_results:
+        has_failures = has_failures or any(not r.passed for r in project_results)
+    return 1 if has_failures else 0
+
+
+def _handle_config_scan(args: argparse.Namespace) -> int:
+    """Handle config scan subcommands."""
+    from cc_codex_bridge.config_scan_commands import (
+        handle_scan_add,
+        handle_scan_list,
+        handle_scan_remove,
+    )
+    from cc_codex_bridge import interactive
+
+    bridge_home = resolve_bridge_home()
+    cfg_path = bridge_home / "config.toml"
+
+    scan_command = getattr(args, "scan_command", None)
+
+    if scan_command == "add":
+        pattern = getattr(args, "pattern", None)
+        if pattern is None:
+            if not interactive.is_interactive():
+                print("Error: pattern required (not running interactively).", file=sys.stderr)
+                return 1
+            pattern = interactive.prompt_for_value("Scan path pattern: ")
+            if pattern is None:
+                print("Cancelled.", file=sys.stderr)
+                return 1
+
+        result = handle_scan_add(pattern=pattern, config_path=cfg_path)
+        print(result.message)
+        return 0 if result.success else 1
+
+    if scan_command == "remove":
+        pattern = getattr(args, "pattern", None)
+        if pattern is None:
+            # Interactive: let user pick from current scan paths.
+            current = handle_scan_list(config_path=cfg_path)
+            if not current.paths:
+                print("No scan paths configured.")
+                return 0
+            if not interactive.is_interactive():
+                print("Error: pattern required (not running interactively).", file=sys.stderr)
+                return 1
+            pattern = interactive.select_from_list(
+                list(current.paths),
+                prompt="Select pattern to remove: ",
+            )
+            if pattern is None:
+                print("Cancelled.", file=sys.stderr)
+                return 1
+
+        result = handle_scan_remove(pattern=pattern, config_path=cfg_path)
+        print(result.message)
+        return 0 if result.success else 1
+
+    if scan_command == "list":
+        listing = handle_scan_list(config_path=cfg_path)
+        if listing.paths:
+            print("Scan paths:")
+            for p in listing.paths:
+                print(f"  {p}")
+        else:
+            print("No scan paths configured.")
+        if listing.exclude_paths:
+            print("Exclude paths:")
+            for p in listing.exclude_paths:
+                print(f"  {p}")
+        return 0
+
+    print(f"Error: unknown scan command `{scan_command}`", file=sys.stderr)
+    return 1
+
+
+def _handle_config_log(args: argparse.Namespace) -> int:
+    """Handle config log subcommands."""
+    from cc_codex_bridge import config_writer, interactive
+    from cc_codex_bridge.config import DEFAULT_LOG_RETENTION_DAYS
+
+    if getattr(args, "config_log_command", None) != "set-retention":
+        print(
+            f"Error: unknown config log command `{getattr(args, 'config_log_command', None)}`",
+            file=sys.stderr,
+        )
+        return 1
+
+    bridge_home = resolve_bridge_home()
+    cfg_path = bridge_home / "config.toml"
+
+    days = getattr(args, "days", None)
+    if days is None:
+        if not interactive.is_interactive():
+            print("Error: days value required (not running interactively).", file=sys.stderr)
+            return 1
+        raw = interactive.prompt_for_value("Log retention (days): ")
+        if raw is None:
+            print("Cancelled.", file=sys.stderr)
+            return 1
+        try:
+            days = int(raw)
+        except ValueError:
+            print(f"Error: invalid integer: {raw}", file=sys.stderr)
+            return 1
+
+    if days < 1:
+        print(f"Error: retention days must be >= 1, got {days}.", file=sys.stderr)
+        return 1
+
+    data = config_writer.read_config_data(cfg_path)
+    log_section = data.get("log", {})
+    old = log_section.get("log_retention_days", DEFAULT_LOG_RETENTION_DAYS)
+
+    config_writer.set_nested_value(data, ["log", "log_retention_days"], days)
+    config_writer.write_config_data(cfg_path, data)
+
+    print(f"Set log retention to {days} days (was {old}).")
+    return 0
+
+
+def _handle_config_exclude(args: argparse.Namespace) -> int:
+    """Handle config exclude add/remove/list subcommands."""
+    from cc_codex_bridge import interactive
+    from cc_codex_bridge.config_exclude_commands import (
+        _KIND_TO_KEY,
+        handle_exclude_add,
+        handle_exclude_list,
+        handle_exclude_remove,
+        list_discoverable_entities,
+    )
+    from cc_codex_bridge.config_scope import resolve_config_scope
+
+    bridge_home = resolve_bridge_home()
+    scope = resolve_config_scope(
+        force_global=getattr(args, "force_global", False),
+        project_dir=getattr(args, "project", None),
+        bridge_home=bridge_home,
+    )
+
+    subcmd = getattr(args, "config_exclude_command", None)
+
+    # -- list --
+    if subcmd == "list":
+        result = handle_exclude_list(config_path=scope.config_path)
+        any_found = False
+        for kind, key in _KIND_TO_KEY.items():
+            entries = getattr(result, key)
+            if entries:
+                any_found = True
+                print(f"{kind}s:")
+                for entry in entries:
+                    print(f"  {entry}")
+        if not any_found:
+            print("No exclusions configured.")
+        return 0
+
+    # -- add --
+    if subcmd == "add":
+        from cc_codex_bridge.discover import discover
+
+        try:
+            discovery = discover(
+                project_path=scope.project_root,
+                cache_dir=getattr(args, "cache_dir", None),
+                claude_home=getattr(args, "claude_home", None),
+            )
+        except Exception as exc:
+            print(f"Error: discovery failed: {exc}", file=sys.stderr)
+            return 1
+
+        kind = getattr(args, "kind", None)
+        entity_id = getattr(args, "entity_id", None)
+
+        if kind is None:
+            if not interactive.is_interactive():
+                print("Error: kind required (not running interactively).", file=sys.stderr)
+                return 1
+            kind = interactive.select_from_list(
+                sorted(_KIND_TO_KEY.keys()),
+                prompt="Select entity kind: ",
+            )
+            if kind is None:
+                print("Cancelled.", file=sys.stderr)
+                return 1
+
+        if entity_id is None:
+            discoverable = list_discoverable_entities(discovery)
+            candidates = discoverable.get(kind, [])
+            if not candidates:
+                print(f"No discoverable {kind}s found.", file=sys.stderr)
+                return 1
+            if not interactive.is_interactive():
+                print("Error: entity_id required (not running interactively).", file=sys.stderr)
+                return 1
+            entity_id = interactive.select_from_list(
+                candidates,
+                prompt=f"Select {kind} to exclude: ",
+            )
+            if entity_id is None:
+                print("Cancelled.", file=sys.stderr)
+                return 1
+
+        result = handle_exclude_add(
+            kind=kind,
+            entity_id=entity_id,
+            config_path=scope.config_path,
+            discovery=discovery,
+        )
+        print(result.message)
+        return 0 if result.success else 1
+
+    # -- remove --
+    if subcmd == "remove":
+        kind = getattr(args, "kind", None)
+        entity_id = getattr(args, "entity_id", None)
+
+        if kind is None and entity_id is None:
+            # Interactive: pick from flattened current exclusions
+            current = handle_exclude_list(config_path=scope.config_path)
+            flat: list[str] = []
+            flat_map: list[tuple[str, str]] = []  # (kind, entity_id)
+            for k, key in _KIND_TO_KEY.items():
+                for entry in getattr(current, key):
+                    label = f"{k}: {entry}"
+                    flat.append(label)
+                    flat_map.append((k, entry))
+            if not flat:
+                print("No exclusions to remove.")
+                return 0
+            if not interactive.is_interactive():
+                print("Error: kind and entity_id required (not running interactively).", file=sys.stderr)
+                return 1
+            chosen = interactive.select_from_list(flat, prompt="Select exclusion to remove: ")
+            if chosen is None:
+                print("Cancelled.", file=sys.stderr)
+                return 1
+            idx = flat.index(chosen)
+            kind, entity_id = flat_map[idx]
+
+        elif kind is not None and entity_id is None:
+            # Kind given, pick entity from that kind's exclusions
+            current = handle_exclude_list(config_path=scope.config_path)
+            key = _KIND_TO_KEY.get(kind, kind + "s")
+            entries = list(getattr(current, key, ()))
+            if not entries:
+                print(f"No {kind} exclusions to remove.")
+                return 0
+            if not interactive.is_interactive():
+                print("Error: entity_id required (not running interactively).", file=sys.stderr)
+                return 1
+            entity_id = interactive.select_from_list(
+                entries,
+                prompt=f"Select {kind} to remove: ",
+            )
+            if entity_id is None:
+                print("Cancelled.", file=sys.stderr)
+                return 1
+
+        result = handle_exclude_remove(
+            kind=kind,
+            entity_id=entity_id,
+            config_path=scope.config_path,
+        )
+        print(result.message)
+        return 0 if result.success else 1
+
+    print(f"Error: unknown exclude command `{subcmd}`", file=sys.stderr)
+    return 1
 
 
 def _handle_clean_command(args: argparse.Namespace) -> int:

@@ -12,6 +12,7 @@ license = "MIT"
 authors = [{ name = "Vlad Olaru" }]
 dependencies = [
   "PyYAML>=6.0",
+  "tomli-w>=1.0",
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",

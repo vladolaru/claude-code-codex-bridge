@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- `config show` command — displays effective config with source attribution (global/project/default)
+- `config check` command — audits config files against current environment (TOML validity, scan paths, exclusion entities, structural correctness)
+- `config scan add/remove/list` — manage scan paths from CLI with glob validation
+- `config exclude add/remove/list` — manage exclusions from CLI with discovery-backed validation
+- `config log set-retention` — set log retention period from CLI
+- Interactive guided flows for all config mutations when values are omitted (TTY-only)
+- `doctor` now includes a config health check section
+- `tomli-w` runtime dependency for TOML writing
+
 ## [0.18.0] - 2026-03-25
 
 ### Added
