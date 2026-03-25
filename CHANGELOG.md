@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.1] - 2026-03-25
+
+### Changed
+- Interactive pickers show the prompt label as a heading before the numbered list, with `Enter choice [1-N]:` for input
+- ESC key cancels the current selection and clears its output; in multi-step flows (e.g. `config exclude add`) ESC goes back one level instead of exiting
+- Already-excluded entities are filtered from the `config exclude add` picker; kinds with no remaining candidates are hidden
+
+### Fixed
+- Confirmation messages after interactive selection no longer start mid-line (raw terminal mode now emits carriage return before newline)
+
 ## [0.19.0] - 2026-03-25
 
 ### Added
