@@ -110,23 +110,27 @@ class _AutoWidthHelpFormatter(argparse.HelpFormatter):
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI parser."""
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument(
+    # Shared discovery flags: project root, plugin cache, Claude home.
+    common_discovery = argparse.ArgumentParser(add_help=False)
+    common_discovery.add_argument(
         "--project",
         type=Path,
         help="Target project directory (default: current working directory).",
     )
-    common.add_argument(
+    common_discovery.add_argument(
         "--cache-dir",
         type=Path,
         help="Claude plugin cache directory (default: ~/.claude/plugins/cache).",
     )
-    common.add_argument(
+    common_discovery.add_argument(
         "--claude-home",
         type=Path,
         help="Claude home directory (default: ~/.claude).",
     )
-    common.add_argument(
+
+    # Discovery + Codex output flags: used by commands that write to ~/.codex.
+    common_with_codex = argparse.ArgumentParser(add_help=False, parents=[common_discovery])
+    common_with_codex.add_argument(
         "--codex-home",
         type=Path,
         help="Codex home directory (default: ~/.codex).",
@@ -159,7 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     reconcile_parser = subparsers.add_parser(
         "reconcile",
-        parents=[common],
+        parents=[common_with_codex],
         help="Sync Codex artifacts with the current Claude Code setup",
         description=(
             "Sync Codex artifacts with the current Claude Code setup. "
@@ -181,7 +185,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_parser = subparsers.add_parser(
         "validate",
-        parents=[common],
+        parents=[common_discovery],
         help="Check that plugins translate cleanly without writing files",
         description=(
             "Check that installed Claude Code plugins translate cleanly into "
@@ -191,7 +195,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status_parser = subparsers.add_parser(
         "status",
-        parents=[common],
+        parents=[common_with_codex],
         help="Show sync status and pending changes",
         description=(
             "Compare the current Codex artifacts on disk with what reconcile "
@@ -509,11 +513,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Target project directory (default: current working directory).",
     )
     clean_parser.add_argument(
-        "--codex-home",
-        type=Path,
-        help="Codex home directory (default: ~/.codex). Note: clean uses the path recorded in bridge state, not this value.",
-    )
-    clean_parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Show what would be removed without deleting anything.",
@@ -630,7 +629,7 @@ def main(argv: list[str] | None = None) -> int:
         checks = run_doctor(
             cache_dir=args.cache_dir,
             claude_home=args.claude_home,
-            codex_home=args.codex_home,
+            codex_home=getattr(args, "codex_home", None),
             launchagents_dir=args.launchagents_dir,
         )
         if args.json:
@@ -660,7 +659,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         build = build_project_desired_state(
             args.project,
-            codex_home=args.codex_home,
+            codex_home=getattr(args, "codex_home", None),
             claude_home=args.claude_home,
             cache_dir=args.cache_dir,
             exclude_plugins=getattr(args, "exclude_plugin", None) or (),
@@ -686,7 +685,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 build = build_project_desired_state(
                     args.project,
-                    codex_home=args.codex_home,
+                    codex_home=getattr(args, "codex_home", None),
                     claude_home=args.claude_home,
                     cache_dir=args.cache_dir,
                     exclude_plugins=getattr(args, "exclude_plugin", None) or (),
@@ -1363,7 +1362,7 @@ def _handle_uninstall_command(args: argparse.Namespace) -> int:
     try:
         from cc_codex_bridge.reconcile import uninstall_all
         report = uninstall_all(
-            codex_home=args.codex_home,
+            codex_home=getattr(args, "codex_home", None),
             launchagents_dir=args.launchagents_dir,
             dry_run=args.dry_run,
         )
@@ -1388,7 +1387,7 @@ def _handle_all_command(args: argparse.Namespace) -> int:
     try:
         from cc_codex_bridge.reconcile import reconcile_all
         report = reconcile_all(
-            codex_home=args.codex_home,
+            codex_home=getattr(args, "codex_home", None),
             claude_home=getattr(args, "claude_home", None),
             cache_dir=getattr(args, "cache_dir", None),
             exclude_plugins=getattr(args, "exclude_plugin", None) or (),

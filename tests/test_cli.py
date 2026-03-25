@@ -931,7 +931,6 @@ def test_clean_command_succeeds(make_project, make_plugin_version, tmp_path: Pat
     exit_code = cli.main([
         "clean",
         "--project", str(project_root),
-        "--codex-home", str(codex_home),
     ])
     assert exit_code == 0
     assert not _bridge_state_path(project_root, tmp_path).exists()
@@ -957,7 +956,6 @@ def test_clean_dry_run_command(make_project, make_plugin_version, tmp_path: Path
     exit_code = cli.main([
         "clean",
         "--project", str(project_root),
-        "--codex-home", str(codex_home),
         "--dry-run",
     ])
     assert exit_code == 0
@@ -974,7 +972,6 @@ def test_clean_no_state_exits_zero(make_project, tmp_path: Path):
     exit_code = cli.main([
         "clean",
         "--project", str(project_root),
-        "--codex-home", str(codex_home),
     ])
     assert exit_code == 0
 
@@ -1005,7 +1002,6 @@ def test_clean_succeeds_when_agents_md_missing(make_project, make_plugin_version
     exit_code = cli.main([
         "clean",
         "--project", str(project_root),
-        "--codex-home", str(codex_home),
     ])
     assert exit_code == 0
     assert not _bridge_state_path(project_root, tmp_path).exists()
@@ -1420,7 +1416,6 @@ def test_validate_all_dispatches(
 
     exit_code = cli.main([
         "validate", "--all",
-        "--codex-home", str(codex_home),
     ])
     assert exit_code == 0
 
@@ -1537,12 +1532,21 @@ def test_uninstall_rejects_unused_flags():
 
 
 def test_clean_rejects_unused_flags():
-    """clean does not accept --claude-home or --cache-dir."""
+    """clean does not accept --claude-home, --cache-dir, or --codex-home."""
     with pytest.raises(SystemExit, match="2"):
         cli.main(["clean", "--claude-home", "/tmp/fake"])
 
     with pytest.raises(SystemExit, match="2"):
         cli.main(["clean", "--cache-dir", "/tmp/fake"])
+
+    with pytest.raises(SystemExit, match="2"):
+        cli.main(["clean", "--codex-home", "/tmp/fake"])
+
+
+def test_validate_rejects_codex_home_flag():
+    """validate does not accept --codex-home (read-only, never writes to codex)."""
+    with pytest.raises(SystemExit, match="2"):
+        cli.main(["validate", "--codex-home", "/tmp/fake"])
 
 
 def test_validate_works_without_plugins(make_project, tmp_path: Path, capsys):
@@ -1591,7 +1595,6 @@ def test_validate_reports_bootstrap_needed(tmp_path: Path, capsys):
 
     exit_code = cli.main([
         "validate", "--project", str(project_root),
-        "--codex-home", str(tmp_path / "codex-home"),
     ])
 
     assert exit_code == 1

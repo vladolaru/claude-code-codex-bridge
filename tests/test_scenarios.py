@@ -835,7 +835,6 @@ def test_clean_undoes_reconcile(make_project, tmp_path: Path):
     exit_code = cli.main([
         "clean",
         "--project", str(project_root),
-        "--codex-home", str(codex_home),
     ])
     assert exit_code == 0
 
@@ -861,7 +860,6 @@ def test_clean_undoes_reconcile(make_project, tmp_path: Path):
     exit_code = cli.main([
         "clean",
         "--project", str(project_root),
-        "--codex-home", str(codex_home),
     ])
     assert exit_code == 0
 
@@ -881,7 +879,6 @@ def test_clean_dry_run_previews_without_side_effects(make_project, tmp_path: Pat
     exit_code = cli.main([
         "clean",
         "--project", str(project_root),
-        "--codex-home", str(codex_home),
         "--dry-run",
     ])
     assert exit_code == 0
