@@ -7,7 +7,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from cc_codex_bridge.exclusions import SyncExclusions, _normalize_id_list, _read_string_list
+from cc_codex_bridge.exclusions import SyncExclusions, parse_sync_exclusions
 
 DEFAULT_LOG_RETENTION_DAYS = 90
 
@@ -54,24 +54,7 @@ def _parse_exclusions(data: dict[str, object], config_path: Path) -> SyncExclusi
             _log.warning("Global config `exclude` is not a table in: %s", config_path)
             return SyncExclusions()
 
-        return SyncExclusions(
-            plugins=_normalize_id_list(
-                _read_string_list(exclude_table, "plugins", config_path),
-                kind="plugin",
-            ),
-            skills=_normalize_id_list(
-                _read_string_list(exclude_table, "skills", config_path),
-                kind="skill",
-            ),
-            agents=_normalize_id_list(
-                _read_string_list(exclude_table, "agents", config_path),
-                kind="agent",
-            ),
-            commands=_normalize_id_list(
-                _read_string_list(exclude_table, "commands", config_path),
-                kind="command",
-            ),
-        )
+        return parse_sync_exclusions(exclude_table, config_path)
     except Exception:
         _log.warning(
             "Failed to parse [exclude] section in %s; using empty exclusions",

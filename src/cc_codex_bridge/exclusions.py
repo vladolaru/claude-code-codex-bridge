@@ -57,6 +57,19 @@ def load_project_exclusions(
     if not isinstance(exclude_table, dict):
         raise ReconcileError(f"`exclude` must be a TOML table in: {config_path}")
 
+    return parse_sync_exclusions(exclude_table, config_path)
+
+
+def parse_sync_exclusions(
+    exclude_table: dict[str, object],
+    config_path: str | Path,
+) -> SyncExclusions:
+    """Parse an ``[exclude]`` TOML table into a :class:`SyncExclusions`.
+
+    Shared by :func:`load_project_exclusions` (project-level) and
+    :func:`~cc_codex_bridge.config.load_config` (global-level).
+    Raises :class:`ReconcileError` on malformed values.
+    """
     return SyncExclusions(
         plugins=_normalize_id_list(
             _read_string_list(exclude_table, "plugins", config_path),
