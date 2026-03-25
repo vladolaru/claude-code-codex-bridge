@@ -115,7 +115,7 @@ def _input_with_escape(prompt: str) -> str | object:
                 sys.stdout.flush()
                 return _ESCAPE
             if ch in ("\r", "\n"):  # Enter
-                sys.stdout.write("\n")
+                sys.stdout.write("\r\n")
                 sys.stdout.flush()
                 return "".join(buf)
             if ch in ("\x7f", "\x08"):  # Backspace
