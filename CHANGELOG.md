@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.18.0] - 2026-03-25
 
 ### Added
 - Global `[exclude]` section in `~/.cc-codex-bridge/config.toml` for machine-wide plugin/skill/agent/command exclusions — unioned with per-project `.codex/bridge.toml`; CLI `--exclude-*` flags replace the merged set for that category
