@@ -193,7 +193,14 @@ cc-codex-bridge reconcile --project . \
   --exclude-command marketplace/plugin/command.md
 ```
 
-Persist exclusions per project in `.codex/bridge.toml`:
+Persist exclusions globally in `~/.cc-codex-bridge/config.toml` (applies to all projects):
+
+```toml
+[exclude]
+plugins = ["vladolaru-claude-code-plugins/yoloing-safe"]
+```
+
+Or per project in `.codex/bridge.toml`:
 
 ```toml
 [exclude]
@@ -203,7 +210,7 @@ agents = ["market/prompt-engineer/reviewer.md"]
 commands = ["market/plugin/debug.md"]
 ```
 
-CLI flags override config exclusions for the same entity kind in that run.
+Global and project exclusions are **combined** (both apply). CLI `--exclude-*` flags **replace** the combined set for that entity kind in the current run.
 
 ## Ownership and Safety
 
