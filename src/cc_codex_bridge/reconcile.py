@@ -324,7 +324,9 @@ def build_project_desired_state(
     Returns a ProjectBuildResult containing the desired state and all
     intermediate values both callers (CLI and reconcile_all) need.
     """
+    from cc_codex_bridge.bridge_home import config_path as bridge_config_path
     from cc_codex_bridge.claude_shim import plan_claude_shim
+    from cc_codex_bridge.config import load_config
     from cc_codex_bridge.discover import discover
     from cc_codex_bridge.exclusions import (
         apply_sync_exclusions,
@@ -348,14 +350,19 @@ def build_project_desired_state(
         translate_standalone_skills,
     )
 
+    bridge_home_path = Path(bridge_home or resolve_bridge_home()).expanduser().resolve()
+
     result = discover(
         project_path=project_root,
         cache_dir=cache_dir,
         claude_home=claude_home,
     )
+    cfg = load_config(bridge_config_path(bridge_home=bridge_home_path))
+
     config_exclusions = load_project_exclusions(result.project.root)
     exclusions = resolve_effective_exclusions(
         config_exclusions,
+        global_config=cfg.exclude,
         cli_exclude_plugins=tuple(exclude_plugins) or None,
         cli_exclude_skills=tuple(exclude_skills) or None,
         cli_exclude_agents=tuple(exclude_agents) or None,
@@ -379,7 +386,6 @@ def build_project_desired_state(
             diagnostics=(),
         )
 
-    bridge_home_path = Path(bridge_home or resolve_bridge_home()).expanduser().resolve()
     agent_result = translate_installed_agents_with_diagnostics(result.plugins, bridge_home=bridge_home_path)
     user_agent_result = translate_standalone_agents(result.user_agents, scope="user")
     project_agent_result = translate_standalone_agents(result.project_agents, scope="project")

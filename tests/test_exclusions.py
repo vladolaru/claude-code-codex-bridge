@@ -436,3 +436,44 @@ def test_resolve_effective_exclusions_preserves_commands_when_cli_is_none():
     resolved = resolve_effective_exclusions(config)
 
     assert resolved.commands == ("market/alpha/review.md",)
+
+
+# --- Global exclusion merge tests ---
+
+
+def test_resolve_effective_exclusions_merges_global_and_project():
+    """Global and project exclusions are unioned."""
+    global_exc = SyncExclusions(plugins=("market/global-only",))
+    project_exc = SyncExclusions(plugins=("market/project-only",))
+    result = resolve_effective_exclusions(
+        project_config=project_exc,
+        global_config=global_exc,
+    )
+    assert "market/global-only" in result.plugins
+    assert "market/project-only" in result.plugins
+
+
+def test_resolve_effective_exclusions_cli_replaces_merged():
+    """CLI flags fully replace the merged global+project set for that kind."""
+    global_exc = SyncExclusions(plugins=("market/global-plugin",))
+    project_exc = SyncExclusions(plugins=("market/project-plugin",))
+    result = resolve_effective_exclusions(
+        project_config=project_exc,
+        global_config=global_exc,
+        cli_exclude_plugins=["market/cli-plugin"],
+    )
+    assert result.plugins == ("market/cli-plugin",)
+
+
+def test_resolve_effective_exclusions_global_only():
+    """Global exclusions apply when no project config exists."""
+    global_exc = SyncExclusions(
+        plugins=("market/yoloing-safe",),
+        skills=("some-skill",),
+    )
+    result = resolve_effective_exclusions(
+        project_config=SyncExclusions(),
+        global_config=global_exc,
+    )
+    assert result.plugins == ("market/yoloing-safe",)
+    assert result.skills == ("some-skill",)

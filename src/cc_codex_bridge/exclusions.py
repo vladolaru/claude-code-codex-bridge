@@ -78,31 +78,39 @@ def load_project_exclusions(
 
 
 def resolve_effective_exclusions(
-    config: SyncExclusions,
+    project_config: SyncExclusions,
     *,
+    global_config: SyncExclusions = SyncExclusions(),
     cli_exclude_plugins: list[str] | None = None,
     cli_exclude_skills: list[str] | None = None,
     cli_exclude_agents: list[str] | None = None,
     cli_exclude_commands: list[str] | None = None,
 ) -> SyncExclusions:
-    """Resolve per-kind exclusions, letting CLI values override config values."""
+    """Resolve per-kind exclusions: union global + project, then let CLI replace.
+
+    The merge order is:
+    1. Union global and project exclusions (deduplicated, sorted).
+    2. For each kind where the CLI provides an explicit list, the CLI list
+       fully replaces the merged value for that kind.
+    """
+    merged = _merge_exclusions(global_config, project_config)
     plugin_values = (
-        config.plugins
+        merged.plugins
         if cli_exclude_plugins is None
         else _normalize_id_list(cli_exclude_plugins, kind="plugin")
     )
     skill_values = (
-        config.skills
+        merged.skills
         if cli_exclude_skills is None
         else _normalize_id_list(cli_exclude_skills, kind="skill")
     )
     agent_values = (
-        config.agents
+        merged.agents
         if cli_exclude_agents is None
         else _normalize_id_list(cli_exclude_agents, kind="agent")
     )
     command_values = (
-        config.commands
+        merged.commands
         if cli_exclude_commands is None
         else _normalize_id_list(cli_exclude_commands, kind="command")
     )
@@ -111,6 +119,16 @@ def resolve_effective_exclusions(
         skills=skill_values,
         agents=agent_values,
         commands=command_values,
+    )
+
+
+def _merge_exclusions(a: SyncExclusions, b: SyncExclusions) -> SyncExclusions:
+    """Union two SyncExclusions, deduplicating and sorting each tuple."""
+    return SyncExclusions(
+        plugins=tuple(sorted(set(a.plugins) | set(b.plugins))),
+        skills=tuple(sorted(set(a.skills) | set(b.skills))),
+        agents=tuple(sorted(set(a.agents) | set(b.agents))),
+        commands=tuple(sorted(set(a.commands) | set(b.commands))),
     )
 
 
