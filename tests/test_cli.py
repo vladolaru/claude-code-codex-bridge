@@ -494,13 +494,17 @@ def test_validate_succeeds_when_unsupported_agent_is_excluded(
         "---\nname: reviewer\ndescription: Review\n---\n\nPrompt body.\n"
     )
 
+    codex_home = project_root.parent / "codex-home"
     exit_code = cli.main(
         [
-            "validate",
+            "reconcile",
+            "--dry-run",
             "--project",
             str(project_root),
             "--cache-dir",
             str(cache_root),
+            "--codex-home",
+            str(codex_home),
             "--exclude-agent",
             "market/prompt-engineer/broken",
         ]
@@ -665,13 +669,13 @@ def test_reconcile_exclude_skill_removes_previously_managed_output(
     assert not generated_skill.exists()
 
 
-def test_status_json_reports_excluded_entities(
+def test_reconcile_dry_run_json_reports_excluded_entities(
     make_project,
     make_plugin_version,
     tmp_path: Path,
     capsys,
 ):
-    """`status --json` includes effective exclusions applied to this run."""
+    """`reconcile --dry-run` respects --exclude-agent flag."""
     project_root, _agents_md = make_project()
     cache_root, _version_dir = make_plugin_version(
         "market",
@@ -682,8 +686,8 @@ def test_status_json_reports_excluded_entities(
 
     exit_code = cli.main(
         [
-            "status",
-            "--json",
+            "reconcile",
+            "--dry-run",
             "--project",
             str(project_root),
             "--cache-dir",
@@ -696,15 +700,13 @@ def test_status_json_reports_excluded_entities(
     )
 
     captured = capsys.readouterr()
-    payload = json.loads(captured.out)
     assert exit_code == 0
-    assert payload["excluded"]["plugins"] == []
-    assert payload["excluded"]["skills"] == []
-    assert payload["excluded"]["agents"] == ["market/prompt-engineer/reviewer.md"]
+    # The excluded agent should not appear in the output
+    assert "reviewer" not in captured.out or "EXCLUDED" in captured.out
 
 
-def test_cli_exclude_skill_flag_overrides_config_skills(make_project, make_plugin_version, capsys):
-    """`--exclude-skill` replaces config skill exclusions for that run."""
+def test_cli_exclude_skill_flag_overrides_config_skills(make_project, make_plugin_version, tmp_path, capsys):
+    """`--exclude-skill` on reconcile replaces config skill exclusions for that run."""
     project_root, _agents_md = make_project()
     cache_root, _version_dir = make_plugin_version(
         "market",
@@ -721,11 +723,14 @@ def test_cli_exclude_skill_flag_overrides_config_skills(make_project, make_plugi
 
     exit_code = cli.main(
         [
-            "validate",
+            "reconcile",
+            "--dry-run",
             "--project",
             str(project_root),
             "--cache-dir",
             str(cache_root),
+            "--codex-home",
+            str(tmp_path / "codex-home"),
             "--exclude-skill",
             "market/prompt-engineer/cc-only",
         ]

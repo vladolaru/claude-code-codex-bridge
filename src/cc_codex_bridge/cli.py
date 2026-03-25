@@ -206,25 +206,26 @@ def build_parser() -> argparse.ArgumentParser:
             default=False,
             help="Operate on all registered projects and scan-config paths.",
         )
-        pipeline_parser.add_argument(
+    for exclude_parser in (reconcile_parser,):
+        exclude_parser.add_argument(
             "--exclude-plugin",
             action="append",
             default=None,
             help="Skip a plugin (format: marketplace/plugin). Repeatable.",
         )
-        pipeline_parser.add_argument(
+        exclude_parser.add_argument(
             "--exclude-skill",
             action="append",
             default=None,
             help="Skip a skill (format: marketplace/plugin/skill). Repeatable.",
         )
-        pipeline_parser.add_argument(
+        exclude_parser.add_argument(
             "--exclude-agent",
             action="append",
             default=None,
             help="Skip an agent (format: marketplace/plugin/agent.md). Repeatable.",
         )
-        pipeline_parser.add_argument(
+        exclude_parser.add_argument(
             "--exclude-command",
             action="append",
             default=None,
@@ -662,10 +663,10 @@ def main(argv: list[str] | None = None) -> int:
             codex_home=args.codex_home,
             claude_home=args.claude_home,
             cache_dir=args.cache_dir,
-            exclude_plugins=args.exclude_plugin or (),
-            exclude_skills=args.exclude_skill or (),
-            exclude_agents=args.exclude_agent or (),
-            exclude_commands=args.exclude_command or (),
+            exclude_plugins=getattr(args, "exclude_plugin", None) or (),
+            exclude_skills=getattr(args, "exclude_skill", None) or (),
+            exclude_agents=getattr(args, "exclude_agent", None) or (),
+            exclude_commands=getattr(args, "exclude_command", None) or (),
         )
     except (DiscoveryError, TranslationError, ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -688,10 +689,10 @@ def main(argv: list[str] | None = None) -> int:
                     codex_home=args.codex_home,
                     claude_home=args.claude_home,
                     cache_dir=args.cache_dir,
-                    exclude_plugins=args.exclude_plugin or (),
-                    exclude_skills=args.exclude_skill or (),
-                    exclude_agents=args.exclude_agent or (),
-                    exclude_commands=args.exclude_command or (),
+                    exclude_plugins=getattr(args, "exclude_plugin", None) or (),
+                    exclude_skills=getattr(args, "exclude_skill", None) or (),
+                    exclude_agents=getattr(args, "exclude_agent", None) or (),
+                    exclude_commands=getattr(args, "exclude_command", None) or (),
                 )
             except (DiscoveryError, TranslationError, ReconcileError, OSError, UnicodeError) as exc:
                 print(f"Error: {exc}", file=sys.stderr)
