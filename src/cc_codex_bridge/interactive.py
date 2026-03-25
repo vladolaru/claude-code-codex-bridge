@@ -67,7 +67,6 @@ def select_from_list(
                 selected = items[choice - 1]
                 if clear_on_select:
                     _clear_lines(lines_printed + extra_lines)
-                    print(f"{prompt} {selected}")
                 return selected
             print(f"  Enter a number between 1 and {len(items)}.")
             extra_lines += 1

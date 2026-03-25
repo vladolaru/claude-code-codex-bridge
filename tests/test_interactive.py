@@ -122,13 +122,10 @@ def test_select_from_list_retry_then_valid(monkeypatch):
 
 
 def test_select_from_list_clear_on_select(monkeypatch, capsys):
-    """clear_on_select replaces the list with a compact summary."""
+    """clear_on_select erases the list entirely after selection."""
     monkeypatch.setattr(interactive_mod, "_input_with_escape", lambda _: "1")
     result = select_from_list(["alpha", "beta"], prompt="Pick:", clear_on_select=True)
     assert result == "alpha"
-    captured = capsys.readouterr()
-    # The summary line should appear in output
-    assert "Pick: alpha" in captured.out
 
 
 # -- prompt_for_value ---------------------------------------------------------
