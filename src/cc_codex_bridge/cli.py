@@ -1182,6 +1182,14 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
         cli_kind = getattr(args, "kind", None)
         entity_id = getattr(args, "entity_id", None)
 
+        # Build candidate lists, filtered by what's already excluded.
+        current_excl = handle_exclude_list(config_path=scope.config_path)
+        discoverable = list_discoverable_entities(discovery)
+        available: dict[str, list[str]] = {}
+        for k, key in KIND_TO_KEY.items():
+            already = set(getattr(current_excl, key))
+            available[k] = [e for e in discoverable.get(k, []) if e not in already]
+
         # Interactive loop: ESC at entity level goes back to kind selection.
         kind = cli_kind
         while True:
@@ -1189,8 +1197,13 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
                 if not interactive.is_interactive():
                     print("Error: kind required (not running interactively).", file=sys.stderr)
                     return 1
+                # Only show kinds that have remaining candidates.
+                selectable_kinds = [k for k in sorted(KIND_TO_KEY.keys()) if available.get(k)]
+                if not selectable_kinds:
+                    print("All discoverable entities are already excluded.")
+                    return 0
                 kind = interactive.select_from_list(
-                    sorted(KIND_TO_KEY.keys()),
+                    selectable_kinds,
                     prompt="Select entity kind:",
                     clear_on_select=True,
                 )
@@ -1199,11 +1212,13 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
                     return 0
 
             if entity_id is None:
-                discoverable = list_discoverable_entities(discovery)
-                candidates = discoverable.get(kind, [])
+                candidates = available.get(kind, [])
                 if not candidates:
-                    print(f"No discoverable {kind}s found.", file=sys.stderr)
-                    return 1
+                    print(f"No {kind}s available to exclude (all already excluded).")
+                    if cli_kind is not None:
+                        return 0
+                    kind = None
+                    continue
                 if not interactive.is_interactive():
                     print("Error: entity_id required (not running interactively).", file=sys.stderr)
                     return 1
