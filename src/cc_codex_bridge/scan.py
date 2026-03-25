@@ -24,6 +24,18 @@ CONFIG_STUB = """\
 # exclude_paths = [
 #   "~/Work/projects/scratch",
 # ]
+
+# Globally exclude plugins, skills, agents, or commands from sync.
+# These apply to all projects. Per-project .codex/bridge.toml adds to these.
+# CLI --exclude-* flags replace config values for that category.
+#
+# [exclude]
+# plugins = [
+#   "vladolaru-claude-code-plugins/yoloing-safe",
+# ]
+# skills = []
+# agents = []
+# commands = []
 """
 
 
