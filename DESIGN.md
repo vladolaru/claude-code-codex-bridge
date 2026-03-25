@@ -703,7 +703,12 @@ Pipeline commands (`validate`, `status`, `reconcile`) also support:
 
 Exclusion IDs use part-count disambiguation: 1 part matches all scopes, 2 parts match by scope (`user` or `project`), 3 parts match plugin sources.
 
-All exclusion flags are repeatable. `.codex/bridge.toml` can define persistent exclusions, and CLI exclusions override config values for the same entity kind in the current run.
+All exclusion flags are repeatable. Exclusions merge from three layers:
+
+1. **Global** `~/.cc-codex-bridge/config.toml` `[exclude]` — machine-wide defaults
+2. **Project** `.codex/bridge.toml` `[exclude]` — per-project additions
+
+Global and project exclusions are **unioned** (both apply). CLI `--exclude-*` flags **replace** the merged set for that entity kind in the current run.
 
 ### Log commands
 
@@ -804,21 +809,30 @@ Global configuration lives in `src/cc_codex_bridge/config.py`.
 
 `~/.cc-codex-bridge/config.toml` is a user-authored file that the bridge reads but never writes. The file is optional — all settings have defaults that apply when the file is missing.
 
-The config file serves two purposes:
+The config file serves three purposes:
 
 1. scan-based discovery configuration (`scan_paths`, `exclude_paths`) — loaded by `scan.py`
 2. activity log configuration (`[log]` section) — loaded by `config.py`
+3. global sync exclusions (`[exclude]` section) — loaded by `config.py`, merged into the exclusion pipeline
 
 ### Current settings
 
 ```toml
 [log]
 log_retention_days = 90   # default; minimum 1
+
+[exclude]
+plugins = ["vladolaru-claude-code-plugins/yoloing-safe"]
+skills = []
+agents = []
+commands = []
 ```
 
 - `log_retention_days` controls how many days of activity log files are retained before auto-prune removes them
 - non-integer or sub-1 values fall back to the default (90 days)
 - a missing `[log]` section or missing config file both produce the default
+- `[exclude]` lists are unioned with per-project `.codex/bridge.toml` exclusions; CLI `--exclude-*` flags replace the merged set for that kind
+- malformed `[exclude]` values are silently ignored (logged as warnings) and fall back to empty exclusions
 
 ### Design constraint
 
