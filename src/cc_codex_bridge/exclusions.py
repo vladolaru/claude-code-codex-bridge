@@ -285,10 +285,10 @@ def _read_string_list(table: dict[str, object], key: str, config_path: Path) -> 
 
 def _normalize_id_list(values: list[str] | tuple[str, ...], *, kind: str) -> tuple[str, ...]:
     """Normalize and validate a list of exclusion ids."""
-    return tuple(sorted({_normalize_entity_id(value, kind=kind) for value in values}))
+    return tuple(sorted({normalize_entity_id(value, kind=kind) for value in values}))
 
 
-def _normalize_entity_id(value: str, *, kind: str) -> str:
+def normalize_entity_id(value: str, *, kind: str) -> str:
     """Normalize one exclusion entity id and validate shape.
 
     Plugins require exactly 2 parts (marketplace/plugin).

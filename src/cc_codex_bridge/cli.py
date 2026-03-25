@@ -484,17 +484,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Target project directory (default: current working directory).",
     )
-    config_check_parser.add_argument(
-        "--cache-dir",
-        type=Path,
-        help="Claude plugin cache directory (default: ~/.claude/plugins/cache).",
-    )
-    config_check_parser.add_argument(
-        "--claude-home",
-        type=Path,
-        help="Claude home directory (default: ~/.claude).",
-    )
-
     # -- config scan subcommand group --
     config_scan_parser = config_subparsers.add_parser(
         "scan",
@@ -934,7 +923,7 @@ def _handle_config_show(args: argparse.Namespace) -> int:
     bridge_home = resolve_bridge_home()
     scope = resolve_config_scope(
         force_global=getattr(args, "force_global", False),
-        project_dir=getattr(args, "project", None),
+        project_dir=getattr(args, "project", None) or Path.cwd(),
         bridge_home=bridge_home,
     )
 
@@ -942,15 +931,16 @@ def _handle_config_show(args: argparse.Namespace) -> int:
 
     try:
         scan_cfg = load_scan_config(bridge_home)
-    except Exception:
+    except Exception as exc:
+        print(f"Warning: could not load scan config: {exc}", file=sys.stderr)
         scan_cfg = None
 
     project_exclusions = None
     if scope.target == "project" and scope.project_root:
         try:
             project_exclusions = load_project_exclusions(scope.project_root)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"Warning: could not load project exclusions: {exc}", file=sys.stderr)
 
     display_scope = "global" if scope.target == "global" else "merged"
     if getattr(args, "force_global", False):
@@ -994,7 +984,7 @@ def _handle_config_check(args: argparse.Namespace) -> int:
 
     scope = resolve_config_scope(
         force_global=False,
-        project_dir=getattr(args, "project", None),
+        project_dir=getattr(args, "project", None) or Path.cwd(),
         bridge_home=bridge_home,
     )
     project_results = None
@@ -1142,7 +1132,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
     """Handle config exclude add/remove/list subcommands."""
     from cc_codex_bridge import interactive
     from cc_codex_bridge.config_exclude_commands import (
-        _KIND_TO_KEY,
+        KIND_TO_KEY,
         handle_exclude_add,
         handle_exclude_list,
         handle_exclude_remove,
@@ -1163,7 +1153,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
     if subcmd == "list":
         result = handle_exclude_list(config_path=scope.config_path)
         any_found = False
-        for kind, key in _KIND_TO_KEY.items():
+        for kind, key in KIND_TO_KEY.items():
             entries = getattr(result, key)
             if entries:
                 any_found = True
@@ -1196,7 +1186,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
                 print("Error: kind required (not running interactively).", file=sys.stderr)
                 return 1
             kind = interactive.select_from_list(
-                sorted(_KIND_TO_KEY.keys()),
+                sorted(KIND_TO_KEY.keys()),
                 prompt="Select entity kind: ",
             )
             if kind is None:
@@ -1239,7 +1229,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
             current = handle_exclude_list(config_path=scope.config_path)
             flat: list[str] = []
             flat_map: list[tuple[str, str]] = []  # (kind, entity_id)
-            for k, key in _KIND_TO_KEY.items():
+            for k, key in KIND_TO_KEY.items():
                 for entry in getattr(current, key):
                     label = f"{k}: {entry}"
                     flat.append(label)
@@ -1260,7 +1250,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
         elif kind is not None and entity_id is None:
             # Kind given, pick entity from that kind's exclusions
             current = handle_exclude_list(config_path=scope.config_path)
-            key = _KIND_TO_KEY.get(kind, kind + "s")
+            key = KIND_TO_KEY.get(kind, kind + "s")
             entries = list(getattr(current, key, ()))
             if not entries:
                 print(f"No {kind} exclusions to remove.")

@@ -32,7 +32,7 @@ The project has a strict source-of-truth split.
 These are authoritative inputs:
 
 - project `AGENTS.md`
-- optional project exclusion config at `.codex/bridge.toml`
+- optional project exclusion config at `.codex/bridge.toml` (user-editable; also managed by `config exclude` CLI commands)
 - installed Claude plugin skills discovered from the local Claude plugin cache
 - installed Claude plugin agents discovered from the local Claude plugin cache
 - installed Claude plugin commands discovered from the local Claude plugin cache
@@ -184,7 +184,7 @@ The reconcile engine is conservative by design.
 ### Never overwritten unless already generator-owned
 
 - project `AGENTS.md`
-- hand-authored project `.codex/bridge.toml` exclusion config
+- project `.codex/bridge.toml` exclusion config (the reconcile pipeline never overwrites this file, but `config exclude` CLI commands intentionally mutate it)
 - hand-authored `CLAUDE.md`
 - hand-authored `.codex/agents/*.toml`
 - non-generated files under `~/.codex/agents/`

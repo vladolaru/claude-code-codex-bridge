@@ -9,8 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-
-AGENTS_MD = "AGENTS.md"
+from cc_codex_bridge.discover import AGENTS_MD
 
 
 @dataclass(frozen=True)

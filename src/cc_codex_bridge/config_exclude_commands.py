@@ -11,10 +11,10 @@ from cc_codex_bridge.config_writer import (
     remove_from_string_list,
     write_config_data,
 )
-from cc_codex_bridge.exclusions import _normalize_entity_id
-from cc_codex_bridge.model import DiscoveryResult
+from cc_codex_bridge.exclusions import normalize_entity_id
+from cc_codex_bridge.model import DiscoveryResult, ReconcileError
 
-_KIND_TO_KEY = {
+KIND_TO_KEY = {
     "plugin": "plugins",
     "skill": "skills",
     "agent": "agents",
@@ -124,14 +124,17 @@ def handle_exclude_add(
     4. Read config, add to ``exclude.<kind_plural>``, write back.
     5. Return success/failure result.
     """
-    if kind not in _KIND_TO_KEY:
-        valid = ", ".join(sorted(_KIND_TO_KEY))
+    if kind not in KIND_TO_KEY:
+        valid = ", ".join(sorted(KIND_TO_KEY))
         return ExcludeCommandResult(
             success=False,
             message=f"Invalid kind '{kind}'; expected one of: {valid}",
         )
 
-    normalized = _normalize_entity_id(entity_id, kind=kind)
+    try:
+        normalized = normalize_entity_id(entity_id, kind=kind)
+    except ReconcileError as exc:
+        return ExcludeCommandResult(success=False, message=str(exc))
 
     # Validate against discovered entities
     known = list_discoverable_entities(discovery)
@@ -144,7 +147,7 @@ def handle_exclude_add(
     # Read, modify, write
     data = read_config_data(config_path)
     exclude_table: dict = data.setdefault("exclude", {})
-    key = _KIND_TO_KEY[kind]
+    key = KIND_TO_KEY[kind]
     added = add_to_string_list(exclude_table, key, normalized)
 
     if not added:
@@ -174,18 +177,21 @@ def handle_exclude_remove(
     3. Read config, remove from ``exclude.<kind_plural>``.
     4. Return success/failure result.
     """
-    if kind not in _KIND_TO_KEY:
-        valid = ", ".join(sorted(_KIND_TO_KEY))
+    if kind not in KIND_TO_KEY:
+        valid = ", ".join(sorted(KIND_TO_KEY))
         return ExcludeCommandResult(
             success=False,
             message=f"Invalid kind '{kind}'; expected one of: {valid}",
         )
 
-    normalized = _normalize_entity_id(entity_id, kind=kind)
+    try:
+        normalized = normalize_entity_id(entity_id, kind=kind)
+    except ReconcileError as exc:
+        return ExcludeCommandResult(success=False, message=str(exc))
 
     data = read_config_data(config_path)
     exclude_table: dict = data.get("exclude", {})
-    key = _KIND_TO_KEY[kind]
+    key = KIND_TO_KEY[kind]
     removed = remove_from_string_list(exclude_table, key, normalized)
 
     if not removed:

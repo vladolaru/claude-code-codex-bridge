@@ -7,6 +7,7 @@ bridge config files use.
 
 from __future__ import annotations
 
+import os
 import tomllib
 from pathlib import Path
 
@@ -22,10 +23,19 @@ def read_config_data(config_path: Path) -> dict:
 
 
 def write_config_data(config_path: Path, data: dict) -> None:
-    """Write *data* as TOML to *config_path*.  Creates parent dirs."""
+    """Write *data* as TOML to *config_path* atomically.  Creates parent dirs.
+
+    Writes to a temporary file first, then atomically replaces the target
+    to avoid leaving a truncated/corrupt file on interrupted writes.
+    """
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    with config_path.open("wb") as fh:
-        tomli_w.dump(data, fh)
+    tmp_path = config_path.with_suffix(".toml.tmp")
+    try:
+        tmp_path.write_bytes(tomli_w.dumps(data).encode())
+        os.replace(tmp_path, config_path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def add_to_string_list(data: dict, key: str, value: str) -> bool:
