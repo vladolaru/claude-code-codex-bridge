@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.21.0] - 2026-03-26
+
+### Added
+- `upgrade` command — checks the latest GitHub release, compares with the installed version, and runs the official install script in place; `--check` reports the available version without installing; editable (development) installs are detected and refused with a clear message
+- `doctor` version check — best-effort network check reports `warning` when a newer release is available on GitHub (with a hint to run `upgrade`), `ok` when up to date or when GitHub is unreachable (3-second timeout, never delays doctor)
+- ANSI color output across all commands using Python 3.14's `_colorize` theme (same palette as argparse help): keys in bold blue, status values in green/yellow/red by meaning, create/update/remove counts colored semantically, excluded items dimmed; colors suppressed automatically when output is not a TTY
+- `status` now shows full discovery info matching `reconcile` output: project root, AGENTS.md path, CLAUDE.md action, plugin list with per-plugin skill/agent/prompt counts, generated totals — output grouped into sections with blank lines between them
+- Help description colors: program name in bold magenta, version in bold green; `Detailed documentation:` link added to `--help`
+- Error messages colored bold red; program-name prefix removed; blank line before message for visual breathing room
+
+### Changed
+- `validate` command removed — `status` now covers everything `validate` did (discovery, plugin list, generated counts, exclusions) plus the disk diff; use `status` where `validate` was used
+- `print-launchagent` command removed — use `install-launchagent` directly
+- `reconcile` empty-state message changed from "No changes." to "All good. No changes needed."
+- Status output keys padded so values align in a single column; plugin sub-lines (source, skills, agents, prompts) each on their own indented line with aligned `=` signs
+
 ## [0.20.0] - 2026-03-26
 
 ### Added
@@ -23,8 +39,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Preserved symlink state no longer gets backfilled into a trusted hash when the symlink is later replaced with a regular file, so `clean` cannot re-adopt and remove or bootstrap-restore user-authored instructions
 
 ### Changed
-- `validate` command removed — `status` now covers everything `validate` did (discovery, plugin list, generated counts, exclusions) plus the disk diff. Use `status` where `validate` was used.
-- `print-launchagent` command removed — use `install-launchagent` directly.
 - Bootstrap is no longer a separate code path — it is handled by normal reconcile, including both AGENTS.md creation and CLAUDE.md shim replacement
 - `managed_project_files` in bridge state changed from a list of paths to a path-to-content-hash mapping
 - State version bumped from 8 to 10 (v8-v9 state files are automatically migrated on read)

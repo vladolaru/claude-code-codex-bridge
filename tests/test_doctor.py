@@ -122,7 +122,7 @@ def test_doctor_cli_supports_json_output(
     payload = json.loads(captured.out)
     assert exit_code == 0
     assert payload["status"] == "warning"
-    assert {check["name"] for check in payload["checks"]} == {
+    assert {check["name"] for check in payload["checks"]} >= {
         "python",
         "claude_cli",
         "claude_cache",

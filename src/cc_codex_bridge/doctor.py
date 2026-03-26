@@ -38,6 +38,7 @@ def run_doctor(
     python_version: tuple[int, ...] | None = None,
     path_env: str | None = None,
     bridge_home: str | Path | None = None,
+    check_updates: bool = True,
 ) -> tuple[DoctorCheck, ...]:
     """Run the machine-level doctor checks."""
     resolved_python = Path(python_executable or sys.executable).expanduser().resolve()
@@ -54,7 +55,7 @@ def run_doctor(
     from cc_codex_bridge.bridge_home import resolve_bridge_home
     resolved_bridge_home = Path(bridge_home).expanduser().resolve() if bridge_home else resolve_bridge_home()
 
-    return (
+    checks = [
         _check_python(resolved_python, version_info),
         _check_claude_cli(),
         _check_claude_cache(resolved_cache_dir),
@@ -62,7 +63,10 @@ def run_doctor(
         _check_launchagents_dir(resolved_launchagents_dir),
         _check_command_on_path(command_name, effective_path),
         _check_config(resolved_bridge_home),
-    )
+    ]
+    if check_updates:
+        checks.append(_check_latest_version())
+    return tuple(checks)
 
 
 def overall_status(checks: Iterable[DoctorCheck]) -> str:
@@ -399,4 +403,42 @@ def _check_config(bridge_home: Path) -> DoctorCheck:
         name="config",
         status="ok",
         message=f"Global config is valid at {config_path}",
+    )
+
+
+def _check_latest_version() -> DoctorCheck:
+    """Check whether a newer release is available on GitHub (best-effort)."""
+    from cc_codex_bridge import __version__
+    from cc_codex_bridge.cli import _fetch_latest_version
+    from cc_codex_bridge.model import SemVer
+
+    latest = _fetch_latest_version(timeout=3.0)
+    if latest is None:
+        return DoctorCheck(
+            name="version",
+            status="ok",
+            message=f"v{__version__} installed (could not reach GitHub to check for updates)",
+        )
+
+    try:
+        current_sv = SemVer.parse(__version__)
+        latest_sv = SemVer.parse(latest)
+    except Exception:
+        return DoctorCheck(
+            name="version",
+            status="ok",
+            message=f"v{__version__} installed (latest: v{latest})",
+        )
+
+    if not (current_sv < latest_sv):
+        return DoctorCheck(
+            name="version",
+            status="ok",
+            message=f"v{__version__} (up to date)",
+        )
+
+    return DoctorCheck(
+        name="version",
+        status="warning",
+        message=f"v{__version__} installed, v{latest} available — run 'cc-codex-bridge upgrade'",
     )

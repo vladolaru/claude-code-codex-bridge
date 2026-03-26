@@ -55,6 +55,10 @@ PIPELINE_COMMANDS = {"reconcile", "status"}
 LAUNCHAGENT_COMMANDS = {"install-launchagent"}
 UTILITY_COMMANDS = {"doctor"}
 
+_GITHUB_REPO = "vladolaru/claude-code-codex-bridge"
+_GITHUB_API_LATEST = f"https://api.github.com/repos/{_GITHUB_REPO}/releases/latest"
+_INSTALL_SCRIPT_URL = f"https://github.com/{_GITHUB_REPO}/releases/latest/download/install.sh"
+
 _MIN_HELP_POSITION = 24
 _HELP_GAP = 4  # spaces between the longest flag+metavar and the help text
 
@@ -127,6 +131,97 @@ class _AutoWidthHelpFormatter(argparse.HelpFormatter):
         if prefix is None:
             prefix = "Usage: "
         return super()._format_usage(usage, actions, groups, prefix)
+
+
+def _fetch_latest_version(*, timeout: float = 5.0) -> str | None:
+    """Return the latest release tag from GitHub, or None on any failure."""
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            _GITHUB_API_LATEST,
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "cc-codex-bridge"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read())
+        tag = data.get("tag_name", "")
+        return tag.lstrip("v") if tag else None
+    except Exception:
+        return None
+
+
+def _is_editable_install() -> bool:
+    """Return True when the package is installed in editable (development) mode."""
+    try:
+        import importlib.metadata
+        dist = importlib.metadata.distribution("cc-codex-bridge")
+        direct_url_text = dist.read_text("direct_url.json")
+        if direct_url_text:
+            data = json.loads(direct_url_text)
+            return bool(data.get("dir_info", {}).get("editable", False))
+    except Exception:
+        pass
+    return False
+
+
+def _handle_upgrade_command(args: argparse.Namespace) -> int:
+    """Handle the upgrade command."""
+    from cc_codex_bridge import __version__
+    from cc_codex_bridge._colors import color_fns
+
+    c = color_fns()
+    print()
+    print(f"{c['key']('INSTALLED:')} v{__version__}")
+
+    if _is_editable_install():
+        print(c["warn"]("Development install detected — upgrade is not supported."))
+        print("  Use git pull and pip install -e . to update your local checkout.")
+        return 1
+
+    latest = _fetch_latest_version()
+    if latest is None:
+        print(f"{c['warn']('WARNING:')} Could not reach GitHub — check your connection.")
+        return 1
+
+    print(f"{c['key']('LATEST:')}    v{latest}")
+
+    from cc_codex_bridge.model import SemVer
+    try:
+        current_sv = SemVer.parse(__version__)
+        latest_sv = SemVer.parse(latest)
+    except Exception:
+        print(f"{c['bad']('Error:')} Could not parse version strings.")
+        return 1
+
+    if not (current_sv < latest_sv):
+        print(f"{c['good']('Already up to date.')}")
+        return 0
+
+    if getattr(args, "check", False):
+        print(f"{c['warn'](f'Update available: v{latest}')}")
+        print(f"  Run {c['key']('cc-codex-bridge upgrade')} to install.")
+        return 0
+
+    print(f"{c['warn'](f'Upgrading to v{latest}...')}")
+    import subprocess
+    import urllib.request
+    import tempfile
+    import os
+    with tempfile.NamedTemporaryFile(suffix=".sh", delete=False) as tmp:
+        tmp_path = tmp.name
+        try:
+            with urllib.request.urlopen(_INSTALL_SCRIPT_URL, timeout=30) as resp:
+                tmp.write(resp.read())
+        except Exception as exc:
+            os.unlink(tmp_path)
+            print(f"{c['bad']('Error:')} Failed to download install script: {exc}")
+            return 1
+
+    try:
+        os.chmod(tmp_path, 0o755)
+        result = subprocess.run(["bash", tmp_path], check=False)
+        return result.returncode
+    finally:
+        os.unlink(tmp_path)
 
 
 def _colored_description(version: str) -> str:
@@ -546,6 +641,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="LaunchAgents directory to check (default: ~/Library/LaunchAgents).",
     )
 
+    upgrade_parser = subparsers.add_parser(
+        "upgrade",
+        help="Upgrade to the latest release",
+        description=(
+            "Check for a newer release on GitHub and upgrade in place by "
+            "downloading and running the official install script. "
+            "Use --check to report the available version without installing."
+        ),
+    )
+    upgrade_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Report the latest available version without upgrading.",
+    )
+
     clean_parser = subparsers.add_parser(
         "clean",
         help="Remove bridge artifacts for one project",
@@ -664,6 +774,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "uninstall":
         return _handle_uninstall_command(args)
+
+    if args.command == "upgrade":
+        return _handle_upgrade_command(args)
 
     if args.command in LAUNCHAGENT_COMMANDS:
         return _handle_launchagent_command(args)

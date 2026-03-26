@@ -156,13 +156,14 @@ curl -fsSL https://github.com/vladolaru/claude-code-codex-bridge/releases/latest
 
 ### Upgrade
 
-Re-run the install script to get the latest version:
-
 ```bash
-curl -fsSL https://github.com/vladolaru/claude-code-codex-bridge/releases/latest/download/install.sh | bash
+cc-codex-bridge upgrade           # upgrade to the latest release
+cc-codex-bridge upgrade --check   # check for a newer version without installing
 ```
 
-The installer overwrites the existing installation in place. After upgrading, run `cc-codex-bridge reconcile --all` to pick up any changes in how the new version generates Codex artifacts.
+`upgrade` fetches the latest release from GitHub, compares it with the installed version, and runs the official install script in place if a newer version is available. After upgrading, run `cc-codex-bridge reconcile --all` to pick up any changes in how the new version generates Codex artifacts.
+
+`doctor` also reports if a newer version is available as part of its environment checks.
 
 ### From a local checkout
 
