@@ -19,8 +19,9 @@ def color_fns() -> dict[str, object]:
                 "update": lambda s: f"{t.summary_label}{s}{R}",
                 "remove": lambda s: f"\x1b[31m{s}{R}",
                 "dim":    lambda s: f"\x1b[2m{s}{R}",
+                "cmd":    lambda s: f"{t.long_option}{s}{R}",
             }
     except ImportError:
         pass
     noop = lambda s: s
-    return {k: noop for k in ("key", "good", "warn", "bad", "create", "update", "remove", "dim")}
+    return {k: noop for k in ("key", "good", "warn", "bad", "create", "update", "remove", "dim", "cmd")}

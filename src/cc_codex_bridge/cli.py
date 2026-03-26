@@ -175,10 +175,10 @@ def _handle_upgrade_command(args: argparse.Namespace) -> int:
 
     if _is_editable_install():
         print(c["warn"]("Development install detected — upgrade is not supported."))
-        print("  To update your checkout:  git pull && pip install -e .")
+        print(f"  To update your checkout:  {c['cmd']('git pull && pip install -e .')}")
         print("  To switch to a release:   run the install script in a shell without an active venv:")
-        print("    deactivate  # or open a new terminal")
-        print("    curl -fsSL https://github.com/vladolaru/claude-code-codex-bridge/releases/latest/download/install.sh | bash")
+        print(f"    {c['cmd']('deactivate')}  # or open a new terminal")
+        print(f"    {c['cmd']('curl -fsSL https://github.com/vladolaru/claude-code-codex-bridge/releases/latest/download/install.sh | bash')}")
         return 1
 
     latest = _fetch_latest_version()
@@ -202,7 +202,7 @@ def _handle_upgrade_command(args: argparse.Namespace) -> int:
 
     if getattr(args, "check", False):
         print(f"{c['warn'](f'Update available: v{latest}')}")
-        print(f"  Run {c['key']('cc-codex-bridge upgrade')} to install.")
+        print(f"  Run {c['cmd']('cc-codex-bridge upgrade')} to install.")
         return 0
 
     print(f"{c['warn'](f'Upgrading to v{latest}...')}")
@@ -262,6 +262,9 @@ class _ArgumentParser(argparse.ArgumentParser):
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI parser."""
+    from cc_codex_bridge._colors import color_fns as _cfns
+    _c = _cfns()
+
     # Shared discovery flags: project root, plugin cache, Claude home.
     common_discovery = argparse.ArgumentParser(add_help=False)
     common_discovery.add_argument(
@@ -454,7 +457,7 @@ def build_parser() -> argparse.ArgumentParser:
     config_scan_parser = config_subparsers.add_parser(
         "scan",
         help="Manage scan paths for bulk project discovery",
-        description="Add, remove, or list scan path patterns used by reconcile --all.",
+        description=f"Add, remove, or list scan path patterns used by {_c['cmd']('reconcile --all')}.",
     )
     config_scan_subparsers = config_scan_parser.add_subparsers(
         dest="scan_command", required=True, title="Commands", metavar="COMMAND",
@@ -673,7 +676,7 @@ def build_parser() -> argparse.ArgumentParser:
     autosync_parser = subparsers.add_parser(
         "autosync",
         help="Manage automatic background reconciliation (macOS)",
-        description="Install or remove the macOS LaunchAgent that runs reconcile --all on a schedule.",
+        description=f"Install or remove the macOS LaunchAgent that runs {_c['cmd']('reconcile --all')} on a schedule.",
     )
     autosync_subparsers = autosync_parser.add_subparsers(
         dest="autosync_command", required=True, title="Commands", metavar="COMMAND",
@@ -688,7 +691,7 @@ def build_parser() -> argparse.ArgumentParser:
         "install",
         help="Set up automatic background sync",
         description=(
-            "Install a macOS LaunchAgent that runs 'cc-codex-bridge reconcile --all' "
+            f"Install a macOS LaunchAgent that runs {_c['cmd']('cc-codex-bridge reconcile --all')} "
             "on a recurring interval. Writes the plist to ~/Library/LaunchAgents and "
             "loads it via launchd. Re-running updates the plist and reloads the agent."
         ),
@@ -1814,6 +1817,7 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
         import subprocess
         la_dir = Path(args.launchagents_dir or _LA_DIR).expanduser().resolve()
         plist_path = la_dir / f"{GLOBAL_LAUNCHAGENT_LABEL}.plist"
+        print()
         if not plist_path.exists():
             print(f"{c['warn']('AUTOSYNC:')} not installed")
             return 0
@@ -1855,9 +1859,9 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
         project="*",
         changes=(Change(kind="update" if la_existed else "create", path=destination, resource_kind="launchagent"),),
     )
-    print(f"{c['good']('Installed:')} {destination}")
-    print(f"  Run every {args.interval}s — next step:")
-    print(f"  launchctl bootstrap gui/$(id -u) {destination}")
+    print()
+    print(f"{c['good']('Installed and loaded:')} {destination}")
+    print(f"  Runs {c['cmd']('reconcile --all')} every {args.interval}s")
 
     # Warn about stale per-project plists
     la_dir = args.launchagents_dir if hasattr(args, "launchagents_dir") and args.launchagents_dir else None
@@ -1866,10 +1870,10 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
     if per_project_plists:
         print("")
         print(c["warn"]("WARNING: Found existing per-project LaunchAgent plists."))
-        print("These are no longer needed with the global reconcile --all plist.")
+        print(f"These are no longer needed with the global {c['cmd']('reconcile --all')} plist.")
         print("Remove them with:")
         for plist_path in per_project_plists:
-            print(f"  launchctl bootout gui/$(id -u) {plist_path} && rm {plist_path}")
+            print(f"  {c['cmd'](f'launchctl bootout gui/$(id -u) {plist_path} && rm {plist_path}')}")
 
     return 0
 

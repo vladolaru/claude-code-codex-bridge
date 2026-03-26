@@ -5,6 +5,7 @@ from __future__ import annotations
 import plistlib
 from pathlib import Path
 import re
+import shutil
 import sys
 import tempfile
 from typing import Any
@@ -16,8 +17,8 @@ from cc_codex_bridge.model import ReconcileError
 DEFAULT_START_INTERVAL = 1800
 DEFAULT_LAUNCHAGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
 DEFAULT_LOGS_DIR = Path.home() / "Library" / "Logs" / "codex-bridge"
-BRIDGE_LABEL_PREFIX = "com.openai.codex-bridge."
-GLOBAL_LAUNCHAGENT_LABEL = "com.openai.codex-bridge.reconcile-all"
+BRIDGE_LABEL_PREFIX = "cc-codex-bridge."
+GLOBAL_LAUNCHAGENT_LABEL = "cc-codex-bridge.autosync"
 
 
 def build_launchagent_label(project_root: str | Path) -> str:
@@ -94,21 +95,26 @@ def build_global_launchagent_plist(
         raise ReconcileError("LaunchAgent interval must be a positive integer")
 
     label_value = label or GLOBAL_LAUNCHAGENT_LABEL
-    python_path = str(Path(python_executable or sys.executable).expanduser().resolve())
-    cli_script_path = str(Path(cli_path or (Path(__file__).resolve().parent / "cli.py")).resolve())
     log_root = Path(logs_dir or DEFAULT_LOGS_DIR).expanduser().resolve()
     stdout_path = log_root / f"{label_value}.out.log"
     stderr_path = log_root / f"{label_value}.err.log"
 
-    program_arguments = [
-        python_path,
-        cli_script_path,
-        "reconcile",
-        "--all",
-    ]
+    # Prefer the cc-codex-bridge console script so macOS shows the tool name
+    # in background-activity notifications instead of the Python interpreter.
+    console_script = cli_path or shutil.which("cc-codex-bridge")
+    if console_script:
+        program = str(Path(console_script).expanduser().resolve())
+        program_arguments = ["cc-codex-bridge", "reconcile", "--all"]
+    else:
+        # Fallback: invoke cli.py via the Python interpreter directly.
+        python_path = str(Path(python_executable or sys.executable).expanduser().resolve())
+        cli_script_path = str(Path(__file__).resolve().parent / "cli.py")
+        program = python_path
+        program_arguments = [python_path, cli_script_path, "reconcile", "--all"]
 
     payload: dict[str, Any] = {
         "Label": label_value,
+        "Program": program,
         "ProgramArguments": program_arguments,
         "WorkingDirectory": str(Path.home()),
         "RunAtLoad": True,
@@ -126,14 +132,35 @@ def install_launchagent(
     label: str,
     launchagents_dir: str | Path | None = None,
 ) -> Path:
-    """Install a rendered LaunchAgent plist into a LaunchAgents directory."""
+    """Write the LaunchAgent plist and load it via launchd.
+
+    If the agent is already loaded, it is booted out first so the new
+    plist takes effect immediately. Returns the installed plist path.
+    """
+    import os
+    import subprocess
+
     root = Path(launchagents_dir or DEFAULT_LAUNCHAGENTS_DIR).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     destination = root / f"{label}.plist"
+
+    # Boot out any running instance before replacing the plist.
+    if destination.exists():
+        subprocess.run(
+            ["launchctl", "bootout", f"gui/{os.getuid()}", str(destination)],
+            check=False, capture_output=True,
+        )
+
     with tempfile.NamedTemporaryFile(dir=root, delete=False) as handle:
         handle.write(plist_bytes)
         temp_path = Path(handle.name)
     temp_path.replace(destination)
+
+    subprocess.run(
+        ["launchctl", "bootstrap", f"gui/{os.getuid()}", str(destination)],
+        check=False, capture_output=True,
+    )
+
     return destination
 
 

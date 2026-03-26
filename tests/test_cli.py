@@ -129,12 +129,8 @@ def test_install_launchagent_cli_writes_plist(tmp_path: Path):
     assert len(plist_paths) == 1
     payload = plistlib.loads(plist_paths[0].read_bytes())
     assert payload["StartInterval"] == 900
-    assert payload["ProgramArguments"][:4] == [
-        "/usr/bin/python3",
-        str(Path("/tmp/cc_codex_bridge/cli.py").resolve()),
-        "reconcile",
-        "--all",
-    ]
+    assert payload["Program"] == str(Path("/tmp/cc_codex_bridge/cli.py").resolve())
+    assert payload["ProgramArguments"] == ["cc-codex-bridge", "reconcile", "--all"]
 
 
 
@@ -1140,7 +1136,7 @@ def test_uninstall_removes_launchagent_plists(make_project, make_plugin_version,
     ]) == 0
 
     # Plant a bridge plist
-    (la_dir / "com.openai.codex-bridge.myproject.abc123.plist").write_bytes(b"<plist/>")
+    (la_dir / "cc-codex-bridge.myproject.abc123.plist").write_bytes(b"<plist/>")
     # Plant a non-bridge plist (should survive)
     (la_dir / "com.apple.something.plist").write_bytes(b"<plist/>")
 
@@ -1151,7 +1147,7 @@ def test_uninstall_removes_launchagent_plists(make_project, make_plugin_version,
     ])
     assert exit_code == 0
 
-    assert not (la_dir / "com.openai.codex-bridge.myproject.abc123.plist").exists()
+    assert not (la_dir / "cc-codex-bridge.myproject.abc123.plist").exists()
     assert (la_dir / "com.apple.something.plist").exists()
 
 
@@ -1182,7 +1178,7 @@ def test_uninstall_dry_run_json(make_project, make_plugin_version, tmp_path: Pat
     codex_home = tmp_path / "codex-home"
     la_dir = tmp_path / "LaunchAgents"
     la_dir.mkdir()
-    (la_dir / "com.openai.codex-bridge.test.abc.plist").write_bytes(b"<plist/>")
+    (la_dir / "cc-codex-bridge.test.abc.plist").write_bytes(b"<plist/>")
 
     assert cli.main([
         "reconcile",
@@ -1240,8 +1236,8 @@ def test_find_bridge_launchagents_discovers_matching_plists(tmp_path: Path):
     la_dir.mkdir()
 
     # Bridge plists
-    (la_dir / "com.openai.codex-bridge.myproject.abc123.plist").write_bytes(b"<plist/>")
-    (la_dir / "com.openai.codex-bridge.other.def456.plist").write_bytes(b"<plist/>")
+    (la_dir / "cc-codex-bridge.myproject.abc123.plist").write_bytes(b"<plist/>")
+    (la_dir / "cc-codex-bridge.other.def456.plist").write_bytes(b"<plist/>")
 
     # Non-bridge plists (should be ignored)
     (la_dir / "com.apple.something.plist").write_bytes(b"<plist/>")
@@ -1251,8 +1247,8 @@ def test_find_bridge_launchagents_discovers_matching_plists(tmp_path: Path):
     assert len(results) == 2
     names = sorted(r.name for r in results)
     assert names == [
-        "com.openai.codex-bridge.myproject.abc123.plist",
-        "com.openai.codex-bridge.other.def456.plist",
+        "cc-codex-bridge.myproject.abc123.plist",
+        "cc-codex-bridge.other.def456.plist",
     ]
 
 
@@ -1281,7 +1277,7 @@ def test_install_launchagent_warns_about_per_project_plists(tmp_path: Path, caps
     """autosync install warns when existing per-project plists are found."""
     la_dir = tmp_path / "home" / "Library" / "LaunchAgents"
     la_dir.mkdir(parents=True)
-    (la_dir / "com.openai.codex-bridge.old-project.abc123.plist").write_bytes(b"<plist/>")
+    (la_dir / "cc-codex-bridge.old-project.abc123.plist").write_bytes(b"<plist/>")
 
     exit_code = cli.main([
         "autosync", "install",

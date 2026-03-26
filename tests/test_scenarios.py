@@ -913,7 +913,7 @@ def test_uninstall_cleans_entire_machine(make_project, tmp_path: Path):
     assert reconcile(project_b, claude_home, codex_home) == 0
 
     # Plant a bridge LaunchAgent plist
-    (la_dir / "com.openai.codex-bridge.project-a.abc123.plist").write_bytes(b"<plist/>")
+    (la_dir / "cc-codex-bridge.project-a.abc123.plist").write_bytes(b"<plist/>")
 
     # Verify everything exists
     assert _bridge_state_path(project_a, tmp_path).exists()
@@ -945,7 +945,7 @@ def test_uninstall_cleans_entire_machine(make_project, tmp_path: Path):
     assert not (bridge_home / GLOBAL_REGISTRY_FILENAME).exists()
 
     # LaunchAgent plist removed
-    assert not (la_dir / "com.openai.codex-bridge.project-a.abc123.plist").exists()
+    assert not (la_dir / "cc-codex-bridge.project-a.abc123.plist").exists()
 
     # AGENTS.md (hand-authored) survives on both projects
     assert (project_a / "AGENTS.md").exists()
@@ -971,7 +971,7 @@ def test_uninstall_dry_run_json_structure(make_project, tmp_path: Path, capsys):
     assert reconcile(project_b, claude_home, codex_home) == 0
     capsys.readouterr()  # discard reconcile output
 
-    (la_dir / "com.openai.codex-bridge.test.abc.plist").write_bytes(b"<plist/>")
+    (la_dir / "cc-codex-bridge.test.abc.plist").write_bytes(b"<plist/>")
 
     exit_code = cli.main([
         "uninstall",
