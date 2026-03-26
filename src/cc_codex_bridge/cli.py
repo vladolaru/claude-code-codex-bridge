@@ -41,6 +41,7 @@ from cc_codex_bridge.reconcile import (
     Change,
     ReconcileReport,
     build_project_desired_state,
+    compute_project_drift,
     diff_desired_state,
     format_change_report,
     format_diff_report,
@@ -697,6 +698,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if agent_diags:
             if args.command == "status":
+                drifted = compute_project_drift(
+                    build.discovery.project.root,
+                    bridge_home=build.desired_state.bridge_home if build.desired_state else None,
+                )
                 if args.json:
                     print(format_status_json(
                         None, build.exclusion_report,
@@ -704,6 +709,7 @@ def main(argv: list[str] | None = None) -> int:
                         skill_count=build.skill_count,
                         prompt_count=build.prompt_count,
                         diagnostics=agent_diags, skill_diagnostics=skill_diags,
+                        drifted_files=drifted,
                     ))
                 else:
                     print(format_status_report(
@@ -712,6 +718,7 @@ def main(argv: list[str] | None = None) -> int:
                         skill_count=build.skill_count,
                         prompt_count=build.prompt_count,
                         diagnostics=agent_diags, skill_diagnostics=skill_diags,
+                        drifted_files=drifted,
                     ))
                 return 0
             raise TranslationError(format_agent_translation_diagnostics(agent_diags))
@@ -783,6 +790,10 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "status":
             report = diff_desired_state(build.desired_state)
+            drifted = compute_project_drift(
+                build.discovery.project.root,
+                bridge_home=build.desired_state.bridge_home if build.desired_state else None,
+            )
             if args.json:
                 print(format_status_json(
                     report, build.exclusion_report,
@@ -790,6 +801,7 @@ def main(argv: list[str] | None = None) -> int:
                     skill_count=build.skill_count,
                     prompt_count=build.prompt_count,
                     skill_diagnostics=skill_diags,
+                    drifted_files=drifted,
                 ))
             else:
                 print(format_status_report(
@@ -798,6 +810,7 @@ def main(argv: list[str] | None = None) -> int:
                     skill_count=build.skill_count,
                     prompt_count=build.prompt_count,
                     skill_diagnostics=skill_diags,
+                    drifted_files=drifted,
                 ))
             return 0
     except (TranslationError, ReconcileError, OSError, UnicodeError) as exc:
@@ -1722,6 +1735,7 @@ def _build_status_payload(
     prompt_count: int = 0,
     diagnostics=None,
     skill_diagnostics=None,
+    drifted_files: list[str] | None = None,
 ) -> dict[str, object]:
     """Build a stable status payload from reconcile diff output."""
     categorized_changes: dict[str, dict[str, list[str]]] = {
@@ -1791,6 +1805,7 @@ def _build_status_payload(
             "agents": list(exclusion_report.agents),
             "commands": list(exclusion_report.commands),
         },
+        "drifted_files": drifted_files or [],
     }
 
 
@@ -1798,6 +1813,7 @@ def format_status_json(
     report, exclusion_report: ExclusionReport,
     *, agent_count: int = 0, skill_count: int = 0, prompt_count: int = 0,
     diagnostics=None, skill_diagnostics=None,
+    drifted_files: list[str] | None = None,
 ) -> str:
     """Render status output as deterministic JSON."""
     return json.dumps(
@@ -1806,6 +1822,7 @@ def format_status_json(
             agent_count=agent_count, skill_count=skill_count,
             prompt_count=prompt_count,
             diagnostics=diagnostics, skill_diagnostics=skill_diagnostics,
+            drifted_files=drifted_files,
         ),
         indent=2,
         sort_keys=True,
@@ -1816,6 +1833,7 @@ def format_status_report(
     report, exclusion_report: ExclusionReport,
     *, agent_count: int = 0, skill_count: int = 0, prompt_count: int = 0,
     diagnostics=None, skill_diagnostics=None,
+    drifted_files: list[str] | None = None,
 ) -> str:
     """Render status output as human-readable text."""
     payload = _build_status_payload(
@@ -1823,6 +1841,7 @@ def format_status_report(
         agent_count=agent_count, skill_count=skill_count,
         prompt_count=prompt_count,
         diagnostics=diagnostics, skill_diagnostics=skill_diagnostics,
+        drifted_files=drifted_files,
     )
     categorized = payload["categorized_changes"]
     project_files = categorized["project_files"]
@@ -1917,6 +1936,11 @@ def format_status_report(
         lines.append(f"EXCLUDED_AGENT: {agent_id}")
     for command_id in payload["excluded"]["commands"]:
         lines.append(f"EXCLUDED_COMMAND: {command_id}")
+    drifted = payload.get("drifted_files", [])
+    if drifted:
+        lines.append(f"DRIFTED_FILES: {len(drifted)}")
+        for path in drifted:
+            lines.append(f"DRIFTED: {path}")
     return "\n".join(lines)
 
 

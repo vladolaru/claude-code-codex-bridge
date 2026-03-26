@@ -4581,3 +4581,130 @@ def test_clean_no_bootstrap_reversal_when_both_edited(
     assert (project_root / "CLAUDE.md").exists()
     assert "Custom" in (project_root / "AGENTS.md").read_text()
     assert (project_root / "CLAUDE.md").read_text() == "# My custom CLAUDE.md\n"
+
+
+# --- compute_project_drift ---
+
+def test_compute_project_drift_returns_drifted_files(tmp_path: Path):
+    """compute_project_drift returns relative paths of externally modified managed files."""
+    from cc_codex_bridge.reconcile import compute_project_drift
+    from cc_codex_bridge.state import BridgeState
+    from cc_codex_bridge.registry import hash_file_content
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+
+    # Write managed files with known content
+    shim_content = b"@AGENTS.md\n"
+    agents_content = b"# Shared instructions\n"
+    (project_root / "CLAUDE.md").write_bytes(shim_content)
+    (project_root / "AGENTS.md").write_bytes(agents_content)
+
+    # Create a bridge state that tracks both files with their hashes
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_dir.mkdir(parents=True)
+    state = BridgeState(
+        project_root=project_root,
+        codex_home=tmp_path / "codex",
+        bridge_home=bridge_home,
+        managed_project_files={
+            "CLAUDE.md": hash_file_content(shim_content),
+            "AGENTS.md": hash_file_content(agents_content),
+        },
+    )
+    (state_dir / "state.json").write_text(state.to_json())
+
+    # No drift before modification
+    drifted = compute_project_drift(project_root, bridge_home=bridge_home)
+    assert drifted == []
+
+    # Externally modify CLAUDE.md
+    (project_root / "CLAUDE.md").write_text("# User's custom content\n")
+
+    drifted = compute_project_drift(project_root, bridge_home=bridge_home)
+    assert "CLAUDE.md" in drifted
+    # AGENTS.md was not modified
+    assert "AGENTS.md" not in drifted
+
+
+def test_compute_project_drift_empty_when_no_state(tmp_path: Path):
+    """compute_project_drift returns empty list when no bridge state exists."""
+    from cc_codex_bridge.reconcile import compute_project_drift
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+
+    drifted = compute_project_drift(project_root, bridge_home=bridge_home)
+    assert drifted == []
+
+
+def test_compute_project_drift_skips_missing_files(tmp_path: Path):
+    """compute_project_drift skips files that no longer exist on disk."""
+    from cc_codex_bridge.reconcile import compute_project_drift
+    from cc_codex_bridge.state import BridgeState
+    from cc_codex_bridge.registry import hash_file_content
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+
+    shim_content = b"@AGENTS.md\n"
+    (project_root / "CLAUDE.md").write_bytes(shim_content)
+
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_dir.mkdir(parents=True)
+    state = BridgeState(
+        project_root=project_root,
+        codex_home=tmp_path / "codex",
+        bridge_home=bridge_home,
+        managed_project_files={
+            "CLAUDE.md": hash_file_content(shim_content),
+        },
+    )
+    (state_dir / "state.json").write_text(state.to_json())
+
+    # Delete the managed file
+    (project_root / "CLAUDE.md").unlink()
+
+    drifted = compute_project_drift(project_root, bridge_home=bridge_home)
+    # Missing files are not reported as drifted (they are a different problem)
+    assert "CLAUDE.md" not in drifted
+
+
+def test_compute_project_drift_sorted_output(tmp_path: Path):
+    """compute_project_drift returns paths in sorted order."""
+    from cc_codex_bridge.reconcile import compute_project_drift
+    from cc_codex_bridge.state import BridgeState
+    from cc_codex_bridge.registry import hash_file_content
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+
+    shim_content = b"@AGENTS.md\n"
+    agents_content = b"# Shared instructions\n"
+    (project_root / "CLAUDE.md").write_bytes(shim_content)
+    (project_root / "AGENTS.md").write_bytes(agents_content)
+
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_dir.mkdir(parents=True)
+    state = BridgeState(
+        project_root=project_root,
+        codex_home=tmp_path / "codex",
+        bridge_home=bridge_home,
+        managed_project_files={
+            "CLAUDE.md": hash_file_content(shim_content),
+            "AGENTS.md": hash_file_content(agents_content),
+        },
+    )
+    (state_dir / "state.json").write_text(state.to_json())
+
+    # Modify both managed files
+    (project_root / "CLAUDE.md").write_text("# Custom\n")
+    (project_root / "AGENTS.md").write_text("# Custom AGENTS\n")
+
+    drifted = compute_project_drift(project_root, bridge_home=bridge_home)
+    assert drifted == sorted(drifted)
+    assert len(drifted) == 2

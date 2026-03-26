@@ -1941,3 +1941,121 @@ def test_reconcile_single_project_dry_run_json(make_project, make_plugin_version
     data = json.loads(capsys.readouterr().out)
     assert isinstance(data, dict)
     assert data["applied"] is False
+
+
+# --- Drift reporting in status output ---
+
+
+def test_status_reports_drifted_files(tmp_path: Path, capsys):
+    """Status output includes drifted managed files in human-readable format."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "CLAUDE.md").write_text("# Instructions\n")
+    codex_home = tmp_path / "codex-home"
+
+    # First reconcile: bootstrap creates AGENTS.md and rewrites CLAUDE.md
+    cli.main([
+        "reconcile", "--project", str(project_root),
+        "--codex-home", str(codex_home),
+    ])
+    capsys.readouterr()
+
+    # Externally modify CLAUDE.md (which is now the shim "@AGENTS.md\n")
+    (project_root / "CLAUDE.md").write_text("# User's custom content\n")
+
+    # Status should report drift
+    exit_code = cli.main([
+        "status", "--project", str(project_root),
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "DRIFTED" in captured.out
+    assert "CLAUDE.md" in captured.out
+
+
+def test_status_json_includes_drifted_files(tmp_path: Path, capsys):
+    """JSON status output includes drifted_files array."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "CLAUDE.md").write_text("# Instructions\n")
+    codex_home = tmp_path / "codex-home"
+
+    cli.main([
+        "reconcile", "--project", str(project_root),
+        "--codex-home", str(codex_home),
+    ])
+    capsys.readouterr()
+
+    # Externally modify CLAUDE.md
+    (project_root / "CLAUDE.md").write_text("# Modified\n")
+
+    exit_code = cli.main([
+        "status", "--json", "--project", str(project_root),
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert "drifted_files" in data
+    assert any("CLAUDE.md" in f for f in data["drifted_files"])
+
+
+def test_status_no_drift_when_files_unmodified(tmp_path: Path, capsys):
+    """Status output has empty drifted_files when no managed files were externally modified."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "CLAUDE.md").write_text("# Instructions\n")
+    codex_home = tmp_path / "codex-home"
+
+    cli.main([
+        "reconcile", "--project", str(project_root),
+        "--codex-home", str(codex_home),
+    ])
+    capsys.readouterr()
+
+    # Status without any external modifications
+    exit_code = cli.main([
+        "status", "--json", "--project", str(project_root),
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["drifted_files"] == []
+    # Human-readable should not contain DRIFTED lines
+    capsys.readouterr()  # clear
+    cli.main([
+        "status", "--project", str(project_root),
+        "--codex-home", str(codex_home),
+    ])
+    text_captured = capsys.readouterr()
+    assert "DRIFTED" not in text_captured.out
+
+
+def test_status_drifted_files_count_in_text_output(tmp_path: Path, capsys):
+    """Human-readable status shows DRIFTED_FILES count and individual DRIFTED lines."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "CLAUDE.md").write_text("# Instructions\n")
+    codex_home = tmp_path / "codex-home"
+
+    cli.main([
+        "reconcile", "--project", str(project_root),
+        "--codex-home", str(codex_home),
+    ])
+    capsys.readouterr()
+
+    # Modify both managed project files (CLAUDE.md shim and AGENTS.md)
+    (project_root / "CLAUDE.md").write_text("# Custom\n")
+    (project_root / "AGENTS.md").write_text("# Custom AGENTS\n")
+
+    exit_code = cli.main([
+        "status", "--project", str(project_root),
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "DRIFTED_FILES: 2" in captured.out
+    assert "DRIFTED: CLAUDE.md" in captured.out
+    assert "DRIFTED: AGENTS.md" in captured.out

@@ -541,6 +541,38 @@ def build_project_desired_state(
     )
 
 
+def compute_project_drift(
+    project_root: str | Path,
+    *,
+    bridge_home: str | Path | None = None,
+) -> list[str]:
+    """Return relative paths of managed project files whose on-disk content has drifted.
+
+    Compares stored content hashes in the bridge state against current on-disk
+    content.  Files that were externally modified (hash mismatch) are returned.
+    Missing files, symlinks, and files without a stored hash (v8 migration) are
+    skipped.
+    """
+    project_root_path = Path(project_root).expanduser().resolve()
+    bridge_home_path = Path(bridge_home or resolve_bridge_home()).expanduser().resolve()
+    state_dir = project_state_dir(project_root_path, bridge_home=bridge_home_path)
+    state = BridgeState.from_path(state_dir / "state.json")
+    if state is None:
+        return []
+
+    drifted: list[str] = []
+    for relative, stored_hash in state.managed_project_files.items():
+        if not stored_hash:
+            continue  # No hash to compare (v8 migration)
+        path = state.project_root / relative
+        if not path.exists() or path.is_symlink():
+            continue
+        current_hash = hash_file_content(path.read_bytes())
+        if current_hash != stored_hash:
+            drifted.append(relative)
+    return sorted(drifted)
+
+
 def diff_desired_state(desired: DesiredState) -> ReconcileReport:
     """Compare current outputs to desired state without writing."""
     previous_state = _load_previous_state(desired)
