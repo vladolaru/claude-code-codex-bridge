@@ -10,10 +10,12 @@ from cc_codex_bridge.model import ReconcileError
 from cc_codex_bridge.text import read_utf8_text
 
 
-STATE_VERSION = 9
+STATE_VERSION = 10
 
 # Accept state files from this version onward (migration supported).
 _MIN_STATE_VERSION = 8
+UNKNOWN_MANAGED_FILE_HASH = ""
+PRESERVED_SYMLINK_MANAGED_FILE_HASH = "preserved-symlink"
 
 
 @dataclass(frozen=True)
@@ -75,6 +77,11 @@ class BridgeState:
             "managed_project_skill_dirs": list(self.managed_project_skill_dirs),
         }
         return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+
+def managed_file_has_trusted_content_hash(stored_hash: str) -> bool:
+    """Return True when a state value is a trusted content hash."""
+    return stored_hash.startswith("sha256:") and len(stored_hash) > len("sha256:")
 
 
 def _require_string(data: dict[str, object], key: str, path: Path) -> str:

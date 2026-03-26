@@ -26,7 +26,7 @@ def test_bridge_state_round_trips(tmp_path: Path):
     loaded = BridgeState.from_path(path)
 
     assert loaded == state
-    assert json.loads(state.to_json())["version"] == 9
+    assert json.loads(state.to_json())["version"] == 10
 
 
 def test_bridge_state_handles_missing_invalid_and_unsupported_files(tmp_path: Path):
@@ -125,7 +125,7 @@ def test_bridge_state_managed_files_with_hashes(tmp_path: Path):
 
 
 def test_bridge_state_v8_migration(tmp_path: Path):
-    """v8 state files (list format) are migrated to v9 (dict with empty hashes)."""
+    """v8 state files (list format) are migrated to v10 (dict with empty hashes)."""
     state_path = tmp_path / "state.json"
     state_path.write_text(json.dumps({
         "version": 8,
@@ -138,7 +138,7 @@ def test_bridge_state_v8_migration(tmp_path: Path):
     loaded = BridgeState.from_path(state_path)
     # v8 list entries get empty hash (unknown content)
     assert loaded.managed_project_files == {"CLAUDE.md": ""}
-    assert loaded.version == 9
+    assert loaded.version == 10
 
 
 def test_global_skill_registry_round_trips(tmp_path: Path):

@@ -5091,6 +5091,56 @@ def test_v8_migrated_preserved_agents_md_gains_drift_protection(
     assert compute_project_drift(project_root, bridge_home=bridge_home) == ["AGENTS.md"]
 
 
+def test_clean_preserves_custom_agents_after_preserved_symlink_cycle(
+    make_plugin_version, tmp_path: Path
+):
+    """Clean must not re-adopt a custom AGENTS.md after a preserved symlink cycle."""
+    from cc_codex_bridge.reconcile import clean_project
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    original_content = "# Original instructions\n"
+    custom_content = "# User-authored instructions\n"
+    (project_root / "CLAUDE.md").write_text(original_content)
+
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("review",),
+    )
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+
+    reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
+
+    claude_path = project_root / "CLAUDE.md"
+    agents_path = project_root / "AGENTS.md"
+    external_path = project_root / "external-agents.md"
+
+    agents_path.unlink()
+    external_path.write_text("# External instructions\n")
+    agents_path.symlink_to(external_path.name)
+
+    reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
+
+    agents_path.unlink()
+    agents_path.write_text(custom_content)
+
+    reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
+
+    report = clean_project(project_root, bridge_home=bridge_home)
+
+    assert not claude_path.exists()
+    assert agents_path.exists()
+    assert agents_path.read_text() == custom_content
+    assert not any(
+        change.path == agents_path and change.kind == "remove"
+        for change in report.changes
+    )
+    assert not any(
+        change.path == claude_path and change.kind == "restore"
+        for change in report.changes
+    )
+
+
 def test_clean_preserves_agents_md_when_claude_is_symlink_to_it(
     make_plugin_version, tmp_path: Path
 ):

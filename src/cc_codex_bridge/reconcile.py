@@ -33,7 +33,12 @@ from cc_codex_bridge.registry import (
     hash_generated_skill_files,
     hash_prompt_content,
 )
-from cc_codex_bridge.state import BridgeState
+from cc_codex_bridge.state import (
+    BridgeState,
+    PRESERVED_SYMLINK_MANAGED_FILE_HASH,
+    UNKNOWN_MANAGED_FILE_HASH,
+    managed_file_has_trusted_content_hash,
+)
 from cc_codex_bridge.text import read_utf8_text
 
 
@@ -568,8 +573,8 @@ def compute_project_drift(
 
     drifted: list[str] = []
     for relative, stored_hash in _validated_managed_project_files(state).items():
-        if not stored_hash:
-            continue  # No hash to compare (v8 migration)
+        if not managed_file_has_trusted_content_hash(stored_hash):
+            continue  # No trusted content hash to compare
         path = state.project_root / relative
         if not path.exists() or path.is_symlink():
             continue
@@ -695,9 +700,9 @@ def clean_project(
             continue
         if path.exists() and not path.is_symlink():
             stored_hash = managed_project_files[relative]
-            if not stored_hash:
-                # Migrated v8 entries have no trusted baseline, so they must
-                # not authorize file removal.
+            if not managed_file_has_trusted_content_hash(stored_hash):
+                # Migrated v8 entries and preserved symlinks have no trusted
+                # content baseline, so they must not authorize file removal.
                 continue
             current_hash = hash_file_content(path.read_bytes())
             if current_hash != stored_hash:
@@ -1525,9 +1530,10 @@ def _compute_project_file_changes(
             # content, the file was externally modified — skip the update to
             # avoid overwriting user edits.
             stored_hash = previous_state.managed_project_files.get(relative, "") if previous_state else ""
-            if not stored_hash:
-                # Migrated v8 entries have no trusted baseline, so they must
-                # not authorize overwriting existing files.
+            if not managed_file_has_trusted_content_hash(stored_hash):
+                # Migrated v8 entries and preserved symlinks have no trusted
+                # content baseline, so they must not authorize overwriting
+                # existing files.
                 continue
             current_hash = hash_file_content(existing)
             if current_hash != stored_hash:
@@ -1555,9 +1561,9 @@ def _compute_project_file_changes(
             # content, the file was externally modified — skip the removal to
             # avoid deleting user-edited content.
             stored_hash = previous_state.managed_project_files.get(relative, "") if previous_state else ""
-            if not stored_hash:
-                # Migrated v8 entries have no trusted baseline, so they must
-                # not authorize file removal.
+            if not managed_file_has_trusted_content_hash(stored_hash):
+                # Migrated v8 entries and preserved symlinks have no trusted
+                # content baseline, so they must not authorize file removal.
                 continue
             current_hash = hash_file_content(path.read_bytes())
             if current_hash != stored_hash:
@@ -2237,26 +2243,30 @@ def _build_state_record(
         relative = _project_relative(desired, path)
         managed_project_files[relative] = hash_file_content(content)
     # Preserved files — keep tracking only if previously managed.
-    # Retain the prior stored hash when present. Older v8 state files only
-    # recorded managed paths, so their migrated entries have an empty hash.
-    # In that case, backfill from on-disk bytes once; leaving the hash empty
-    # forever would disable drift protection for the upgraded project.
+    # Retain the prior stored state marker when present. Older v8 state files
+    # only recorded managed paths, so their migrated entries have an empty
+    # "unknown" hash. In that case, backfill from on-disk bytes once; leaving
+    # the hash empty forever would disable drift protection for the upgraded
+    # project.
     for rel in sorted(preserved_relatives):
         if rel in previously_managed:
             full_path = desired.project_root / rel
             if full_path.is_symlink():
-                # Track symlinked preserved files without a content hash —
-                # the bridge does not own the symlink target's content.
-                managed_project_files[rel] = ""
+                # Track symlinked preserved files with an explicit marker — the
+                # bridge does not own the symlink target's content.
+                managed_project_files[rel] = PRESERVED_SYMLINK_MANAGED_FILE_HASH
             elif full_path.exists():
-                prior_hash = (previous_managed_files or {}).get(rel, "")
-                if prior_hash:
+                prior_hash = (previous_managed_files or {}).get(rel, UNKNOWN_MANAGED_FILE_HASH)
+                if prior_hash == PRESERVED_SYMLINK_MANAGED_FILE_HASH:
+                    managed_project_files[rel] = prior_hash
+                    continue
+                if managed_file_has_trusted_content_hash(prior_hash):
                     managed_project_files[rel] = prior_hash
                     continue
                 try:
                     managed_project_files[rel] = hash_file_content(full_path.read_bytes())
                 except OSError:
-                    managed_project_files[rel] = ""
+                    managed_project_files[rel] = UNKNOWN_MANAGED_FILE_HASH
     for rel, stored_hash in sorted((retained_previous_project_files or {}).items()):
         managed_project_files[rel] = stored_hash
     managed_project_skill_dirs = tuple(
@@ -2370,7 +2380,7 @@ def _retained_stale_managed_project_files(
         path = desired.project_root / relative
         if not path.exists() or path.is_symlink():
             continue
-        if stored_hash:
+        if stored_hash != UNKNOWN_MANAGED_FILE_HASH:
             retained[relative] = stored_hash
             continue
         try:

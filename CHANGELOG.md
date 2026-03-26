@@ -20,11 +20,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `compute_project_drift()` now rejects corrupted managed project paths from bridge state instead of hashing paths outside the project root
 - Top-level `status` fields now treat drifted files as pending work, even when reconcile has no file mutations to apply
 - `clean` now preserves `AGENTS.md` when `CLAUDE.md` is a symlink to it, avoiding a dangling project instructions symlink
+- Preserved symlink state no longer gets backfilled into a trusted hash when the symlink is later replaced with a regular file, so `clean` cannot re-adopt and remove or bootstrap-restore user-authored instructions
 
 ### Changed
 - Bootstrap is no longer a separate code path — it is handled by normal reconcile, including both AGENTS.md creation and CLAUDE.md shim replacement
 - `managed_project_files` in bridge state changed from a list of paths to a path-to-content-hash mapping
-- State version bumped from 8 to 9 (v8 state files are automatically migrated on read)
+- State version bumped from 8 to 10 (v8-v9 state files are automatically migrated on read)
 - `AGENTS.md` is now a managed project file (added to the allowlist alongside `CLAUDE.md` and `.codex/agents/*.toml`)
 
 ### Removed
