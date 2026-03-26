@@ -1,4 +1,4 @@
-# claude-code-codex-bridge
+# Claude Code → Codex bridge
 
 [![Latest release](https://img.shields.io/github/v/release/vladolaru/claude-code-codex-bridge)](https://github.com/vladolaru/claude-code-codex-bridge/releases/latest)
 
