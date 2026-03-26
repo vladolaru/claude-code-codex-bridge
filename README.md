@@ -6,7 +6,65 @@ Automatically bridge your local Claude Code setup into Codex so both stay equall
 
 `cc-codex-bridge` reads the Claude Code setup on your machine — plugins, skills, agents, commands, and instructions — and generates equivalent Codex artifacts. You install/set up/author once in Claude Code; the bridge keeps Codex in sync.
 
-## What It Reads
+**This is a one-way bridge: Claude Code → Codex.** Changes made directly in Codex (editing generated files, adding skills manually under `~/.codex/`) are not reflected back into Claude Code and will be overwritten on the next reconcile.
+
+## Quick setup
+
+### 1. Install
+
+```bash
+curl -fsSL https://github.com/vladolaru/claude-code-codex-bridge/releases/latest/download/install.sh | bash
+```
+
+### 2. Verify the environment
+
+```bash
+cc-codex-bridge doctor
+```
+
+This checks that Python, the `claude` CLI, and the Codex home directory are all accessible. Fix any reported errors before continuing.
+
+### 3. Reconcile your first project
+
+```bash
+cd ~/path/to/your/project
+cc-codex-bridge reconcile
+```
+
+The bridge reads your Claude Code plugins, skills, agents, and commands and writes the Codex equivalents under `.codex/` and `~/.codex/`. Run `status` any time to see what's in sync.
+
+### 4. Register all your projects for bulk operations
+
+Projects are registered individually each time you run `reconcile` inside them. To avoid doing that one by one, add a scan path glob that covers your project directories:
+
+```bash
+cc-codex-bridge config scan add "~/path/to/projects/*"
+cc-codex-bridge reconcile --all
+```
+
+`reconcile --all` then discovers every matching project and syncs them all in one shot.
+
+### 5. Keep everything in sync automatically (macOS)
+
+Install a LaunchAgent that runs `reconcile --all` every 30 minutes in the background:
+
+```bash
+cc-codex-bridge install-launchagent
+```
+
+### 6. Confirm everything is in sync
+
+```bash
+cc-codex-bridge status --all
+```
+
+You should see `STATUS: in_sync` for every project. Done — Claude Code and Codex now share the same plugins, skills, agents, and instructions.
+
+---
+
+## What it reads
+
+A **project** is any directory the bridge treats as a Claude Code project root — one that contains `AGENTS.md`, `CLAUDE.md`, or a `.claude/` directory. The bridge maintains per-project state, writes project-local Codex artifacts (`.codex/`) there, and tracks it in the registry so `--all` operations can find it again.
 
 The bridge discovers these canonical Claude Code sources:
 
@@ -29,7 +87,7 @@ Plugin enablement is checked by running `claude plugins list --json`, so only pl
 
 When multiple installed versions of the same plugin exist, the highest semantic version is selected.
 
-## What It Generates
+## What it generates
 
 ### Project-local outputs
 
@@ -58,7 +116,7 @@ When multiple installed versions of the same plugin exist, the highest semantic 
 
 All generated outputs are derived artifacts. Do not hand-edit them — change the Claude Code source and re-run `reconcile`.
 
-## How Claude Code Maps to Codex
+## How Claude Code concepts map to Codex ones
 
 The bridge translates between two different extensibility models. This table shows how each Claude Code mechanic maps to its Codex equivalent:
 
@@ -81,7 +139,7 @@ The bridge translates between two different extensibility models. This table sho
 
 ## Install
 
-### From GitHub Releases (recommended)
+### From GitHub releases (recommended)
 
 ```bash
 curl -fsSL https://github.com/vladolaru/claude-code-codex-bridge/releases/latest/download/install.sh | bash
@@ -238,7 +296,7 @@ commands = ["market/plugin/debug.md"]
 
 Global and project exclusions are **combined** (both apply). CLI `--exclude-*` flags **replace** the combined set for that entity kind in the current run.
 
-## Ownership and Safety
+## Ownership and safety
 
 The reconcile engine is conservative. It tracks which files it created and refuses to overwrite anything it did not generate.
 
@@ -261,7 +319,7 @@ The reconcile engine is conservative. It tracks which files it created and refus
 - Content hashing detects and rejects cross-project conflicts for shared global artifacts
 - Symlinked targets are rejected to prevent writes outside expected directories
 
-## Contributor Setup
+## Contributor setup
 
 ```bash
 python3 -m venv .venv
