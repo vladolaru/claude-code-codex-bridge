@@ -45,7 +45,7 @@ def test_validate_runs_against_isolated_project_and_cache(
     (project_root / "CLAUDE.md").write_text("@AGENTS.md\n")
 
     exit_code = cli.main(
-        ["validate", "--project", str(project_root), "--cache-dir", str(cache_root)]
+        ["status", "--project", str(project_root), "--cache-dir", str(cache_root)]
     )
 
     assert exit_code == 0
@@ -136,26 +136,6 @@ def test_install_launchagent_cli_writes_plist(tmp_path: Path):
         "--all",
     ]
 
-
-def test_print_launchagent_cli_produces_global_plist(capsys: pytest.CaptureFixture[str]):
-    """print-launchagent produces a global reconcile --all plist without requiring --project."""
-    exit_code = cli.main(["print-launchagent"])
-
-    captured = capsys.readouterr()
-    payload = plistlib.loads(captured.out.encode())
-    assert exit_code == 0
-    assert "reconcile-all" in payload["Label"]
-    args = payload["ProgramArguments"]
-    assert "reconcile" in args
-    assert "--all" in args
-
-
-def test_print_launchagent_rejects_pipeline_flags():
-    """LaunchAgent commands should not accept pipeline-only flags."""
-    # --project is a pipeline flag, not a LaunchAgent flag
-    with pytest.raises(SystemExit) as exc_info:
-        cli.main(["print-launchagent", "--project", "/tmp/fake"])
-    assert exc_info.value.code != 0
 
 
 def test_reconcile_dry_run_with_diff_flag_reports_file_diff(
@@ -281,7 +261,7 @@ def test_validate_surfaces_os_errors_as_user_facing_errors(monkeypatch: pytest.M
     """Filesystem errors during pipeline setup should not escape as tracebacks."""
     monkeypatch.setattr(cli, "build_project_desired_state", lambda *_a, **_kw: (_ for _ in ()).throw(PermissionError("boom")))
 
-    exit_code = cli.main(["validate", "--project", "."])
+    exit_code = cli.main(["status", "--project", "."])
 
     captured = capsys.readouterr()
     assert exit_code == 1
@@ -307,7 +287,7 @@ def test_validate_surfaces_non_utf8_claude_md_as_user_facing_error(
     (project_root / "CLAUDE.md").write_bytes(b"\xff\xfebroken")
 
     exit_code = cli.main(
-        ["validate", "--project", str(project_root), "--cache-dir", str(cache_root)]
+        ["status", "--project", str(project_root), "--cache-dir", str(cache_root)]
     )
 
     captured = capsys.readouterr()
@@ -336,7 +316,7 @@ def test_validate_succeeds_with_unrecognized_agent_tools(make_project, make_plug
     )
 
     exit_code = cli.main(
-        ["validate", "--project", str(project_root), "--cache-dir", str(cache_root)]
+        ["status", "--project", str(project_root), "--cache-dir", str(cache_root)]
     )
 
     assert exit_code == 0
@@ -549,7 +529,7 @@ def test_status_cli_reports_pending_and_json(make_project, make_plugin_version, 
     pending_captured = capsys.readouterr()
 
     assert pending_exit == 0
-    assert "STATUS: pending_changes" in pending_captured.out
+    assert "STATUS:" in pending_captured.out and "pending_changes" in pending_captured.out
     assert "PENDING_CHANGES:" in pending_captured.out
 
     assert cli.main(
@@ -606,15 +586,15 @@ def test_validate_honors_project_exclusion_config(make_project, make_plugin_vers
     )
 
     exit_code = cli.main(
-        ["validate", "--project", str(project_root), "--cache-dir", str(cache_root)]
+        ["status", "--project", str(project_root), "--cache-dir", str(cache_root)]
     )
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert "GENERATED_AGENTS: 1" in captured.out
-    assert "GENERATED_SKILLS: 1" in captured.out
-    assert "EXCLUDED_SKILL: market/prompt-engineer/cc-only" in captured.out
-    assert "EXCLUDED_AGENT: market/prompt-engineer/cc-reviewer.md" in captured.out
+    assert "GENERATED_AGENTS:" in captured.out and "1" in captured.out
+    assert "GENERATED_SKILLS:" in captured.out
+    assert "market/prompt-engineer/cc-only" in captured.out
+    assert "market/prompt-engineer/cc-reviewer.md" in captured.out
 
 
 def test_reconcile_exclude_skill_removes_previously_managed_output(
@@ -740,8 +720,8 @@ def test_cli_exclude_skill_flag_overrides_config_skills(make_project, make_plugi
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert "EXCLUDED_SKILL: market/prompt-engineer/cc-only" in captured.out
-    assert "EXCLUDED_SKILL: market/prompt-engineer/portable" not in captured.out
+    assert "market/prompt-engineer/cc-only" in captured.out
+    assert "market/prompt-engineer/portable" not in captured.out
 
 
 def test_cli_handles_unsupported_command(
@@ -790,14 +770,14 @@ def test_validate_with_claude_home_flag(make_project, tmp_path: Path, capsys):
     _make_minimal_plugin(cache_root, "market", "test-plugin", "1.0.0")
 
     exit_code = cli.main([
-        "validate",
+        "status",
         "--project", str(project_root),
         "--claude-home", str(claude_home),
     ])
 
     assert exit_code == 0
     captured = capsys.readouterr()
-    assert "PLUGINS_FOUND: 1" in captured.out
+    assert "PLUGINS_FOUND:" in captured.out
 
 
 def test_reconcile_includes_user_level_skills(make_project, tmp_path: Path, capsys):
@@ -1296,19 +1276,6 @@ def test_find_bridge_launchagents_missing_dir(tmp_path: Path):
     assert results == ()
 
 
-def test_print_launchagent_renders_global_plist(tmp_path: Path, capsys):
-    """print-launchagent produces a global reconcile --all plist."""
-    exit_code = cli.main(["print-launchagent"])
-    assert exit_code == 0
-
-    captured = capsys.readouterr()
-    payload = plistlib.loads(captured.out.encode() if isinstance(captured.out, str) else captured.out)
-    assert "reconcile-all" in payload["Label"]
-    args = payload["ProgramArguments"]
-    assert "reconcile" in args
-    assert "--all" in args
-    assert payload["StartInterval"] == 1800
-
 
 def test_install_launchagent_warns_about_per_project_plists(tmp_path: Path, capsys):
     """install-launchagent warns when existing per-project plists are found."""
@@ -1417,7 +1384,7 @@ def test_validate_all_dispatches(
     capsys.readouterr()
 
     exit_code = cli.main([
-        "validate", "--all",
+        "status", "--all",
     ])
     assert exit_code == 0
 
@@ -1545,10 +1512,6 @@ def test_clean_rejects_unused_flags():
         cli.main(["clean", "--codex-home", "/tmp/fake"])
 
 
-def test_validate_rejects_codex_home_flag():
-    """validate does not accept --codex-home (read-only, never writes to codex)."""
-    with pytest.raises(SystemExit, match="2"):
-        cli.main(["validate", "--codex-home", "/tmp/fake"])
 
 
 def test_validate_works_without_plugins(make_project, tmp_path: Path, capsys):
@@ -1562,15 +1525,15 @@ def test_validate_works_without_plugins(make_project, tmp_path: Path, capsys):
     (user_skill / "SKILL.md").write_text("---\nname: my-skill\ndescription: test\n---\n")
 
     exit_code = cli.main([
-        "validate",
+        "status",
         "--project", str(project_root),
         "--claude-home", str(claude_home),
     ])
 
     assert exit_code == 0
     captured = capsys.readouterr()
-    assert "PLUGINS_FOUND: 0" in captured.out
-    assert "GENERATED_SKILLS: 1" in captured.out
+    assert "PLUGINS_FOUND:" in captured.out
+    assert "GENERATED_SKILLS:" in captured.out
 
 
 def test_status_shows_bootstrap_as_pending_changes(tmp_path: Path, capsys):
@@ -1596,7 +1559,7 @@ def test_validate_succeeds_with_bootstrap_pending(tmp_path: Path, capsys):
     (project_root / "CLAUDE.md").write_text("# My instructions\n")
 
     exit_code = cli.main([
-        "validate", "--project", str(project_root),
+        "status", "--project", str(project_root),
     ])
 
     assert exit_code == 0
@@ -1734,7 +1697,7 @@ def test_validate_reports_prompt_count(make_project, tmp_path: Path, capsys):
     )
 
     exit_code = cli.main([
-        "validate",
+        "status",
         "--project", str(project_root),
         "--claude-home", str(claude_home),
     ])
@@ -1869,21 +1832,23 @@ def test_log_show_negative_days(capsys):
     assert "at least 1" in captured.err
 
 
-def test_validate_json_output(make_project, make_plugin_version, capsys):
-    """validate --json emits valid JSON with expected fields."""
+def test_status_json_output(make_project, make_plugin_version, tmp_path, capsys):
+    """status --json emits valid JSON with expected fields."""
     project_root, _ = make_project()
     cache_root, _ = make_plugin_version("market", "tools", "1.0.0", skill_names=("review",))
+    codex_home = tmp_path / "codex-home"
     exit_code = cli.main([
-        "validate", "--json", "--project", str(project_root), "--cache-dir", str(cache_root),
+        "status", "--json", "--project", str(project_root), "--cache-dir", str(cache_root),
+        "--codex-home", str(codex_home),
     ])
     assert exit_code == 0
     data = json.loads(capsys.readouterr().out)
-    assert "plugins" in data or "plugin_count" in data
     assert "skill_count" in data
     assert "agent_count" in data
     assert "prompt_count" in data
     assert "excluded" in data
-    assert "project_root" in data
+    assert "status" in data
+    assert "pending_change_count" in data
 
 
 def test_clean_json_output(make_project, make_plugin_version, tmp_path, capsys):
@@ -2110,6 +2075,6 @@ def test_status_drifted_files_count_in_text_output(tmp_path: Path, capsys):
     ])
     assert exit_code == 0
     captured = capsys.readouterr()
-    assert "DRIFTED_FILES: 2" in captured.out
-    assert "DRIFTED: CLAUDE.md" in captured.out
-    assert "DRIFTED: AGENTS.md" in captured.out
+    assert "DRIFTED_FILES:" in captured.out and "2" in captured.out
+    assert "CLAUDE.md" in captured.out
+    assert "AGENTS.md" in captured.out

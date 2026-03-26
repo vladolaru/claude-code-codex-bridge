@@ -83,18 +83,39 @@ def doctor_exit_code(checks: Iterable[DoctorCheck]) -> int:
 def format_doctor_report(checks: Iterable[DoctorCheck]) -> str:
     """Render doctor checks in a stable human-readable form."""
     from cc_codex_bridge import __version__
+    from cc_codex_bridge._colors import color_fns
 
     materialized = tuple(checks)
+    c = color_fns()
+    status = overall_status(materialized)
+    if status == "ok":
+        colored_status = c["good"](status)
+    elif status == "warning":
+        colored_status = c["warn"](status)
+    else:
+        colored_status = c["bad"](status)
+
+    n_ok = sum(1 for check in materialized if check.status == "ok")
+    n_warn = sum(1 for check in materialized if check.status == "warning")
+    n_err = sum(1 for check in materialized if check.status == "error")
+
     lines = [
-        f"VERSION: v{__version__}",
-        f"STATUS: {overall_status(materialized)}",
-        f"CHECKS_OK: {sum(1 for check in materialized if check.status == 'ok')}",
-        f"CHECKS_WARNING: {sum(1 for check in materialized if check.status == 'warning')}",
-        f"CHECKS_ERROR: {sum(1 for check in materialized if check.status == 'error')}",
+        "",
+        f"{c['key']('VERSION:')} v{__version__}",
+        f"{c['key']('STATUS:')} {colored_status}",
+        f"{c['key']('CHECKS_OK:')} {c['good'](str(n_ok)) if n_ok else str(n_ok)}",
+        f"{c['key']('CHECKS_WARNING:')} {c['warn'](str(n_warn)) if n_warn else str(n_warn)}",
+        f"{c['key']('CHECKS_ERROR:')} {c['bad'](str(n_err)) if n_err else str(n_err)}",
     ]
     for check in materialized:
+        if check.status == "ok":
+            status_s = c["good"](check.status)
+        elif check.status == "warning":
+            status_s = c["warn"](check.status)
+        else:
+            status_s = c["bad"](check.status)
         lines.append(
-            f"CHECK: {check.name} status={check.status} message={check.message}"
+            f"{c['key']('CHECK:')} {check.name} status={status_s} message={check.message}"
         )
     return "\n".join(lines)
 

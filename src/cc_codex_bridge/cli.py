@@ -51,8 +51,8 @@ from cc_codex_bridge.translate_agents import format_agent_translation_diagnostic
 from cc_codex_bridge.translate_skills import format_skill_validation_diagnostics
 
 
-PIPELINE_COMMANDS = {"reconcile", "validate", "status"}
-LAUNCHAGENT_COMMANDS = {"print-launchagent", "install-launchagent"}
+PIPELINE_COMMANDS = {"reconcile", "status"}
+LAUNCHAGENT_COMMANDS = {"install-launchagent"}
 UTILITY_COMMANDS = {"doctor"}
 
 _MIN_HELP_POSITION = 24
@@ -73,6 +73,24 @@ class _AutoWidthHelpFormatter(argparse.HelpFormatter):
         # clamp it after _action_max_length is known.
         kwargs.setdefault("max_help_position", 52)
         super().__init__(prog, **kwargs)  # type: ignore[arg-type]
+
+    def _fill_text(self, text: str, width: int, indent: str) -> str:
+        # Fill each explicit line independently so URLs are never broken.
+        import textwrap
+        filled = []
+        for line in text.split("\n"):
+            stripped = line.strip()
+            if not stripped:
+                filled.append("")
+            elif " " not in stripped or "http://" in stripped or "https://" in stripped:
+                filled.append(indent + stripped)
+            else:
+                filled.append(textwrap.fill(
+                    stripped, width,
+                    initial_indent=indent, subsequent_indent=indent,
+                    break_long_words=False, break_on_hyphens=False,
+                ))
+        return "\n".join(filled)
 
     def format_help(self) -> str:
         # After all actions have been added, _action_max_length holds
@@ -111,6 +129,38 @@ class _AutoWidthHelpFormatter(argparse.HelpFormatter):
         return super()._format_usage(usage, actions, groups, prefix)
 
 
+def _colored_description(version: str) -> str:
+    """Build the parser description with colors when the terminal supports them."""
+    try:
+        from _colorize import can_colorize, get_theme
+        if can_colorize():
+            t = get_theme(force_color=True).argparse
+            prog = f"{t.prog}cc-codex-bridge{t.reset}"
+            ver = f"{t.action}v{version}{t.reset}"
+            return (
+                f"{prog} {ver} — Bridge your local Claude Code setup into Codex so both tools stay equally effective.\n\n"
+                "Detailed documentation: https://github.com/vladolaru/claude-code-codex-bridge/blob/main/README.md"
+            )
+    except ImportError:
+        pass
+    return (
+        f"cc-codex-bridge v{version} — Bridge your local Claude Code setup into Codex so both tools stay equally effective.\n\n"
+        "Detailed documentation: https://github.com/vladolaru/claude-code-codex-bridge/blob/main/README.md"
+    )
+
+
+class _ArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser with a blank line before errors and no prog prefix in the message."""
+
+    def error(self, message: str) -> None:
+        from cc_codex_bridge._colors import color_fns
+        c = color_fns()
+        self.print_usage(sys.stderr)
+        print(file=sys.stderr)
+        print(c["bad"](f"Error: {message}"), file=sys.stderr)
+        self.exit(2)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI parser."""
     # Shared discovery flags: project root, plugin cache, Claude home.
@@ -141,9 +191,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     from cc_codex_bridge import __version__
 
-    parser = argparse.ArgumentParser(
+    parser = _ArgumentParser(
         prog="cc-codex-bridge",
-        description=f"cc-codex-bridge v{__version__} — Bridge your local Claude Code setup into Codex so both tools stay equally effective.",
+        description=_colored_description(__version__),
         formatter_class=_AutoWidthHelpFormatter,
     )
     parser.add_argument(
@@ -186,16 +236,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show unified diffs between current and desired file contents (requires --dry-run).",
     )
-    validate_parser = subparsers.add_parser(
-        "validate",
-        parents=[common_discovery],
-        help="Check that plugins translate cleanly without writing files",
-        description=(
-            "Check that installed Claude Code plugins translate cleanly into "
-            "Codex artifacts. Reports plugin counts, skill/agent/prompt totals, "
-            "and any translation warnings. Does not write or modify any files."
-        ),
-    )
     status_parser = subparsers.add_parser(
         "status",
         parents=[common_with_codex],
@@ -206,7 +246,7 @@ def build_parser() -> argparse.ArgumentParser:
             "any pending creates, updates, or removals. Does not write or modify any files."
         ),
     )
-    for pipeline_parser in (reconcile_parser, validate_parser, status_parser):
+    for pipeline_parser in (reconcile_parser, status_parser):
         pipeline_parser.add_argument(
             "--all",
             action="store_true",
@@ -239,11 +279,6 @@ def build_parser() -> argparse.ArgumentParser:
             help="Skip a command (format: name, scope/name, or marketplace/plugin/name). Repeatable.",
         )
     reconcile_parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit JSON output instead of human-readable text.",
-    )
-    validate_parser.add_argument(
         "--json",
         action="store_true",
         help="Emit JSON output instead of human-readable text.",
@@ -594,17 +629,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory for LaunchAgent stdout/stderr logs (default: ~/.cc-codex-bridge/logs).",
     )
 
-    subparsers.add_parser(
-        "print-launchagent",
-        parents=[launchagent_common],
-        help="Print a LaunchAgent plist to stdout",
-        description=(
-            "Print a macOS LaunchAgent plist to stdout without installing it. "
-            "The plist configures launchd to run 'cc-codex-bridge reconcile --all' "
-            "on a recurring interval, keeping Codex artifacts in sync automatically. "
-            "Pipe to a file or inspect before using install-launchagent."
-        ),
-    )
     install_parser = subparsers.add_parser(
         "install-launchagent",
         parents=[launchagent_common],
@@ -719,34 +743,11 @@ def main(argv: list[str] | None = None) -> int:
                         prompt_count=build.prompt_count,
                         diagnostics=agent_diags, skill_diagnostics=skill_diags,
                         drifted_files=drifted,
+                        discovery=build.discovery,
+                        shim_action=build.shim_decision.action,
                     ))
                 return 0
             raise TranslationError(format_agent_translation_diagnostics(agent_diags))
-
-        if args.command == "validate":
-            if getattr(args, "json", False):
-                print(format_validate_json(
-                    build.discovery,
-                    build.shim_decision.action,
-                    build.agent_count,
-                    build.skill_count,
-                    build.prompt_count,
-                    build.exclusion_report,
-                    skill_diagnostics=skill_diags,
-                ))
-            else:
-                _print_summary(
-                    build.discovery,
-                    build.shim_decision.action,
-                    build.agent_count,
-                    build.skill_count,
-                    build.prompt_count,
-                    build.exclusion_report,
-                )
-                if skill_diags:
-                    print("\nSkill validation warnings:", file=sys.stderr)
-                    print(format_skill_validation_diagnostics(skill_diags), file=sys.stderr)
-            return 0
 
         if args.command == "reconcile":
             if args.dry_run:
@@ -811,6 +812,8 @@ def main(argv: list[str] | None = None) -> int:
                     prompt_count=build.prompt_count,
                     skill_diagnostics=skill_diags,
                     drifted_files=drifted,
+                    discovery=build.discovery,
+                    shim_action=build.shim_decision.action,
                 ))
             return 0
     except (TranslationError, ReconcileError, OSError, UnicodeError) as exc:
@@ -1418,8 +1421,8 @@ def _handle_uninstall_command(args: argparse.Namespace) -> int:
 
 def _handle_all_command(args: argparse.Namespace) -> int:
     """Handle --all mode for reconcile, validate, and status commands."""
-    # validate and status always run in dry-run mode
-    dry_run = True if args.command in ("validate", "status") else getattr(args, "dry_run", False)
+    # status always runs in dry-run mode
+    dry_run = True if args.command == "status" else getattr(args, "dry_run", False)
     use_json = getattr(args, "json", False)
 
     try:
@@ -1648,10 +1651,6 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    if args.command == "print-launchagent":
-        sys.stdout.buffer.write(plist_bytes)
-        return 0
-
     from cc_codex_bridge.reconcile import Change
     from cc_codex_bridge.install_launchagent import DEFAULT_LAUNCHAGENTS_DIR as _LA_DIR
     la_root = Path(args.launchagents_dir or _LA_DIR).expanduser().resolve()
@@ -1696,34 +1695,41 @@ def _print_summary(
     """Print a human-readable discovery summary."""
     from cc_codex_bridge import __version__
 
-    print(f"VERSION: v{__version__}")
-    print(f"PROJECT_ROOT: {result.project.root}")
-    print(f"AGENTS_MD: {result.project.agents_md_path}")
-    print(f"CLAUDE_MD_ACTION: {shim_action}")
-    print(f"PLUGINS_FOUND: {len(result.plugins)}")
-    print(f"GENERATED_AGENTS: {agent_count}")
-    print(f"GENERATED_SKILLS: {skill_count}")
-    print(f"TRANSLATED_PROMPTS: {prompt_count}")
+    c = _status_color_fns()
+    # Project metadata
+    print()
+    print(f"{c['key']('VERSION:')} v{__version__}")
+    print(f"{c['key']('PROJECT_ROOT:')} {result.project.root}")
+    print(f"{c['key']('AGENTS_MD:')} {result.project.agents_md_path}")
+    print(f"{c['key']('CLAUDE_MD_ACTION:')} {shim_action}")
+    # Plugin discovery
+    print()
+    print(f"{c['key']('PLUGINS_FOUND:')} {len(result.plugins)}")
     for plugin in result.plugins:
-        print(
-            "PLUGIN: "
-            f"{plugin.marketplace}/{plugin.plugin_name}@{plugin.version_text} "
-            f"source={plugin.source_path} "
-            f"skills={len(plugin.skills)} "
-            f"agents={len(plugin.agents)}"
-        )
-    print(f"EXCLUDED_PLUGINS: {len(exclusion_report.plugins)}")
-    print(f"EXCLUDED_SKILLS: {len(exclusion_report.skills)}")
-    print(f"EXCLUDED_AGENTS: {len(exclusion_report.agents)}")
-    print(f"EXCLUDED_COMMANDS: {len(exclusion_report.commands)}")
+        print(f"  {plugin.marketplace}/{plugin.plugin_name}@{plugin.version_text}")
+        print(f"    source  = {plugin.source_path}")
+        print(f"    skills  = {len(plugin.skills)}")
+        print(f"    agents  = {len(plugin.agents)}")
+        print(f"    prompts = {len(plugin.commands)}")
+    # Translation output
+    print()
+    print(f"{c['key']('GENERATED_AGENTS:')} {agent_count}")
+    print(f"{c['key']('GENERATED_SKILLS:')} {skill_count}")
+    print(f"{c['key']('TRANSLATED_PROMPTS:')} {prompt_count}")
+    # Exclusions
+    print()
+    print(f"{c['key']('EXCLUDED_PLUGINS:')} {len(exclusion_report.plugins)}")
     for plugin_id in exclusion_report.plugins:
-        print(f"EXCLUDED_PLUGIN: {plugin_id}")
+        print(f"  {c['dim'](plugin_id)}")
+    print(f"{c['key']('EXCLUDED_SKILLS:')} {len(exclusion_report.skills)}")
     for skill_id in exclusion_report.skills:
-        print(f"EXCLUDED_SKILL: {skill_id}")
+        print(f"  {c['dim'](skill_id)}")
+    print(f"{c['key']('EXCLUDED_AGENTS:')} {len(exclusion_report.agents)}")
     for agent_id in exclusion_report.agents:
-        print(f"EXCLUDED_AGENT: {agent_id}")
+        print(f"  {c['dim'](agent_id)}")
+    print(f"{c['key']('EXCLUDED_COMMANDS:')} {len(exclusion_report.commands)}")
     for command_id in exclusion_report.commands:
-        print(f"EXCLUDED_COMMAND: {command_id}")
+        print(f"  {c['dim'](command_id)}")
 
 
 def _build_status_payload(
@@ -1832,11 +1838,16 @@ def format_status_json(
     )
 
 
+from cc_codex_bridge._colors import color_fns as _status_color_fns
+
+
 def format_status_report(
     report, exclusion_report: ExclusionReport,
     *, agent_count: int = 0, skill_count: int = 0, prompt_count: int = 0,
     diagnostics=None, skill_diagnostics=None,
     drifted_files: list[str] | None = None,
+    discovery=None,
+    shim_action: str | None = None,
 ) -> str:
     """Render status output as human-readable text."""
     payload = _build_status_payload(
@@ -1846,157 +1857,130 @@ def format_status_report(
         diagnostics=diagnostics, skill_diagnostics=skill_diagnostics,
         drifted_files=drifted_files,
     )
+    c = _status_color_fns()
     categorized = payload["categorized_changes"]
     project_files = categorized["project_files"]
     skills = categorized["skills"]
     agents = categorized["agents"]
     prompts = categorized["prompts"]
     global_changes = categorized["global"]
-    lines = [
-        f"VERSION: v{payload['version']}",
-        f"STATUS: {payload['status']}",
-        f"PENDING_CHANGES: {payload['pending_change_count']}",
-        f"GENERATED_AGENTS: {payload['agent_count']}",
-        f"GENERATED_SKILLS: {payload['skill_count']}",
-        f"TRANSLATED_PROMPTS: {payload['prompt_count']}",
-        (
-            "PROJECT_FILES: "
-            f"create={len(project_files['create'])} "
-            f"update={len(project_files['update'])} "
-            f"remove={len(project_files['remove'])}"
-        ),
-        (
-            "SKILLS: "
-            f"create={len(skills['create'])} "
-            f"update={len(skills['update'])} "
-            f"remove={len(skills['remove'])}"
-        ),
-        (
-            "AGENTS: "
-            f"create={len(agents['create'])} "
-            f"update={len(agents['update'])} "
-            f"remove={len(agents['remove'])}"
-        ),
-        (
-            "PROMPTS: "
-            f"create={len(prompts['create'])} "
-            f"update={len(prompts['update'])} "
-            f"remove={len(prompts['remove'])}"
-        ),
-        (
-            "GLOBAL: "
-            f"create={len(global_changes['create'])} "
-            f"update={len(global_changes['update'])} "
-            f"remove={len(global_changes['remove'])}"
-        ),
-        (
-            "EXCLUDED: "
-            f"plugins={len(payload['excluded']['plugins'])} "
-            f"skills={len(payload['excluded']['skills'])} "
-            f"agents={len(payload['excluded']['agents'])} "
-            f"commands={len(payload['excluded']['commands'])}"
-        ),
-    ]
+
+    # Pad key+colon before coloring so ANSI codes don't affect ljust width.
+    _W = len("TRANSLATED_PROMPTS:")  # 19 — longest summary key
+    def _k(key: str) -> str:
+        return c["key"](f"{key}:".ljust(_W))
+
+    status_val = payload['status']
+    if status_val == "in_sync":
+        colored_status = c["good"](status_val)
+    elif status_val == "pending_changes":
+        colored_status = c["warn"](status_val)
+    else:
+        colored_status = c["bad"](status_val)
+
+    pending = payload['pending_change_count']
+    colored_pending = c["warn"](str(pending)) if pending > 0 else str(pending)
+
+    def _counts(cat):
+        n_create = len(cat["create"])
+        n_update = len(cat["update"])
+        n_remove = len(cat["remove"])
+        create_s = c["create"](f"create = {n_create}") if n_create else f"create = {n_create}"
+        update_s = c["update"](f"update = {n_update}") if n_update else f"update = {n_update}"
+        remove_s = c["remove"](f"remove = {n_remove}") if n_remove else f"remove = {n_remove}"
+        return f"{create_s} {update_s} {remove_s}"
+
+    # Group 1: project metadata
+    lines = [""]
+    lines.append(f"{_k('VERSION')} v{payload['version']}")
+    if discovery is not None:
+        lines.append(f"{_k('PROJECT_ROOT')} {discovery.project.root}")
+        lines.append(f"{_k('AGENTS_MD')} {discovery.project.agents_md_path}")
+        if shim_action is not None:
+            lines.append(f"{_k('CLAUDE_MD_ACTION')} {shim_action}")
+    lines.append(f"{_k('STATUS')} {colored_status}")
+
+    # Group 2: plugin discovery
+    if discovery is not None:
+        lines.append("")
+        lines.append(f"{_k('PLUGINS_FOUND')} {len(discovery.plugins)}")
+        for plugin in discovery.plugins:
+            lines.append(f"  {plugin.marketplace}/{plugin.plugin_name}@{plugin.version_text}")
+            lines.append(f"    source  = {plugin.source_path}")
+            lines.append(f"    skills  = {len(plugin.skills)}")
+            lines.append(f"    agents  = {len(plugin.agents)}")
+            lines.append(f"    prompts = {len(plugin.commands)}")
+
+    # Group 3: translation output
+    lines.append("")
+    lines.append(f"{_k('GENERATED_AGENTS')} {payload['agent_count']}")
+    lines.append(f"{_k('GENERATED_SKILLS')} {payload['skill_count']}")
+    lines.append(f"{_k('TRANSLATED_PROMPTS')} {payload['prompt_count']}")
+
+    # Group 4: pending changes
+    lines.append("")
+    lines.append(f"{_k('PENDING_CHANGES')} {colored_pending}")
+    lines.append(f"{_k('PROJECT_FILES')} {_counts(project_files)}")
+    lines.append(f"{_k('SKILLS')} {_counts(skills)}")
+    lines.append(f"{_k('AGENTS')} {_counts(agents)}")
+    lines.append(f"{_k('PROMPTS')} {_counts(prompts)}")
+    lines.append(f"{_k('GLOBAL')} {_counts(global_changes)}")
     for diagnostic in payload["diagnostics"]:
-        lines.append(f"DIAGNOSTIC: {diagnostic['message']}")
+        lines.append(f"{c['bad']('DIAGNOSTIC:')} {diagnostic['message']}")
     for warning in payload["skill_warnings"]:
-        lines.append(f"SKILL_WARNING: {warning['message']}")
+        lines.append(f"{c['key']('SKILL_WARNING:')} {c['warn'](warning['message'])}")
     for path in project_files["create"]:
-        lines.append(f"PROJECT_FILE_CREATE: {path}")
+        lines.append(f"{c['key']('PROJECT_FILE_CREATE:')} {c['create'](path)}")
     for path in project_files["update"]:
-        lines.append(f"PROJECT_FILE_UPDATE: {path}")
+        lines.append(f"{c['key']('PROJECT_FILE_UPDATE:')} {c['update'](path)}")
     for path in project_files["remove"]:
-        lines.append(f"PROJECT_FILE_REMOVE: {path}")
+        lines.append(f"{c['key']('PROJECT_FILE_REMOVE:')} {c['remove'](path)}")
     for path in skills["create"]:
-        lines.append(f"SKILL_CREATE: {path}")
+        lines.append(f"{c['key']('SKILL_CREATE:')} {c['create'](path)}")
     for path in skills["update"]:
-        lines.append(f"SKILL_UPDATE: {path}")
+        lines.append(f"{c['key']('SKILL_UPDATE:')} {c['update'](path)}")
     for path in skills["remove"]:
-        lines.append(f"SKILL_REMOVE: {path}")
+        lines.append(f"{c['key']('SKILL_REMOVE:')} {c['remove'](path)}")
     for path in agents["create"]:
-        lines.append(f"AGENT_CREATE: {path}")
+        lines.append(f"{c['key']('AGENT_CREATE:')} {c['create'](path)}")
     for path in agents["update"]:
-        lines.append(f"AGENT_UPDATE: {path}")
+        lines.append(f"{c['key']('AGENT_UPDATE:')} {c['update'](path)}")
     for path in agents["remove"]:
-        lines.append(f"AGENT_REMOVE: {path}")
+        lines.append(f"{c['key']('AGENT_REMOVE:')} {c['remove'](path)}")
     for path in prompts["create"]:
-        lines.append(f"PROMPT_CREATE: {path}")
+        lines.append(f"{c['key']('PROMPT_CREATE:')} {c['create'](path)}")
     for path in prompts["update"]:
-        lines.append(f"PROMPT_UPDATE: {path}")
+        lines.append(f"{c['key']('PROMPT_UPDATE:')} {c['update'](path)}")
     for path in prompts["remove"]:
-        lines.append(f"PROMPT_REMOVE: {path}")
+        lines.append(f"{c['key']('PROMPT_REMOVE:')} {c['remove'](path)}")
     for path in global_changes["create"]:
-        lines.append(f"GLOBAL_CREATE: {path}")
+        lines.append(f"{c['key']('GLOBAL_CREATE:')} {c['create'](path)}")
     for path in global_changes["update"]:
-        lines.append(f"GLOBAL_UPDATE: {path}")
+        lines.append(f"{c['key']('GLOBAL_UPDATE:')} {c['update'](path)}")
     for path in global_changes["remove"]:
-        lines.append(f"GLOBAL_REMOVE: {path}")
-    for plugin_id in payload["excluded"]["plugins"]:
-        lines.append(f"EXCLUDED_PLUGIN: {plugin_id}")
-    for skill_id in payload["excluded"]["skills"]:
-        lines.append(f"EXCLUDED_SKILL: {skill_id}")
-    for agent_id in payload["excluded"]["agents"]:
-        lines.append(f"EXCLUDED_AGENT: {agent_id}")
-    for command_id in payload["excluded"]["commands"]:
-        lines.append(f"EXCLUDED_COMMAND: {command_id}")
+        lines.append(f"{c['key']('GLOBAL_REMOVE:')} {c['remove'](path)}")
     drifted = payload.get("drifted_files", [])
     if drifted:
-        lines.append(f"DRIFTED_FILES: {len(drifted)}")
+        lines.append(f"{_k('DRIFTED_FILES')} {c['warn'](str(len(drifted)))}")
         for path in drifted:
-            lines.append(f"DRIFTED: {path}")
+            lines.append(f"  {c['warn'](path)}")
+
+    # Group 5: exclusions
+    lines.append("")
+    lines.append(f"{_k('EXCLUDED_PLUGINS')} {len(payload['excluded']['plugins'])}")
+    for plugin_id in payload["excluded"]["plugins"]:
+        lines.append(f"  {c['dim'](plugin_id)}")
+    lines.append(f"{_k('EXCLUDED_SKILLS')} {len(payload['excluded']['skills'])}")
+    for skill_id in payload["excluded"]["skills"]:
+        lines.append(f"  {c['dim'](skill_id)}")
+    lines.append(f"{_k('EXCLUDED_AGENTS')} {len(payload['excluded']['agents'])}")
+    for agent_id in payload["excluded"]["agents"]:
+        lines.append(f"  {c['dim'](agent_id)}")
+    lines.append(f"{_k('EXCLUDED_COMMANDS')} {len(payload['excluded']['commands'])}")
+    for command_id in payload["excluded"]["commands"]:
+        lines.append(f"  {c['dim'](command_id)}")
+
     return "\n".join(lines)
-
-
-def format_validate_json(
-    discovery_result,
-    shim_action: str,
-    agent_count: int,
-    skill_count: int,
-    prompt_count: int,
-    exclusion_report: ExclusionReport,
-    *,
-    skill_diagnostics=None,
-) -> str:
-    """Render validate output as deterministic JSON."""
-    from cc_codex_bridge import __version__
-
-    payload: dict[str, object] = {
-        "version": __version__,
-        "project_root": str(discovery_result.project.root),
-        "agents_md": str(discovery_result.project.agents_md_path),
-        "claude_md_action": shim_action,
-        "plugins": [
-            {
-                "id": f"{p.marketplace}/{p.plugin_name}",
-                "version": p.version_text,
-                "source_path": str(p.source_path),
-                "skills": len(p.skills),
-                "agents": len(p.agents),
-            }
-            for p in discovery_result.plugins
-        ],
-        "plugin_count": len(discovery_result.plugins),
-        "agent_count": agent_count,
-        "skill_count": skill_count,
-        "prompt_count": prompt_count,
-        "excluded": {
-            "plugins": list(exclusion_report.plugins),
-            "skills": list(exclusion_report.skills),
-            "agents": list(exclusion_report.agents),
-            "commands": list(exclusion_report.commands),
-        },
-        "skill_warnings": [
-            {
-                "kind": "skill_validation",
-                "source_path": str(d.source_path),
-                "skill_name": d.skill_name,
-                "warnings": list(d.warnings),
-                "message": format_skill_validation_diagnostics((d,)),
-            }
-            for d in (skill_diagnostics or ())
-        ],
-    }
-    return json.dumps(payload, indent=2, sort_keys=True)
 
 
 def format_reconcile_json(

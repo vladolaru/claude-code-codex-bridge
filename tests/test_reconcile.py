@@ -818,7 +818,7 @@ def test_build_desired_state_rejects_agent_paths_outside_project(
 
 def test_format_change_report_handles_empty_report():
     """Empty reports render as a single no-op line."""
-    assert format_change_report(ReconcileReport(changes=(), applied=False)) == "No changes."
+    assert format_change_report(ReconcileReport(changes=(), applied=False)).strip() == "All good. No changes needed."
 
 
 def test_format_diff_report_handles_no_changes(make_project, make_plugin_version, tmp_path: Path):
@@ -834,8 +834,8 @@ def test_format_diff_report_handles_no_changes(make_project, make_plugin_version
     reconcile_desired_state(desired)
     report = diff_desired_state(desired)
 
-    assert format_change_report(report) == "No changes."
-    assert format_diff_report(desired, report) == "No changes."
+    assert format_change_report(report).strip() == "All good. No changes needed."
+    assert format_diff_report(desired, report).strip() == "All good. No changes needed."
 
 
 def test_format_diff_report_includes_global_instructions_diff(

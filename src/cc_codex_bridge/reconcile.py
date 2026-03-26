@@ -1321,10 +1321,21 @@ def _atomic_write_file(path: Path, content: bytes, *, container: Path | None = N
         raise
 
 
+def _no_changes_message() -> str:
+    try:
+        from _colorize import can_colorize, get_theme
+        if can_colorize():
+            t = get_theme(force_color=True).argparse
+            return f"\n{t.action}All good. No changes needed.{t.reset}"
+    except ImportError:
+        pass
+    return "\nAll good. No changes needed."
+
+
 def format_change_report(report: ReconcileReport) -> str:
     """Format a file-level summary of changes."""
     if not report.changes:
-        return "No changes."
+        return _no_changes_message()
     return "\n".join(
         f"{change.kind.upper()}: {change.path}{f' ({change.resource_kind})' if change.resource_kind else ''}"
         for change in report.changes
@@ -1334,7 +1345,7 @@ def format_change_report(report: ReconcileReport) -> str:
 def format_diff_report(desired: DesiredState, report: ReconcileReport) -> str:
     """Format diff output, including unified diffs for text files where useful."""
     if not report.changes:
-        return "No changes."
+        return _no_changes_message()
 
     lines = [format_change_report(report)]
     desired_map = dict(desired.project_files)
