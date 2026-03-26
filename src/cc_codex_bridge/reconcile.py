@@ -1347,13 +1347,12 @@ def _plan_project_skill_mutations(
 ) -> tuple[Change, ...]:
     """Plan project-local skill directory mutations using directory-snapshot comparison."""
     skills_root = desired.project_root / SKILLS_RELATIVE_ROOT
-    # Refuse to write through a symlinked skills root — following it would
-    # modify the symlink target (e.g. .ai/skills/) instead of .codex/skills/.
+    # When the skills root is a symlink (e.g. .codex/skills -> .ai/skills),
+    # the project already provides Codex-visible skills through the symlink.
+    # Skip project skill management to avoid writing through the symlink
+    # and modifying the target directory.
     if skills_root.is_symlink():
-        raise ReconcileError(
-            f"Refusing to write through symlinked skills directory: "
-            f"{skills_root} -> {skills_root.resolve()}"
-        )
+        return ()
     desired_skills = {skill.install_dir_name: skill for skill in desired.project_skills}
     previously_managed = (
         _validated_managed_project_skill_dirs(previous_state)
@@ -1465,9 +1464,14 @@ def _plan_skill_mutations(
     """
     global_skills_root = desired.codex_home / "skills"
     if global_skills_root.is_symlink():
-        raise ReconcileError(
-            f"Refusing to write through symlinked skills directory: "
-            f"{global_skills_root} -> {global_skills_root.resolve()}"
+        return (), GlobalSkillRegistry(
+            skills=dict(snapshot.registry.skills),
+            projects=_ensure_project_in_list(
+                snapshot.registry.projects, desired.project_root
+            ),
+            agents=dict(snapshot.registry.agents),
+            prompts=dict(snapshot.registry.prompts),
+            plugin_resources=dict(snapshot.registry.plugin_resources),
         )
     desired_skills = {skill.install_dir_name: skill for skill in desired.skills}
     desired_hashes = {

@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.7] - 2026-03-26
+
+### Changed
+- Project skill management is skipped when `.codex/skills/` is a symlink (e.g. to `.ai/skills/`), since the project already provides Codex-visible skills through the symlink
+- Global skill management is skipped when `~/.codex/skills/` is a symlink
+
 ## [0.19.6] - 2026-03-26
 
 ### Fixed
