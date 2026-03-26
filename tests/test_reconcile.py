@@ -4316,3 +4316,46 @@ def test_reconcile_rewrites_plugin_references_in_global_instructions(
     instructions = build.desired_state.global_instructions.decode()
     assert "superpowers:writing-plans" not in instructions
     assert "$writing-plans" in instructions
+
+
+def test_reconcile_releases_externally_modified_file(
+    make_project, make_plugin_version, tmp_path: Path,
+):
+    """Reconcile skips update for a managed file when its content was externally modified."""
+    project_root, _agents_md = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "prompt-engineer", "1.0.0",
+        skill_names=("prompt-engineer",),
+    )
+    (version_dir / "skills" / "prompt-engineer" / "SKILL.md").write_text(
+        "---\nname: prompt-engineer\ndescription: Prompt help\n---\n\nUse this skill.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+
+    # First reconcile: creates AGENTS.md and CLAUDE.md shim (both tracked with hashes)
+    first_desired = _build_desired(project_root, cache_root, codex_home)
+    first_report = reconcile_desired_state(first_desired)
+    assert first_report.applied is True
+
+    claude_md = project_root / "CLAUDE.md"
+    assert claude_md.exists()
+    original_shim = claude_md.read_bytes()
+    assert original_shim == b"@AGENTS.md\n"
+
+    # Externally modify CLAUDE.md (simulating user edit)
+    custom_content = b"# My custom instructions\n\nDo not overwrite me.\n"
+    claude_md.write_bytes(custom_content)
+
+    # Second reconcile: should detect drift and NOT overwrite CLAUDE.md
+    second_desired = _build_desired(project_root, cache_root, codex_home)
+    second_report = reconcile_desired_state(second_desired)
+
+    # CLAUDE.md must keep its external content — the bridge must not overwrite it
+    assert claude_md.read_bytes() == custom_content
+
+    # The file should not appear in the update changes (no project-file update for CLAUDE.md)
+    project_file_updates = [
+        c for c in second_report.changes
+        if c.resource_kind == "project_file" and c.kind == "update"
+    ]
+    assert all(c.path != claude_md for c in project_file_updates)

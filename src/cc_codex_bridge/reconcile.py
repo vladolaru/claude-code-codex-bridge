@@ -1434,7 +1434,17 @@ def _compute_project_file_changes(
         existing = path.read_bytes()
         if existing == content:
             continue
-        if not owned:
+        if owned:
+            # Check for drift: if the stored hash doesn't match the on-disk
+            # content, the file was externally modified — skip the update to
+            # avoid overwriting user edits.
+            stored_hash = previous_state.managed_project_files.get(relative, "") if previous_state else ""
+            if stored_hash:
+                current_hash = hash_file_content(existing)
+                if current_hash != stored_hash:
+                    # File was externally modified — release from management
+                    continue
+        else:
             # First reconcile for this file — the bridge is adopting it.
             # This is the bootstrap case: the file exists with different content
             # (e.g. CLAUDE.md being replaced with the shim) and isn't tracked yet.
@@ -1449,6 +1459,14 @@ def _compute_project_file_changes(
     for relative in sorted(managed_project_files - desired_project_paths):
         path = desired.project_root / relative
         if path.exists():
+            # Check for drift: if the stored hash doesn't match the on-disk
+            # content, the file was externally modified — skip the removal to
+            # avoid deleting user-edited content.
+            stored_hash = previous_state.managed_project_files.get(relative, "") if previous_state else ""
+            if stored_hash:
+                current_hash = hash_file_content(path.read_bytes())
+                if current_hash != stored_hash:
+                    continue
             changes.append(Change("remove", path))
 
     return tuple(changes)
