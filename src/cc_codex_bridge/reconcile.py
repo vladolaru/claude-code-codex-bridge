@@ -660,6 +660,21 @@ def clean_project(
                     continue
             changes.append(Change("remove", path))
 
+    # Bootstrap reversal: when both AGENTS.md and CLAUDE.md are scheduled for
+    # removal (both unedited), restore CLAUDE.md to the original content that
+    # the bootstrap copied into AGENTS.md.  This way the project looks like it
+    # did before the bridge was ever used.
+    agents_path = project_root_path / "AGENTS.md"
+    claude_path = project_root_path / "CLAUDE.md"
+    paths_to_remove = {c.path for c in changes if c.kind == "remove"}
+    bootstrap_reversal_content: bytes | None = None
+    if agents_path in paths_to_remove and claude_path in paths_to_remove:
+        bootstrap_reversal_content = agents_path.read_bytes()
+        changes = [
+            c if c.path != claude_path else Change("restore", claude_path)
+            for c in changes
+        ]
+
     # Release skill ownership claims from the global registry
     registry_path = bridge_home_path / GLOBAL_REGISTRY_FILENAME
     if registry_path.is_symlink():
@@ -799,7 +814,14 @@ def clean_project(
     for change in changes:
         if change.path == state_path:
             continue  # deferred to end
-        if change.resource_kind in ("skill", "project_skill"):
+        if change.kind == "restore" and bootstrap_reversal_content is not None:
+            # Bootstrap reversal: write original content back to CLAUDE.md
+            _atomic_write_file(
+                change.path,
+                bootstrap_reversal_content,
+                container=project_root_path,
+            )
+        elif change.resource_kind in ("skill", "project_skill"):
             if change.path.is_dir():
                 shutil.rmtree(change.path)
             elif change.path.exists() or change.path.is_symlink():
