@@ -199,9 +199,9 @@ The project state file (at `~/.cc-codex-bridge/projects/<hash>/state.json`) reco
 - project root
 - Codex home path
 - bridge home path
-- managed project-relative file paths (including agent `.toml` files under `.codex/agents/`)
+- managed project files as a path-to-content-hash mapping (including `CLAUDE.md`, `AGENTS.md`, and agent `.toml` files under `.codex/agents/`)
 - managed project skill directory names (tracked separately for directory-snapshot comparison)
-- state version (currently 8)
+- state version (currently 9; v8 state files are migrated on read)
 
 The global registry records:
 
@@ -212,8 +212,9 @@ The global registry records:
 
 ### Safety rules
 
-- project files are never overwritten unless they were previously recorded as managed
-- the state file may only authorize generator-owned project paths: `CLAUDE.md` and `.codex/agents/*.toml` (project skill directories are tracked separately via `managed_project_skill_dirs`)
+- project files are never overwritten unless they were previously recorded as managed, and their on-disk content hash matches the stored hash (drift detection)
+- externally modified managed files are preserved: reconcile skips updates, clean skips removal
+- the state file may only authorize generator-owned project paths: `CLAUDE.md`, `AGENTS.md`, and `.codex/agents/*.toml` (project skill directories are tracked separately via `managed_project_skill_dirs`)
 - state-tracked project skill directories must be plain generated directory names; traversal, absolute paths, and nested paths are rejected as corrupted state
 - generated project-relative paths are normalized and may not use absolute paths or `..` traversal
 - corrupted or unexpected managed project paths in state are treated as a hard error — this applies to both reconcile and cleanup paths
@@ -347,7 +348,7 @@ Allowed outcomes:
 - `create` — CLAUDE.md does not exist; generate `@AGENTS.md\n`
 - `preserve` — CLAUDE.md is valid; leave it alone
 - `skip` — CLAUDE.md is hand-authored without AGENTS.md reference; proceed without managing it
-- `bootstrap` — CLAUDE.md exists without AGENTS.md; copy to AGENTS.md and replace with shim
+- `bootstrap` — CLAUDE.md exists without AGENTS.md; include both files in desired state (AGENTS.md with original content, CLAUDE.md with shim)
 - `fail` — corrupted state (shim without AGENTS.md, or broken AGENTS.md symlink)
 
 `CLAUDE.md` is treated as valid (`preserve`) when:
@@ -356,7 +357,7 @@ Allowed outcomes:
 - it is a symlink to `AGENTS.md`
 - it contains the substring `AGENTS.md` anywhere in its content (lenient matching)
 
-When `AGENTS.md` does not exist but `CLAUDE.md` is a regular file, the outcome is `bootstrap`. Only `reconcile` (non-dry-run) and `reconcile --all` execute the bootstrap, which copies `CLAUDE.md` to `AGENTS.md` and replaces `CLAUDE.md` with the shim. Read-only commands report that bootstrap is required and exit without mutating files.
+When `AGENTS.md` does not exist but `CLAUDE.md` is a regular file, the outcome is `bootstrap`. Both files are included in the desired project files: AGENTS.md receives the original CLAUDE.md content, and CLAUDE.md becomes the `@AGENTS.md` shim. Normal reconcile creates both files and tracks them with content hashes. Drift detection protects them on subsequent reconciles. Bootstrap is not a separate code path — it is handled by the normal reconcile pipeline.
 
 Hand-authored `CLAUDE.md` without an AGENTS.md reference produces `skip` — the bridge omits CLAUDE.md from managed project files but proceeds with agents, skills, commands, and state.
 
@@ -657,6 +658,7 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
   - report `in_sync` vs `pending_changes`
   - report `invalid` when agent translation contains unsupported Claude tools
   - report categorized project-file vs skill create/update/remove changes
+  - report drifted managed files as a separate `DRIFTED` category (drift is computed by comparing stored content hashes against on-disk content for all managed project files; missing files, symlinks, and files without stored hashes from v8 migration are excluded from drift detection)
   - include agent translation diagnostics in both text and JSON output when invalid
   - report effective excluded plugin/skill/agent ids
   - support JSON output with `--json`
@@ -671,6 +673,7 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
   - preserve hand-authored files (AGENTS.md, bridge.toml)
   - do not touch global instructions (~/.codex/AGENTS.md)
   - support `--dry-run` for preview
+  - when cleaning a bootstrapped project where both AGENTS.md and CLAUDE.md are unedited (content hashes match stored values), the clean operation reverses the bootstrap: AGENTS.md content is written back to CLAUDE.md, and AGENTS.md is removed; if either file was externally modified, the drifted file is preserved and the reversal is skipped
 - `uninstall`
   - discover all projects from the global registry projects list (with fallback to skill owners for backwards compatibility)
   - clean each accessible project (skip and report inaccessible ones)

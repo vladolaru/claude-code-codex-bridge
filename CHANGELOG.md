@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- Content hash tracking for managed project files — state now records sha256 content hashes alongside managed file paths
+- Drift detection on reconcile: externally modified managed files are preserved instead of being overwritten
+- Drift detection on clean: externally modified managed files are preserved instead of being removed
+- Drift reporting in `status` command output (both text and JSON) — shows which managed files were externally modified
+- Clean bootstrap reversal: when both AGENTS.md and CLAUDE.md are unedited, clean restores CLAUDE.md to its original content
+
+### Changed
+- Bootstrap is no longer a separate code path — it is handled by normal reconcile, including both AGENTS.md creation and CLAUDE.md shim replacement
+- `managed_project_files` in bridge state changed from a list of paths to a path-to-content-hash mapping
+- State version bumped from 8 to 9 (v8 state files are automatically migrated on read)
+- `AGENTS.md` is now a managed project file (added to the allowlist alongside `CLAUDE.md` and `.codex/agents/*.toml`)
+
+### Removed
+- `execute_bootstrap()` function and all CLI/reconcile bootstrap handling code
+- Separate dry-run bootstrap change synthesis (now handled naturally by the reconcile pipeline)
+
 ## [0.19.8] - 2026-03-26
 
 ### Fixed
