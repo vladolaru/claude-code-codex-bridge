@@ -12,6 +12,8 @@ import pytest
 
 from cc_codex_bridge import cli
 from cc_codex_bridge.bridge_home import project_state_dir
+from cc_codex_bridge.exclusions import ExclusionReport
+from cc_codex_bridge.reconcile import ReconcileReport
 
 
 def _bridge_state_path(project_root: Path, tmp_path: Path) -> Path:
@@ -1999,6 +2001,58 @@ def test_status_json_includes_drifted_files(tmp_path: Path, capsys):
     data = json.loads(captured.out)
     assert "drifted_files" in data
     assert any("CLAUDE.md" in f for f in data["drifted_files"])
+
+
+def test_status_json_reports_drift_as_not_in_sync(
+    make_project, make_plugin_version, tmp_path: Path, capsys
+):
+    """Top-level status fields must reflect drift even without pending mutations."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "tools", "1.0.0", skill_names=("review",))
+    codex_home = tmp_path / "codex-home"
+
+    assert cli.main([
+        "reconcile", "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(codex_home),
+    ]) == 0
+    capsys.readouterr()
+
+    # Start from a genuinely in-sync project, then introduce only drift.
+    in_sync_exit = cli.main([
+        "status", "--json", "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(codex_home),
+    ])
+    assert in_sync_exit == 0
+    assert json.loads(capsys.readouterr().out)["pending_change_count"] == 0
+
+    (project_root / "CLAUDE.md").write_text("# Modified\n")
+
+    exit_code = cli.main([
+        "status", "--json", "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(codex_home),
+    ])
+    assert exit_code == 0
+    data = json.loads(capsys.readouterr().out)
+
+    assert data["drifted_files"] == ["CLAUDE.md"]
+    assert data["status"] != "in_sync"
+    assert data["pending_change_count"] == 1
+
+
+def test_status_payload_counts_drift_without_other_changes():
+    """Top-level status fields must treat drift as a non-sync condition."""
+    payload = cli._build_status_payload(  # noqa: SLF001 - private helper under test
+        ReconcileReport(changes=(), applied=False),
+        ExclusionReport(),
+        drifted_files=["CLAUDE.md"],
+    )
+
+    assert payload["status"] == "pending_changes"
+    assert payload["pending_change_count"] == 1
+    assert payload["drifted_files"] == ["CLAUDE.md"]
 
 
 def test_status_no_drift_when_files_unmodified(tmp_path: Path, capsys):

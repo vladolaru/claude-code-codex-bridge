@@ -1738,6 +1738,7 @@ def _build_status_payload(
     drifted_files: list[str] | None = None,
 ) -> dict[str, object]:
     """Build a stable status payload from reconcile diff output."""
+    drifted = sorted(drifted_files or [])
     categorized_changes: dict[str, dict[str, list[str]]] = {
         "project_files": {"create": [], "update": [], "remove": []},
         "skills": {"create": [], "update": [], "remove": []},
@@ -1775,8 +1776,8 @@ def _build_status_payload(
             kind_list = categorized_changes[category].get(change.kind)
             if kind_list is not None:
                 kind_list.append(str(change.path))
-        pending_change_count = len(report.changes)
-        status = "in_sync" if not report.changes else "pending_changes"
+        pending_change_count = len(report.changes) + len(drifted)
+        status = "in_sync" if pending_change_count == 0 else "pending_changes"
 
     rendered_skill_warnings = [
         {
@@ -1807,7 +1808,7 @@ def _build_status_payload(
             "agents": list(exclusion_report.agents),
             "commands": list(exclusion_report.commands),
         },
-        "drifted_files": drifted_files or [],
+        "drifted_files": drifted,
     }
 
 

@@ -13,6 +13,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Drift reporting in `status` command output (both text and JSON) — shows which managed files were externally modified
 - Clean bootstrap reversal: when both AGENTS.md and CLAUDE.md are unedited, clean restores CLAUDE.md to its original content
 
+### Fixed
+- First reconcile after a v8→v9 state migration now backfills hashes for preserved managed files, so later edits are reported as drift and protected from `clean`
+- Drift-skipped stale project files now stay bridge-managed in state, so later reconciles preserve ownership instead of failing with "Refusing to overwrite non-generated project file"
+- `compute_project_drift()` now rejects corrupted managed project paths from bridge state instead of hashing paths outside the project root
+- Top-level `status` fields now treat drifted files as pending work, even when reconcile has no file mutations to apply
+
 ### Changed
 - Bootstrap is no longer a separate code path — it is handled by normal reconcile, including both AGENTS.md creation and CLAUDE.md shim replacement
 - `managed_project_files` in bridge state changed from a list of paths to a path-to-content-hash mapping

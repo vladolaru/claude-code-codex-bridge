@@ -152,6 +152,7 @@ class _MutationPlan:
 
     changes: tuple[Change, ...]
     registry_writes: tuple[_RegistryWrite, ...]
+    project_file_changes: tuple[Change, ...] = ()
 
 
 def build_desired_state(
@@ -561,7 +562,7 @@ def compute_project_drift(
         return []
 
     drifted: list[str] = []
-    for relative, stored_hash in state.managed_project_files.items():
+    for relative, stored_hash in _validated_managed_project_files(state).items():
         if not stored_hash:
             continue  # No hash to compare (v8 migration)
         path = state.project_root / relative
@@ -582,7 +583,12 @@ def diff_desired_state(desired: DesiredState) -> ReconcileReport:
     prev_managed = _previously_managed_set(previous_state)
     prev_managed_files = previous_state.managed_project_files if previous_state else None
     plan = _plan_mutations(desired, previous_state)
-    state_write_needed = _state_write_needed(desired, prev_managed, prev_managed_files)
+    state_write_needed = _state_write_needed(
+        desired,
+        prev_managed,
+        prev_managed_files,
+        plan.project_file_changes,
+    )
     _validate_mutation_targets(
         desired,
         previous_state,
@@ -605,7 +611,12 @@ def reconcile_desired_state(desired: DesiredState) -> ReconcileReport:
     prev_managed = _previously_managed_set(previous_state)
     prev_managed_files = previous_state.managed_project_files if previous_state else None
     plan = _plan_mutations(desired, previous_state)
-    state_write_needed = _state_write_needed(desired, prev_managed, prev_managed_files)
+    state_write_needed = _state_write_needed(
+        desired,
+        prev_managed,
+        prev_managed_files,
+        plan.project_file_changes,
+    )
     _validate_mutation_targets(
         desired,
         previous_state,
@@ -661,18 +672,7 @@ def clean_project(
 
     changes: list[Change] = []
 
-    # Validate managed project files against the allowlist (same check as
-    # _compute_project_file_changes) to prevent corrupted state from deleting
-    # hand-authored files like AGENTS.md.
-    invalid_managed_paths = sorted(
-        relative for relative in previous_state.managed_project_files
-        if not _is_allowed_managed_project_relative(relative)
-    )
-    if invalid_managed_paths:
-        raise ReconcileError(
-            "Interop state contains unexpected managed project files: "
-            + ", ".join(invalid_managed_paths)
-        )
+    managed_project_files = _validated_managed_project_files(previous_state)
 
     # Remove managed project skill directories
     managed_project_skill_dirs = _validated_managed_project_skill_dirs(previous_state)
@@ -684,12 +684,12 @@ def clean_project(
             changes.append(Change("remove", skill_dir, resource_kind="project_skill"))
 
     # Remove managed project files (excluding those inside skill dirs)
-    for relative in sorted(previous_state.managed_project_files):
+    for relative in sorted(managed_project_files):
         path = project_root_path / relative
         if any(path == sd or _is_under(path, sd) for sd in skill_dirs_to_remove):
             continue
         if path.exists() and not path.is_symlink():
-            stored_hash = previous_state.managed_project_files[relative]
+            stored_hash = managed_project_files[relative]
             if stored_hash:
                 current_hash = hash_file_content(path.read_bytes())
                 if current_hash != stored_hash:
@@ -1251,7 +1251,17 @@ def _apply_changes(
 
     seed_config_stub(desired.bridge_home)
 
-    state_bytes = _build_state_record(desired, previously_managed, previous_managed_files).to_json().encode()
+    retained_previous_project_files = _retained_stale_managed_project_files(
+        desired,
+        previous_managed_files,
+        plan.project_file_changes,
+    )
+    state_bytes = _build_state_record(
+        desired,
+        previously_managed,
+        previous_managed_files,
+        retained_previous_project_files=retained_previous_project_files,
+    ).to_json().encode()
     desired.state_path.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write_file(desired.state_path, state_bytes, container=desired.bridge_home)
 
@@ -1397,6 +1407,7 @@ def _plan_mutations(
             *global_changes, *plugin_resource_changes,
         )),
         registry_writes=tuple(registry_writes),
+        project_file_changes=project_changes,
     )
 
 
@@ -1472,15 +1483,11 @@ def _compute_project_file_changes(
         )
 
     project_file_map = dict(desired.project_files)
-    managed_project_files = set(previous_state.managed_project_files.keys()) if previous_state else set()
-    invalid_managed_paths = sorted(
-        relative for relative in managed_project_files if not _is_allowed_managed_project_relative(relative)
+    managed_project_files = (
+        set(_validated_managed_project_files(previous_state))
+        if previous_state
+        else set()
     )
-    if invalid_managed_paths:
-        raise ReconcileError(
-            "Interop state contains unexpected managed project files: "
-            + ", ".join(invalid_managed_paths)
-        )
     changes: list[Change] = []
 
     for path, content in sorted(project_file_map.items(), key=lambda item: str(item[0])):
@@ -2186,6 +2193,8 @@ def _build_state_record(
     desired: DesiredState,
     previously_managed: frozenset[str] = frozenset(),
     previous_managed_files: "dict[str, str] | None" = None,
+    *,
+    retained_previous_project_files: "dict[str, str] | None" = None,
 ) -> BridgeState:
     """Build the desired stable state payload.
 
@@ -2203,10 +2212,10 @@ def _build_state_record(
         relative = _project_relative(desired, path)
         managed_project_files[relative] = hash_file_content(content)
     # Preserved files — keep tracking only if previously managed.
-    # Retain the prior stored hash rather than re-hashing on-disk bytes.
-    # Re-hashing would silently adopt drifted content as "expected",
-    # which would cause a subsequent clean to treat user-edited files as
-    # bridge-owned and delete or restore them.
+    # Retain the prior stored hash when present. Older v8 state files only
+    # recorded managed paths, so their migrated entries have an empty hash.
+    # In that case, backfill from on-disk bytes once; leaving the hash empty
+    # forever would disable drift protection for the upgraded project.
     for rel in sorted(preserved_relatives):
         if rel in previously_managed:
             full_path = desired.project_root / rel
@@ -2216,7 +2225,15 @@ def _build_state_record(
                 managed_project_files[rel] = ""
             elif full_path.exists():
                 prior_hash = (previous_managed_files or {}).get(rel, "")
-                managed_project_files[rel] = prior_hash
+                if prior_hash:
+                    managed_project_files[rel] = prior_hash
+                    continue
+                try:
+                    managed_project_files[rel] = hash_file_content(full_path.read_bytes())
+                except OSError:
+                    managed_project_files[rel] = ""
+    for rel, stored_hash in sorted((retained_previous_project_files or {}).items()):
+        managed_project_files[rel] = stored_hash
     managed_project_skill_dirs = tuple(
         sorted(
             _normalize_dir_name(
@@ -2246,9 +2263,20 @@ def _state_write_needed(
     desired: DesiredState,
     previously_managed: frozenset[str] = frozenset(),
     previous_managed_files: "dict[str, str] | None" = None,
+    project_file_changes: tuple[Change, ...] = (),
 ) -> bool:
     """Return True when the project-local state file must be updated."""
-    state_bytes = _build_state_record(desired, previously_managed, previous_managed_files).to_json().encode()
+    retained_previous_project_files = _retained_stale_managed_project_files(
+        desired,
+        previous_managed_files,
+        project_file_changes,
+    )
+    state_bytes = _build_state_record(
+        desired,
+        previously_managed,
+        previous_managed_files,
+        retained_previous_project_files=retained_previous_project_files,
+    ).to_json().encode()
     return not desired.state_path.exists() or desired.state_path.read_bytes() != state_bytes
 
 
@@ -2275,6 +2303,50 @@ def _is_allowed_managed_project_relative(relative: str) -> bool:
         return True
 
     return False
+
+
+def _validated_managed_project_files(previous_state: BridgeState) -> dict[str, str]:
+    """Return validated managed project files from bridge state."""
+    invalid_managed_paths = sorted(
+        relative for relative in previous_state.managed_project_files
+        if not _is_allowed_managed_project_relative(relative)
+    )
+    if invalid_managed_paths:
+        raise ReconcileError(
+            "Interop state contains unexpected managed project files: "
+            + ", ".join(invalid_managed_paths)
+        )
+    return dict(previous_state.managed_project_files)
+
+
+def _retained_stale_managed_project_files(
+    desired: DesiredState,
+    previous_managed_files: "dict[str, str] | None",
+    project_file_changes: tuple[Change, ...],
+) -> dict[str, str]:
+    """Return stale managed files that reconcile preserved due to drift."""
+    if not previous_managed_files:
+        return {}
+
+    desired_project_paths = {
+        *(_project_relative(desired, path) for path, _ in desired.project_files),
+        *(_project_relative(desired, path) for path in desired.preserved_project_files),
+    }
+    removed_project_paths = {
+        _project_relative(desired, change.path)
+        for change in project_file_changes
+        if change.kind == "remove" and not change.resource_kind
+    }
+
+    retained: dict[str, str] = {}
+    for relative, stored_hash in sorted(previous_managed_files.items()):
+        if relative in desired_project_paths or relative in removed_project_paths:
+            continue
+        path = desired.project_root / relative
+        if not path.exists() or path.is_symlink():
+            continue
+        retained[relative] = stored_hash
+    return retained
 
 
 def _validated_managed_project_skill_dirs(previous_state: BridgeState) -> set[str]:

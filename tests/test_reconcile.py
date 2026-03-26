@@ -4710,6 +4710,29 @@ def test_compute_project_drift_sorted_output(tmp_path: Path):
     assert len(drifted) == 2
 
 
+def test_compute_project_drift_rejects_unexpected_managed_paths(tmp_path: Path):
+    """compute_project_drift must reject corrupted managed paths before reading them."""
+    from cc_codex_bridge.reconcile import compute_project_drift
+    from cc_codex_bridge.state import BridgeState
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_dir.mkdir(parents=True)
+
+    state = BridgeState(
+        project_root=project_root,
+        codex_home=tmp_path / "codex",
+        bridge_home=bridge_home,
+        managed_project_files={"../outside.txt": "sha256:deadbeef"},
+    )
+    (state_dir / "state.json").write_text(state.to_json())
+
+    with pytest.raises(ReconcileError, match="unexpected managed project files"):
+        compute_project_drift(project_root, bridge_home=bridge_home)
+
+
 def test_reconcile_refuses_to_overwrite_preexisting_agent_toml(
     make_plugin_version, tmp_path: Path
 ):
@@ -4789,3 +4812,117 @@ def test_clean_preserves_edited_agents_md_after_second_reconcile(
 
     removed_paths = {c.path for c in report.changes if c.kind == "remove"}
     assert (project_root / "AGENTS.md") not in removed_paths
+
+
+def test_reconcile_keeps_drifted_removed_file_managed_for_future_reconcile(
+    make_plugin_version, tmp_path: Path
+):
+    """A drift-skipped stale file must stay bridge-managed across later reconciles."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "CLAUDE.md").write_text("# Original instructions\n")
+
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("review",),
+    )
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+
+    project_agents_dir = project_root / ".claude" / "agents"
+    project_agents_dir.mkdir(parents=True)
+    agent_source = project_agents_dir / "foo.md"
+    agent_source.write_text(
+        "---\nname: foo\ndescription: Generated agent\n---\n\nInitial instructions.\n"
+    )
+
+    build = build_project_desired_state(
+        project_root,
+        codex_home=codex_home,
+        bridge_home=bridge_home,
+        cache_dir=cache_root,
+    )
+    assert build.desired_state is not None
+    reconcile_desired_state(build.desired_state)
+
+    generated_agent = project_root / ".codex" / "agents" / "foo.toml"
+    assert generated_agent.exists()
+
+    generated_agent.write_text("# user edited\n")
+    agent_source.unlink()
+
+    build_without_agent = build_project_desired_state(
+        project_root,
+        codex_home=codex_home,
+        bridge_home=bridge_home,
+        cache_dir=cache_root,
+    )
+    assert build_without_agent.desired_state is not None
+    second_report = reconcile_desired_state(build_without_agent.desired_state)
+
+    assert generated_agent.exists()
+    assert generated_agent.read_text() == "# user edited\n"
+    assert not any(
+        change.path == generated_agent and change.kind == "remove"
+        for change in second_report.changes
+    )
+    state_payload = json.loads(
+        (project_state_dir(project_root, bridge_home=bridge_home) / "state.json").read_text()
+    )
+    assert ".codex/agents/foo.toml" in state_payload["managed_project_files"]
+
+    agent_source.write_text(
+        "---\nname: foo\ndescription: Generated agent\n---\n\nUpdated instructions.\n"
+    )
+    build_with_agent_again = build_project_desired_state(
+        project_root,
+        codex_home=codex_home,
+        bridge_home=bridge_home,
+        cache_dir=cache_root,
+    )
+    assert build_with_agent_again.desired_state is not None
+    third_report = reconcile_desired_state(build_with_agent_again.desired_state)
+
+    assert all(change.path != generated_agent for change in third_report.changes)
+    assert generated_agent.read_text() == "# user edited\n"
+
+
+def test_v8_migrated_preserved_agents_md_gains_drift_protection(
+    make_plugin_version, tmp_path: Path
+):
+    """A preserved AGENTS.md from v8 state must get a stored hash after reconcile."""
+    from cc_codex_bridge.reconcile import compute_project_drift
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    agents_content = "# Original instructions\n"
+    (project_root / "CLAUDE.md").write_text("@AGENTS.md\n")
+    (project_root / "AGENTS.md").write_text(agents_content)
+
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("review",),
+    )
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "state.json").write_text(json.dumps({
+        "version": 8,
+        "project_root": str(project_root.resolve()),
+        "codex_home": str(codex_home.resolve()),
+        "bridge_home": str(bridge_home.resolve()),
+        "managed_project_files": ["CLAUDE.md", "AGENTS.md"],
+        "managed_project_skill_dirs": [],
+    }, indent=2))
+
+    build = build_project_desired_state(
+        project_root,
+        codex_home=codex_home,
+        bridge_home=bridge_home,
+        cache_dir=cache_root,
+    )
+    assert build.desired_state is not None
+    reconcile_desired_state(build.desired_state)
+
+    (project_root / "AGENTS.md").write_text(agents_content + "\n## Added by user\n")
+
+    assert compute_project_drift(project_root, bridge_home=bridge_home) == ["AGENTS.md"]
