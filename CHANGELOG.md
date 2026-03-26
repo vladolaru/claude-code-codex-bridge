@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.23.0] - 2026-03-26
+
+### Added
+- `autosync status` subcommand — reports whether the background sync agent is installed and loaded via launchd
+- Shell command fragments colored bold cyan (`cmd` color) throughout CLI output and `--help` descriptions: `reconcile --all`, `cc-codex-bridge upgrade`, `git pull && pip install -e .`, `deactivate`, `curl` install script, `launchctl` commands
+- Flag names (`--check`, `--all`, `--project`, `--diff`, `--dry-run`, `--json`) colored bold cyan in descriptions and error messages, consistent with argparse long-option styling
+
+### Changed
+- LaunchAgent label renamed from `com.openai.codex-bridge.*` to `cc-codex-bridge.*` — the old prefix used OpenAI's domain, which was wrong; the new prefix matches the tool name. Existing users must manually remove the old plist and re-run `autosync install`
+- `autosync install` (formerly `install-launchagent`) now loads the agent via `launchctl bootstrap` immediately after writing the plist; re-runs boot out the old instance first. No manual `launchctl` step needed
+- macOS background-activity notification now shows `cc-codex-bridge` instead of `python3.14` — the plist `Program` key is now set to the console script (detected via `shutil.which`) rather than the Python interpreter
+
 ## [0.22.0] - 2026-03-26
 
 ### Added
