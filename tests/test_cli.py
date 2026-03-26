@@ -104,13 +104,13 @@ def test_reconcile_and_dry_run_respect_fake_codex_home(
 
 
 def test_install_launchagent_cli_writes_plist(tmp_path: Path):
-    """CLI install-launchagent writes a global plist into the requested LaunchAgents directory."""
+    """CLI autosync install writes a global plist into the requested LaunchAgents directory."""
     launchagents_dir = tmp_path / "LaunchAgents"
     logs_dir = tmp_path / "logs"
 
     exit_code = cli.main(
         [
-            "install-launchagent",
+            "autosync", "install",
             "--launchagents-dir",
             str(launchagents_dir),
             "--logs-dir",
@@ -1278,13 +1278,13 @@ def test_find_bridge_launchagents_missing_dir(tmp_path: Path):
 
 
 def test_install_launchagent_warns_about_per_project_plists(tmp_path: Path, capsys):
-    """install-launchagent warns when existing per-project plists are found."""
+    """autosync install warns when existing per-project plists are found."""
     la_dir = tmp_path / "home" / "Library" / "LaunchAgents"
     la_dir.mkdir(parents=True)
     (la_dir / "com.openai.codex-bridge.old-project.abc123.plist").write_bytes(b"<plist/>")
 
     exit_code = cli.main([
-        "install-launchagent",
+        "autosync", "install",
         "--launchagents-dir", str(la_dir),
     ])
     assert exit_code == 0

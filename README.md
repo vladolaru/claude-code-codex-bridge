@@ -46,10 +46,10 @@ cc-codex-bridge reconcile --all
 
 ### 5. Keep everything in sync automatically (macOS)
 
-Install a LaunchAgent that runs `reconcile --all` every 30 minutes in the background:
+Install a background agent that runs `reconcile --all` every 30 minutes:
 
 ```bash
-cc-codex-bridge install-launchagent
+cc-codex-bridge autosync install
 ```
 
 ### 6. Confirm everything is in sync
@@ -293,10 +293,12 @@ Config commands auto-detect scope: inside a project targets `.codex/bridge.toml`
 ### Scheduled reconciliation (macOS)
 
 ```bash
-cc-codex-bridge install-launchagent            # install LaunchAgent plist
+cc-codex-bridge autosync install    # set up automatic background sync
+cc-codex-bridge autosync uninstall  # stop and remove it
+cc-codex-bridge autosync status     # check whether it is running
 ```
 
-The LaunchAgent runs `reconcile --all` every 30 minutes. Set a different interval with `--interval <seconds>` when installing.
+Runs `reconcile --all` every 30 minutes. Set a different interval with `--interval <seconds>`. `autosync uninstall` stops scheduled reconciliation without touching any reconciled project artifacts.
 
 ## Exclusions
 

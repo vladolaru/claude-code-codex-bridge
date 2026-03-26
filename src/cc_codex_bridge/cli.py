@@ -28,6 +28,7 @@ from cc_codex_bridge.install_launchagent import (
     build_launchagent_plist,
     find_bridge_launchagents,
     install_launchagent,
+    uninstall_launchagent,
 )
 from cc_codex_bridge.model import (
     AgentTranslationDiagnostic,
@@ -52,7 +53,7 @@ from cc_codex_bridge.translate_skills import format_skill_validation_diagnostics
 
 
 PIPELINE_COMMANDS = {"reconcile", "status"}
-LAUNCHAGENT_COMMANDS = {"install-launchagent"}
+LAUNCHAGENT_COMMANDS = {"autosync"}
 UTILITY_COMMANDS = {"doctor"}
 
 _GITHUB_REPO = "vladolaru/claude-code-codex-bridge"
@@ -586,7 +587,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Display activity log entries",
         description=(
             "Display activity log entries. Shows reconcile, clean, and "
-            "install-launchagent operations with their file-level changes. "
+            "autosync install operations with their file-level changes. "
             "Defaults to the last 7 days."
         ),
     )
@@ -594,7 +595,7 @@ def build_parser() -> argparse.ArgumentParser:
     log_show_parser.add_argument("--until", type=str, help="End date, inclusive (YYYY-MM-DD).")
     log_show_parser.add_argument("--days", type=int, help="Show last N days (default: 7). Cannot combine with --since/--until.")
     log_show_parser.add_argument("--project", type=Path, help="Filter to entries for this project path.")
-    log_show_parser.add_argument("--action", type=str, help="Filter by action (reconcile, clean, install-launchagent).")
+    log_show_parser.add_argument("--action", type=str, help="Filter by action (reconcile, clean, autosync-install).")
     log_show_parser.add_argument("--type", type=str, help="Filter by change type (create, update, remove).")
     log_show_parser.add_argument("--json", action="store_true", help="Emit raw JSONL instead of formatted table.")
 
@@ -644,21 +645,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="LaunchAgents directory to check (default: ~/Library/LaunchAgents).",
     )
 
-    upgrade_parser = subparsers.add_parser(
-        "upgrade",
-        help="Upgrade to the latest release",
-        description=(
-            "Check for a newer release on GitHub and upgrade in place by "
-            "downloading and running the official install script. "
-            "Use --check to report the available version without installing."
-        ),
-    )
-    upgrade_parser.add_argument(
-        "--check",
-        action="store_true",
-        help="Report the latest available version without upgrading.",
-    )
-
     clean_parser = subparsers.add_parser(
         "clean",
         help="Remove bridge artifacts for one project",
@@ -684,6 +670,104 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit JSON output instead of human-readable text.",
     )
+    autosync_parser = subparsers.add_parser(
+        "autosync",
+        help="Manage automatic background reconciliation (macOS)",
+        description="Install or remove the macOS LaunchAgent that runs reconcile --all on a schedule.",
+    )
+    autosync_subparsers = autosync_parser.add_subparsers(
+        dest="autosync_command", required=True, title="Commands", metavar="COMMAND",
+    )
+    _raw_autosync_add = autosync_subparsers.add_parser
+    autosync_subparsers.add_parser = lambda *a, **kw: (  # type: ignore[method-assign]
+        kw.setdefault("formatter_class", _AutoWidthHelpFormatter),
+        _raw_autosync_add(*a, **kw),
+    )[1]
+
+    autosync_install_parser = autosync_subparsers.add_parser(
+        "install",
+        help="Set up automatic background sync",
+        description=(
+            "Install a macOS LaunchAgent that runs 'cc-codex-bridge reconcile --all' "
+            "on a recurring interval. Writes the plist to ~/Library/LaunchAgents and "
+            "loads it via launchd. Re-running updates the plist and reloads the agent."
+        ),
+    )
+    autosync_install_parser.add_argument(
+        "--interval",
+        type=int,
+        default=DEFAULT_START_INTERVAL,
+        help=f"Reconcile interval in seconds (default: {DEFAULT_START_INTERVAL}).",
+    )
+    autosync_install_parser.add_argument(
+        "--label",
+        help=f"LaunchAgent label (default: {GLOBAL_LAUNCHAGENT_LABEL}).",
+    )
+    autosync_install_parser.add_argument(
+        "--python-executable",
+        type=Path,
+        help="Python interpreter for the LaunchAgent (default: auto-detected).",
+    )
+    autosync_install_parser.add_argument(
+        "--cli-path",
+        type=Path,
+        help="Path to cc-codex-bridge script (default: auto-detected).",
+    )
+    autosync_install_parser.add_argument(
+        "--logs-dir",
+        type=Path,
+        help="Directory for LaunchAgent stdout/stderr logs (default: ~/.cc-codex-bridge/logs).",
+    )
+    autosync_install_parser.add_argument(
+        "--launchagents-dir",
+        type=Path,
+        help="LaunchAgents destination directory (default: ~/Library/LaunchAgents).",
+    )
+
+    autosync_uninstall_parser = autosync_subparsers.add_parser(
+        "uninstall",
+        help="Stop and remove automatic background sync",
+        description=(
+            "Unload and remove the bridge LaunchAgent plist from ~/Library/LaunchAgents. "
+            "Stops scheduled reconciliation without affecting any reconciled project artifacts."
+        ),
+    )
+    autosync_uninstall_parser.add_argument(
+        "--label",
+        help=f"LaunchAgent label to remove (default: {GLOBAL_LAUNCHAGENT_LABEL}).",
+    )
+    autosync_uninstall_parser.add_argument(
+        "--launchagents-dir",
+        type=Path,
+        help="LaunchAgents directory to search (default: ~/Library/LaunchAgents).",
+    )
+
+    autosync_status_parser = autosync_subparsers.add_parser(
+        "status",
+        help="Show whether automatic background sync is active",
+        description="Report whether the bridge LaunchAgent is installed and loaded.",
+    )
+    autosync_status_parser.add_argument(
+        "--launchagents-dir",
+        type=Path,
+        help="LaunchAgents directory to check (default: ~/Library/LaunchAgents).",
+    )
+
+    upgrade_parser = subparsers.add_parser(
+        "upgrade",
+        help="Upgrade to the latest release",
+        description=(
+            "Check for a newer release on GitHub and upgrade in place by "
+            "downloading and running the official install script. "
+            "Use --check to report the available version without installing."
+        ),
+    )
+    upgrade_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Report the latest available version without upgrading.",
+    )
+
     uninstall_parser = subparsers.add_parser(
         "uninstall",
         help="Remove the entire bridge from this machine",
@@ -713,49 +797,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--launchagents-dir",
         type=Path,
         help="LaunchAgents directory to scan (default: ~/Library/LaunchAgents).",
-    )
-
-    launchagent_common = argparse.ArgumentParser(add_help=False)
-    launchagent_common.add_argument(
-        "--interval",
-        type=int,
-        default=DEFAULT_START_INTERVAL,
-        help=f"Reconcile interval in seconds (default: {DEFAULT_START_INTERVAL}).",
-    )
-    launchagent_common.add_argument(
-        "--label",
-        help=f"LaunchAgent label (default: {GLOBAL_LAUNCHAGENT_LABEL}).",
-    )
-    launchagent_common.add_argument(
-        "--python-executable",
-        type=Path,
-        help="Python interpreter for the LaunchAgent (default: auto-detected).",
-    )
-    launchagent_common.add_argument(
-        "--cli-path",
-        type=Path,
-        help="Path to cc-codex-bridge script (default: auto-detected).",
-    )
-    launchagent_common.add_argument(
-        "--logs-dir",
-        type=Path,
-        help="Directory for LaunchAgent stdout/stderr logs (default: ~/.cc-codex-bridge/logs).",
-    )
-
-    install_parser = subparsers.add_parser(
-        "install-launchagent",
-        parents=[launchagent_common],
-        help="Install a LaunchAgent for automatic reconcile",
-        description=(
-            "Install a macOS LaunchAgent that runs 'cc-codex-bridge reconcile --all' "
-            "on a recurring interval. Writes the plist to ~/Library/LaunchAgents and "
-            "loads it via launchd. Re-running updates the plist and reloads the agent."
-        ),
-    )
-    install_parser.add_argument(
-        "--launchagents-dir",
-        type=Path,
-        help="LaunchAgents destination directory (default: ~/Library/LaunchAgents).",
     )
 
     return parser
@@ -1753,7 +1794,40 @@ def _format_uninstall_report(report, *, dry_run: bool = False) -> str:
 
 
 def _handle_launchagent_command(args: argparse.Namespace) -> int:
-    """Handle LaunchAgent rendering or installation commands."""
+    """Handle autosync install / uninstall / status subcommands."""
+    from cc_codex_bridge._colors import color_fns
+    c = color_fns()
+
+    sub = args.autosync_command
+
+    if sub == "uninstall":
+        label = args.label or GLOBAL_LAUNCHAGENT_LABEL
+        removed = uninstall_launchagent(label, launchagents_dir=args.launchagents_dir)
+        if removed is None:
+            print(c["warn"]("Autosync is not installed."))
+            return 1
+        print(f"{c['good']('Removed:')} {removed}")
+        return 0
+
+    if sub == "status":
+        from cc_codex_bridge.install_launchagent import DEFAULT_LAUNCHAGENTS_DIR as _LA_DIR
+        import subprocess
+        la_dir = Path(args.launchagents_dir or _LA_DIR).expanduser().resolve()
+        plist_path = la_dir / f"{GLOBAL_LAUNCHAGENT_LABEL}.plist"
+        if not plist_path.exists():
+            print(f"{c['warn']('AUTOSYNC:')} not installed")
+            return 0
+        result = subprocess.run(
+            ["launchctl", "list", GLOBAL_LAUNCHAGENT_LABEL],
+            capture_output=True, text=True,
+        )
+        loaded = result.returncode == 0
+        status_s = c["good"]("installed and loaded") if loaded else c["warn"]("installed, not loaded")
+        print(f"{c['key']('AUTOSYNC:')} {status_s}")
+        print(f"  {plist_path}")
+        return 0
+
+    # sub == "install"
     try:
         label = args.label or GLOBAL_LAUNCHAGENT_LABEL
         plist_bytes = build_global_launchagent_plist(
@@ -1777,21 +1851,21 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
         launchagents_dir=args.launchagents_dir,
     )
     _log_and_prune(
-        action="install-launchagent",
+        action="autosync-install",
         project="*",
         changes=(Change(kind="update" if la_existed else "create", path=destination, resource_kind="launchagent"),),
     )
-    print(f"LAUNCHAGENT_LABEL: {label}")
-    print(f"LAUNCHAGENT_PATH: {destination}")
-    print(f"NEXT_STEP: launchctl bootstrap gui/$(id -u) {destination}")
+    print(f"{c['good']('Installed:')} {destination}")
+    print(f"  Run every {args.interval}s — next step:")
+    print(f"  launchctl bootstrap gui/$(id -u) {destination}")
 
-    # Warn about existing per-project plists
+    # Warn about stale per-project plists
     la_dir = args.launchagents_dir if hasattr(args, "launchagents_dir") and args.launchagents_dir else None
     existing_plists = find_bridge_launchagents(launchagents_dir=la_dir)
     per_project_plists = [p for p in existing_plists if p != destination]
     if per_project_plists:
         print("")
-        print("WARNING: Found existing per-project LaunchAgent plists.")
+        print(c["warn"]("WARNING: Found existing per-project LaunchAgent plists."))
         print("These are no longer needed with the global reconcile --all plist.")
         print("Remove them with:")
         for plist_path in per_project_plists:

@@ -137,6 +137,36 @@ def install_launchagent(
     return destination
 
 
+def uninstall_launchagent(
+    label: str,
+    *,
+    launchagents_dir: str | Path | None = None,
+    dry_run: bool = False,
+) -> Path | None:
+    """Bootout and remove a bridge LaunchAgent plist.
+
+    Returns the plist path if it existed, None if it was not found.
+    When dry_run is True, reports what would be done without modifying anything.
+    """
+    import os
+    import subprocess
+
+    root = Path(launchagents_dir or DEFAULT_LAUNCHAGENTS_DIR).expanduser().resolve()
+    plist_path = root / f"{label}.plist"
+    if not plist_path.exists():
+        return None
+    if dry_run:
+        return plist_path
+    uid = os.getuid()
+    subprocess.run(
+        ["launchctl", "bootout", f"gui/{uid}", str(plist_path)],
+        check=False,
+        capture_output=True,
+    )
+    plist_path.unlink()
+    return plist_path
+
+
 def find_bridge_launchagents(
     *,
     launchagents_dir: str | Path | None = None,

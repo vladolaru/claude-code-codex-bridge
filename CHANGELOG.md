@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.22.0] - 2026-03-26
+
+### Added
+- `autosync` command with `install`, `uninstall`, and `status` subcommands — `autosync status` reports whether the background sync agent is installed and loaded via launchd
+
+### Changed
+- `install-launchagent` and `uninstall-launchagent` top-level commands replaced by `autosync install` and `autosync uninstall`; `--dry-run` dropped from uninstall (one-file op, trivially reversible with `autosync install`)
+- `upgrade` moved in help output to appear just above `uninstall`
+
 ## [0.21.0] - 2026-03-26
 
 ### Added
@@ -14,9 +23,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Help description colors: program name in bold magenta, version in bold green; `Detailed documentation:` link added to `--help`
 - Error messages colored bold red; program-name prefix removed; blank line before message for visual breathing room
 
+### Added
+- `autosync` command with `install`, `uninstall`, and `status` subcommands — replaces the former `install-launchagent` top-level command with a cleaner grouped interface; `autosync status` reports whether the LaunchAgent is installed and loaded
+
 ### Changed
 - `validate` command removed — `status` now covers everything `validate` did (discovery, plugin list, generated counts, exclusions) plus the disk diff; use `status` where `validate` was used
-- `print-launchagent` command removed — use `install-launchagent` directly
+- `install-launchagent` and `uninstall-launchagent` top-level commands replaced by `autosync install` and `autosync uninstall`
+- `print-launchagent` command removed — use `autosync install` directly
 - `reconcile` empty-state message changed from "No changes." to "All good. No changes needed."
 - Status output keys padded so values align in a single column; plugin sub-lines (source, skills, agents, prompts) each on their own indented line with aligned `=` signs
 
