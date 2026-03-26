@@ -174,7 +174,10 @@ def _handle_upgrade_command(args: argparse.Namespace) -> int:
 
     if _is_editable_install():
         print(c["warn"]("Development install detected — upgrade is not supported."))
-        print("  Use git pull and pip install -e . to update your local checkout.")
+        print("  To update your checkout:  git pull && pip install -e .")
+        print("  To switch to a release:   run the install script in a shell without an active venv:")
+        print("    deactivate  # or open a new terminal")
+        print("    curl -fsSL https://github.com/vladolaru/claude-code-codex-bridge/releases/latest/download/install.sh | bash")
         return 1
 
     latest = _fetch_latest_version()

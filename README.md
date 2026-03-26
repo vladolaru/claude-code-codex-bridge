@@ -60,6 +60,15 @@ cc-codex-bridge status --all
 
 You should see `STATUS: in_sync` for every project. Done — Claude Code and Codex now share the same plugins, skills, agents, and instructions.
 
+### Staying up to date
+
+```bash
+cc-codex-bridge upgrade           # upgrade to the latest release
+cc-codex-bridge upgrade --check   # check without installing
+```
+
+`doctor` also reports if a newer version is available each time you run it.
+
 ---
 
 ## What it reads
@@ -164,6 +173,19 @@ cc-codex-bridge upgrade --check   # check for a newer version without installing
 `upgrade` fetches the latest release from GitHub, compares it with the installed version, and runs the official install script in place if a newer version is available. After upgrading, run `cc-codex-bridge reconcile --all` to pick up any changes in how the new version generates Codex artifacts.
 
 `doctor` also reports if a newer version is available as part of its environment checks.
+
+`upgrade` does not work with development installs (editable installs via `pip install -e .`). To switch from a development install to a release install, run the install script in a shell without an active venv:
+
+```bash
+deactivate  # or open a new terminal
+curl -fsSL https://github.com/vladolaru/claude-code-codex-bridge/releases/latest/download/install.sh | bash
+```
+
+To update a development install, use git instead:
+
+```bash
+git pull && pip install -e .
+```
 
 ### From a local checkout
 
