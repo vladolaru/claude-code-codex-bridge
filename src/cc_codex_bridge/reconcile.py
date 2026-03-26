@@ -673,6 +673,7 @@ def clean_project(
     changes: list[Change] = []
 
     managed_project_files = _validated_managed_project_files(previous_state)
+    preserve_agents_md = _claude_symlink_points_to_agents(project_root_path)
 
     # Remove managed project skill directories
     managed_project_skill_dirs = _validated_managed_project_skill_dirs(previous_state)
@@ -688,13 +689,18 @@ def clean_project(
         path = project_root_path / relative
         if any(path == sd or _is_under(path, sd) for sd in skill_dirs_to_remove):
             continue
+        if preserve_agents_md and relative == "AGENTS.md":
+            continue
         if path.exists() and not path.is_symlink():
             stored_hash = managed_project_files[relative]
-            if stored_hash:
-                current_hash = hash_file_content(path.read_bytes())
-                if current_hash != stored_hash:
-                    # File was externally modified — don't remove it
-                    continue
+            if not stored_hash:
+                # Migrated v8 entries have no trusted baseline, so they must
+                # not authorize file removal.
+                continue
+            current_hash = hash_file_content(path.read_bytes())
+            if current_hash != stored_hash:
+                # File was externally modified — don't remove it
+                continue
             changes.append(Change("remove", path))
 
     # Bootstrap reversal: when both AGENTS.md and CLAUDE.md are scheduled for
@@ -1506,11 +1512,14 @@ def _compute_project_file_changes(
             # content, the file was externally modified — skip the update to
             # avoid overwriting user edits.
             stored_hash = previous_state.managed_project_files.get(relative, "") if previous_state else ""
-            if stored_hash:
-                current_hash = hash_file_content(existing)
-                if current_hash != stored_hash:
-                    # File was externally modified — skip update to preserve user edits
-                    continue
+            if not stored_hash:
+                # Migrated v8 entries have no trusted baseline, so they must
+                # not authorize overwriting existing files.
+                continue
+            current_hash = hash_file_content(existing)
+            if current_hash != stored_hash:
+                # File was externally modified — skip update to preserve user edits
+                continue
         else:
             # Only CLAUDE.md may be adopted on first reconcile (bootstrap: existing
             # content is replaced with the @AGENTS.md shim). All other project
@@ -1533,10 +1542,13 @@ def _compute_project_file_changes(
             # content, the file was externally modified — skip the removal to
             # avoid deleting user-edited content.
             stored_hash = previous_state.managed_project_files.get(relative, "") if previous_state else ""
-            if stored_hash:
-                current_hash = hash_file_content(path.read_bytes())
-                if current_hash != stored_hash:
-                    continue
+            if not stored_hash:
+                # Migrated v8 entries have no trusted baseline, so they must
+                # not authorize file removal.
+                continue
+            current_hash = hash_file_content(path.read_bytes())
+            if current_hash != stored_hash:
+                continue
             changes.append(Change("remove", path))
 
     return tuple(changes)
@@ -2345,8 +2357,26 @@ def _retained_stale_managed_project_files(
         path = desired.project_root / relative
         if not path.exists() or path.is_symlink():
             continue
-        retained[relative] = stored_hash
+        if stored_hash:
+            retained[relative] = stored_hash
+            continue
+        try:
+            retained[relative] = hash_file_content(path.read_bytes())
+        except OSError:
+            retained[relative] = ""
     return retained
+
+
+def _claude_symlink_points_to_agents(project_root: Path) -> bool:
+    """Return True when CLAUDE.md is a symlink to the project's AGENTS.md."""
+    claude_path = project_root / "CLAUDE.md"
+    agents_path = project_root / "AGENTS.md"
+    if not claude_path.is_symlink():
+        return False
+    try:
+        return claude_path.resolve() == agents_path.resolve()
+    except OSError:
+        return False
 
 
 def _validated_managed_project_skill_dirs(previous_state: BridgeState) -> set[str]:

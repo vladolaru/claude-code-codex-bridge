@@ -2465,6 +2465,7 @@ def test_clean_uses_state_recorded_codex_home(make_project, tmp_path: Path):
 def test_clean_dry_run_reports_managed_file_removal(make_project, tmp_path: Path):
     """clean --dry-run must report managed project files in the removal set."""
     from cc_codex_bridge.reconcile import clean_project
+    from cc_codex_bridge.registry import hash_file_content
     from cc_codex_bridge.state import BridgeState
 
     project_root, _ = make_project()
@@ -2484,7 +2485,7 @@ def test_clean_dry_run_reports_managed_file_removal(make_project, tmp_path: Path
         project_root=project_root.resolve(),
         codex_home=codex.resolve(),
         bridge_home=bridge_home.resolve(),
-        managed_project_files={"CLAUDE.md": ""},
+        managed_project_files={"CLAUDE.md": hash_file_content(b"@AGENTS.md\n")},
     )
     state_dir = project_state_dir(project_root, bridge_home=bridge_home)
     state_path = state_dir / "state.json"
@@ -4886,6 +4887,105 @@ def test_reconcile_keeps_drifted_removed_file_managed_for_future_reconcile(
     assert generated_agent.read_text() == "# user edited\n"
 
 
+def test_v8_migrated_managed_project_agent_is_not_overwritten_on_first_reconcile(
+    tmp_path: Path,
+):
+    """A v8-managed project agent with no stored hash must not be overwritten."""
+    from cc_codex_bridge.reconcile import compute_project_drift
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# Project instructions\n")
+
+    project_agents_dir = project_root / ".claude" / "agents"
+    project_agents_dir.mkdir(parents=True)
+    (project_agents_dir / "foo.md").write_text(
+        "---\nname: foo\ndescription: Generated agent\n---\n\nFresh instructions.\n"
+    )
+
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    build = build_project_desired_state(
+        project_root,
+        codex_home=codex_home,
+        bridge_home=bridge_home,
+        cache_dir=tmp_path / "claude-cache",
+    )
+    assert build.desired_state is not None
+
+    generated_agent = project_root / ".codex" / "agents" / "foo.toml"
+    generated_agent.parent.mkdir(parents=True)
+    generated_agent.write_text("# user edited\n")
+
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "state.json").write_text(json.dumps({
+        "version": 8,
+        "project_root": str(project_root.resolve()),
+        "codex_home": str(codex_home.resolve()),
+        "bridge_home": str(bridge_home.resolve()),
+        "managed_project_files": [".codex/agents/foo.toml"],
+        "managed_project_skill_dirs": [],
+    }, indent=2))
+
+    report = reconcile_desired_state(build.desired_state)
+
+    assert generated_agent.read_text() == "# user edited\n"
+    assert not any(
+        change.path == generated_agent and change.kind == "update"
+        for change in report.changes
+    )
+    assert compute_project_drift(project_root, bridge_home=bridge_home) == [
+        ".codex/agents/foo.toml"
+    ]
+
+
+def test_v8_migrated_stale_project_agent_is_not_removed_on_first_reconcile(
+    tmp_path: Path,
+):
+    """A stale v8-managed project agent with no stored hash must be preserved."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# Project instructions\n")
+
+    generated_agent = project_root / ".codex" / "agents" / "foo.toml"
+    generated_agent.parent.mkdir(parents=True)
+    generated_agent.write_text("# user edited\n")
+
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "state.json").write_text(json.dumps({
+        "version": 8,
+        "project_root": str(project_root.resolve()),
+        "codex_home": str(codex_home.resolve()),
+        "bridge_home": str(bridge_home.resolve()),
+        "managed_project_files": [".codex/agents/foo.toml"],
+        "managed_project_skill_dirs": [],
+    }, indent=2))
+
+    build = build_project_desired_state(
+        project_root,
+        codex_home=codex_home,
+        bridge_home=bridge_home,
+        cache_dir=tmp_path / "claude-cache",
+    )
+    assert build.desired_state is not None
+
+    report = reconcile_desired_state(build.desired_state)
+
+    assert generated_agent.exists()
+    assert generated_agent.read_text() == "# user edited\n"
+    assert not any(
+        change.path == generated_agent and change.kind == "remove"
+        for change in report.changes
+    )
+
+    state_payload = json.loads((state_dir / "state.json").read_text())
+    assert state_payload["managed_project_files"][".codex/agents/foo.toml"] != ""
+
+
 def test_v8_migrated_preserved_agents_md_gains_drift_protection(
     make_plugin_version, tmp_path: Path
 ):
@@ -4926,3 +5026,36 @@ def test_v8_migrated_preserved_agents_md_gains_drift_protection(
     (project_root / "AGENTS.md").write_text(agents_content + "\n## Added by user\n")
 
     assert compute_project_drift(project_root, bridge_home=bridge_home) == ["AGENTS.md"]
+
+
+def test_clean_preserves_agents_md_when_claude_is_symlink_to_it(
+    make_plugin_version, tmp_path: Path
+):
+    """Clean must not remove AGENTS.md when CLAUDE.md is a symlink to it."""
+    from cc_codex_bridge.reconcile import clean_project
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "CLAUDE.md").write_text("# Original instructions\n")
+
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("review",),
+    )
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+
+    desired = _build_desired(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    claude_path = project_root / "CLAUDE.md"
+    agents_path = project_root / "AGENTS.md"
+    claude_path.unlink()
+    claude_path.symlink_to(agents_path.name)
+
+    report = clean_project(project_root, bridge_home=bridge_home)
+
+    assert agents_path.exists()
+    assert claude_path.is_symlink()
+    assert claude_path.resolve() == agents_path.resolve()
+    removed_paths = {c.path for c in report.changes if c.kind == "remove"}
+    assert agents_path not in removed_paths

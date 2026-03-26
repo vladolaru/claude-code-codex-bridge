@@ -201,7 +201,7 @@ The project state file (at `~/.cc-codex-bridge/projects/<hash>/state.json`) reco
 - bridge home path
 - managed project files as a path-to-content-hash mapping (including `CLAUDE.md`, `AGENTS.md`, and agent `.toml` files under `.codex/agents/`)
 - managed project skill directory names (tracked separately for directory-snapshot comparison)
-- state version (currently 9; v8 state files are migrated on read, and the next reconcile backfills hashes for preserved managed files from on-disk content)
+- state version (currently 9; v8 state files are migrated on read, empty migrated hashes are treated as preserve-only until a trusted hash is recorded, and the next reconcile backfills hashes for preserved or retained managed files from on-disk content when possible)
 
 The global registry records:
 
@@ -213,7 +213,9 @@ The global registry records:
 ### Safety rules
 
 - project files are never overwritten unless they were previously recorded as managed, and their on-disk content hash matches the stored hash (drift detection)
+- migrated v8 entries with an empty stored hash do not authorize update or removal; they are preserved until reconcile can record a trusted hash from the on-disk file
 - externally modified managed files are preserved: reconcile skips updates, clean skips removal
+- `clean` preserves `AGENTS.md` when `CLAUDE.md` is a symlink to it, so cleanup does not leave a dangling project instructions symlink
 - the state file may only authorize generator-owned project paths: `CLAUDE.md`, `AGENTS.md`, and `.codex/agents/*.toml` (project skill directories are tracked separately via `managed_project_skill_dirs`)
 - state-tracked project skill directories must be plain generated directory names; traversal, absolute paths, and nested paths are rejected as corrupted state
 - generated project-relative paths are normalized and may not use absolute paths or `..` traversal
@@ -658,7 +660,7 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
   - report `in_sync` vs `pending_changes`
   - report `invalid` when agent translation contains unsupported Claude tools
   - report categorized project-file vs skill create/update/remove changes
-  - report drifted managed files as a separate `DRIFTED` category (drift is computed by comparing stored content hashes against on-disk content for all managed project files; missing files and symlinks are excluded, and v8-migrated preserved files gain hashes on the next reconcile)
+  - report drifted managed files as a separate `DRIFTED` category (drift is computed by comparing stored content hashes against on-disk content for all managed project files; missing files and symlinks are excluded, and v8-migrated managed files with empty hashes are preserved until reconcile can backfill a hash)
   - include agent translation diagnostics in both text and JSON output when invalid
   - report effective excluded plugin/skill/agent ids
   - support JSON output with `--json`
