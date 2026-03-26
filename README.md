@@ -23,7 +23,7 @@ The bridge discovers these canonical Claude Code sources:
 | Project agents | `.claude/agents/<agent-name>.md` |
 | Project commands | `.claude/commands/<command-name>.md` |
 | User global instructions | `~/.claude/CLAUDE.md` |
-| Project instructions | `AGENTS.md` (hand-authored, never modified) |
+| Project instructions | `AGENTS.md` (created by bootstrap if absent, never overwritten once it exists) |
 
 Plugin enablement is checked by running `claude plugins list --json`, so only plugins you have enabled in Claude Code are bridged.
 
@@ -67,7 +67,7 @@ The bridge translates between two different extensibility models. This table sho
 | **Skills** (`SKILL.md` in a directory) | **Skills** (`SKILL.md` in a directory) | Copied as self-contained directory trees under `~/.codex/skills/`. The `name:` frontmatter is rewritten to match the generated directory name. Plugin resource paths (`$PLUGIN_ROOT`, sibling references) are rewritten to vendored absolute paths. |
 | **Agents** (`.md` with frontmatter) | **Agents** (`.toml` with role config) | Translated into self-contained `.toml` files. `name` and `description` map directly. The markdown body becomes `developer_instructions`. Claude `tools` are mapped to Codex `sandbox_mode` (`Bash`/`Write`/`Edit` → `workspace-write`, read-only tools → `read-only`). |
 | **Commands** (`.md` slash commands) | **Prompts** (`.md` in `~/.codex/prompts/`) | Translated into native Codex prompt files. `description` and `argument-hint` frontmatter are preserved. `$ARGUMENTS` and positional args (`$1`-`$9`) pass through natively — Codex supports the same syntax. `allowed-tools` is dropped (Codex controls tool access differently). |
-| **`CLAUDE.md`** (project instructions) | **`AGENTS.md`** (project instructions) | The bridge generates `CLAUDE.md` as the shim `@AGENTS.md` so both CLIs read the same shared instructions. `AGENTS.md` is the canonical source, never modified by the bridge. |
+| **`CLAUDE.md`** (project instructions) | **`AGENTS.md`** (project instructions) | The bridge generates `CLAUDE.md` as the shim `@AGENTS.md` so both CLIs read the same shared instructions. `AGENTS.md` is the canonical source; the bridge creates it during bootstrap but never overwrites it once it exists. |
 | **`~/.claude/CLAUDE.md`** (global instructions) | **`~/.codex/AGENTS.md`** (global instructions) | Content is copied with a bridge ownership sentinel appended. |
 | **Plugin resources** (`scripts/`, `references/`, etc.) | Vendored under `~/.cc-codex-bridge/plugins/` | Resource directories referenced by skills, agents, or commands via `$PLUGIN_ROOT` or `${CLAUDE_PLUGIN_ROOT}` are copied to bridge-internal storage. All references in generated content are rewritten to absolute vendored paths. Transitive dependencies are detected and vendored automatically. |
 
@@ -76,7 +76,7 @@ The bridge translates between two different extensibility models. This table sho
 | Entity | Naming rule |
 |--------|-------------|
 | Skills | Bare directory name (e.g., `code-review`). Collisions get `-alt`, `-alt-2` suffixes. User skills win the bare name over plugin skills. |
-| Agents | `<marketplace>-<plugin>-<agent>.toml` for plugins, `user-<agent>.toml` for user scope, `project-<agent>.toml` for project scope. |
+| Agents | Bare agent file stem (e.g., `reviewer.toml`). Collisions get `-alt`, `-alt-2` suffixes. User/project agents win the bare name over plugin agents. |
 | Prompts | Bare command filename (e.g., `review.md`). Project commands get a `--<project-dirname>` suffix (e.g., `build--my-app.md`). Collisions resolved with `-alt` suffixes. |
 
 ## Install
@@ -116,10 +116,9 @@ cc-codex-bridge doctor
 ### Single project
 
 ```bash
-cc-codex-bridge validate --project .           # check without writing
+cc-codex-bridge status --project .             # inspect sync state (discovery + pending changes)
 cc-codex-bridge reconcile --dry-run --project . # preview changes
 cc-codex-bridge reconcile --dry-run --diff --project .  # preview with diffs
-cc-codex-bridge status --project .             # inspect current state
 cc-codex-bridge reconcile --project .          # apply changes
 ```
 
@@ -129,7 +128,6 @@ cc-codex-bridge reconcile --project .          # apply changes
 cc-codex-bridge reconcile --all                # reconcile all registered projects
 cc-codex-bridge reconcile --all --dry-run      # preview
 cc-codex-bridge status --all                   # bulk status overview
-cc-codex-bridge validate --all                 # bulk validation
 ```
 
 Bulk operations merge scan-discovered projects (from `~/.cc-codex-bridge/config.toml`) with previously reconciled projects from the registry.
@@ -180,8 +178,8 @@ cc-codex-bridge config show --global              # global config only
 cc-codex-bridge config show --json                # machine-readable output
 cc-codex-bridge config check                      # audit config against environment
 
-cc-codex-bridge config scan add "~/Work/a8c/*"    # add a scan path
-cc-codex-bridge config scan remove "~/Work/a8c/*" # remove a scan path
+cc-codex-bridge config scan add "~/Work/projects/*"    # add a scan path
+cc-codex-bridge config scan remove "~/Work/projects/*" # remove a scan path
 cc-codex-bridge config scan list                  # list current scan paths
 
 cc-codex-bridge config exclude add skill security-reviewer   # add exclusion
@@ -205,7 +203,6 @@ Config commands auto-detect scope: inside a project targets `.codex/bridge.toml`
 
 ```bash
 cc-codex-bridge install-launchagent            # install LaunchAgent plist
-cc-codex-bridge print-launchagent              # preview plist without installing
 ```
 
 The LaunchAgent runs `reconcile --all` every 30 minutes. Set a different interval with `--interval <seconds>` when installing.
@@ -226,14 +223,14 @@ Persist exclusions globally in `~/.cc-codex-bridge/config.toml` (applies to all 
 
 ```toml
 [exclude]
-plugins = ["vladolaru-claude-code-plugins/yoloing-safe"]
+plugins = ["my-marketplace/plugin-name"]
 ```
 
 Or per project in `.codex/bridge.toml`:
 
 ```toml
 [exclude]
-plugins = ["market/pirategoat-tools"]
+plugins = ["market/heavy-plugin"]
 skills = ["market/prompt-engineer/internal-cc-only"]
 agents = ["market/prompt-engineer/reviewer.md"]
 commands = ["market/plugin/debug.md"]
@@ -246,12 +243,12 @@ Global and project exclusions are **combined** (both apply). CLI `--exclude-*` f
 The reconcile engine is conservative. It tracks which files it created and refuses to overwrite anything it did not generate.
 
 **Never modified:**
-- `AGENTS.md` (hand-authored project instructions)
 - Hand-authored `CLAUDE.md` files
 - Hand-authored `.codex/agents/*.toml` files
 - Existing non-generated skill directories or prompt files
 
 **Generator-owned (tracked in registry and state):**
+- `AGENTS.md` (created by bootstrap from original `CLAUDE.md`; never overwritten once it exists; removed by `clean` only during bootstrap reversal when unedited)
 - `CLAUDE.md` (only when it is the `@AGENTS.md` shim)
 - `.codex/agents/*.toml` (generated from Claude agents)
 - `~/.codex/skills/`, `~/.codex/agents/`, `~/.codex/prompts/` (generated entries)

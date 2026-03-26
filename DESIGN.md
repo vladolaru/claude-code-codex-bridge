@@ -123,7 +123,7 @@ The runtime is a deterministic pipeline:
 18. build a full desired state for project files, Codex skill directories, global agent files, and global instructions
 19. inspect/preview or reconcile that desired state with ownership and rollback protections
 
-The reconcile pipeline is shared by `validate`, `status`, and `reconcile`.
+The reconcile pipeline is shared by `status` and `reconcile`.
 
 Utility commands such as `doctor` and the LaunchAgent commands are intentionally separate from the reconcile pipeline.
 
@@ -316,8 +316,8 @@ Scan-based discovery lives in `src/cc_codex_bridge/scan.py` and enables bulk pro
 **Config file:** `~/.cc-codex-bridge/config.toml` (user-authored, never overwritten by the bridge)
 
 ```toml
-scan_paths = ["~/Work/a8c/*", "~/Work/a8c/.duplicates/*"]
-exclude_paths = ["~/Work/a8c/scratch"]
+scan_paths = ["~/Work/projects/*"]
+exclude_paths = ["~/Work/projects/scratch"]
 ```
 
 - `scan_paths`: shell-style glob patterns with `~` expansion
@@ -379,9 +379,10 @@ Optional handled fields:
 
 Current mapping rules:
 
-- plugin agents: agent name = `<marketplace>_<plugin>_<normalized_agent>`, install filename = `<marketplace>-<plugin>-<agent>.toml`, scope = `global`
-- user agents: agent name = `user_<normalized_agent>`, install filename = `user-<agent>.toml`, scope = `global`
-- project agents: agent name = `project_<normalized_agent>`, install filename = `project-<agent>.toml`, scope = `project`
+- plugin agents: agent name = bare stem, install filename = `<stem>.toml`, scope = `global`
+- user agents: agent name = bare stem, install filename = `<stem>.toml`, scope = `global`
+- project agents: agent name = bare stem, install filename = `<stem>.toml`, scope = `project`
+- collisions across scopes resolved by `assign_agent_names()`: user/project agents win the bare name; plugin agents receive `-alt`, `-alt-2`, … suffixes
 - normalized generated names reject absolute paths, `..` traversal, and values that collapse to an empty identifier
 - developer_instructions = markdown body after frontmatter, normalized to end with a trailing newline when non-empty
 - sandbox_mode derived from Claude tool list via `derive_sandbox_mode()`:
@@ -645,10 +646,6 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
   - run machine-level environment checks without requiring a project
   - report Python version support, Claude CLI availability, Claude cache visibility, Codex-home writability, LaunchAgents directory access, and CLI PATH visibility
   - support JSON output with `--json`
-- `validate`
-  - run discovery, translation, and rendering in memory
-  - fail non-zero on unsupported-agent diagnostics
-  - print a summary
 - `reconcile --dry-run`
   - compute reconcile changes without writing
   - print change summary
@@ -656,9 +653,11 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
   - compute reconcile changes without writing
   - print change summary plus unified diffs for managed text files
 - `status`
+  - run discovery, translation, and rendering in memory (supersedes the former `validate` command)
   - compute reconcile changes without writing
   - report `in_sync` vs `pending_changes`
   - report `invalid` when agent translation contains unsupported Claude tools
+  - print full discovery summary: project root, AGENTS.md path, CLAUDE.md action, plugin list with per-plugin skill/agent/prompt counts, generated totals, exclusions
   - report categorized project-file vs skill create/update/remove changes
   - report drifted managed files as a separate `DRIFTED` category (drift is computed by comparing stored content hashes against on-disk content for all managed project files; missing files and symlinks are excluded, and v8-migrated managed files with empty hashes are preserved until reconcile can backfill a hash)
   - include agent translation diagnostics in both text and JSON output when invalid
@@ -685,10 +684,9 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
   - support `--dry-run` for preview
   - support `--dry-run --json` for structured output
   - support `--launchagents-dir` override
-Pipeline commands (`reconcile`, `validate`, `status`) support `--all` to operate on all projects from the registry and scan config:
+Pipeline commands (`reconcile`, `status`) support `--all` to operate on all projects from the registry and scan config:
 
 - `reconcile --all`: run the full discover-translate-reconcile pipeline for each project
-- `validate --all`: run discovery and validation for each project (always dry-run)
 - `status --all`: show sync state for each project (always dry-run)
 
 `--all` behavior:
@@ -696,18 +694,21 @@ Pipeline commands (`reconcile`, `validate`, `status`) support `--all` to operate
 - reads the projects list from the global registry and merges with scan-discovered projects
 - skips inaccessible or invalid projects with an error entry in the report
 - exit code 0 if all succeed, 1 if any error
-- supports `--dry-run` for preview (`reconcile --all` only; `validate` and `status` are always dry-run)
+- supports `--dry-run` for preview (`reconcile --all` only; `status` is always dry-run)
 - supports `--json` for structured output (`reconcile --all` and `status --all`)
 - `--all` is mutually exclusive with `--project` (runtime check)
 - scan discovery results are included in both text and JSON output when scan config exists
 
-Pipeline commands (`validate`, `status`, `reconcile`) also support:
+`reconcile` also supports exclusion flags:
 
-- `--claude-home` to override the `~/.claude` base path for user-level discovery
 - `--exclude-plugin marketplace/plugin`
 - `--exclude-skill name` or `scope/name` or `marketplace/plugin/skill`
 - `--exclude-agent name.md` or `scope/name.md` or `marketplace/plugin/agent.md`
 - `--exclude-command name` or `scope/name` or `marketplace/plugin/name`
+
+Both `status` and `reconcile` support:
+
+- `--claude-home` to override the `~/.claude` base path for user-level discovery
 
 Exclusion IDs use part-count disambiguation: 1 part matches all scopes, 2 parts match by scope (`user` or `project`), 3 parts match plugin sources.
 
@@ -733,8 +734,6 @@ Log commands are utility commands independent of the reconcile pipeline.
 
 ### LaunchAgent commands
 
-- `print-launchagent`
-  - render the global `reconcile --all` LaunchAgent plist to stdout
 - `install-launchagent`
   - write the global plist into a LaunchAgents directory and print the `launchctl bootstrap` next step
   - warn about existing per-project plists with removal commands
@@ -743,7 +742,7 @@ LaunchAgent commands have their own parser and do not accept pipeline flags (`--
 
 ### CLI invariants
 
-- `validate`, `status`, and `reconcile` share the same pipeline and error types
+- `status` and `reconcile` share the same pipeline and error types
 - `doctor` is project-independent and does not require `AGENTS.md`
 - `DiscoveryError`, `TranslationError`, and `ReconcileError` are surfaced as user-facing errors with exit code `1`
 - filesystem `OSError` failures during CLI execution are also surfaced as user-facing errors with exit code `1`
@@ -830,7 +829,7 @@ The config file serves three purposes:
 log_retention_days = 90   # default; minimum 1
 
 [exclude]
-plugins = ["vladolaru-claude-code-plugins/yoloing-safe"]
+plugins = ["my-marketplace/plugin-name"]
 skills = []
 agents = []
 commands = []
@@ -921,6 +920,10 @@ Current runtime module responsibilities:
   - plugin resource path detection and rewriting for `$PLUGIN_ROOT` references, transitive dependency detection for vendored scripts
 - `translate_prompts.py`
   - Claude command translation to `GeneratedPrompt` objects (native Codex prompt files), variable pass-through, provenance marking, and plugin resource vendoring support (when `bridge_home` is provided)
+- `rewrite_references.py`
+  - rewrites plugin-qualified skill and command references in generated content to their Codex equivalents
+- `validate_skill.py`
+  - validates generated skill metadata against the Agent Skills Standard (name, description, file structure)
 - `reconcile.py`
   - desired-state modeling, diffing, atomic apply, report formatting
   - shared project build pipeline via `build_project_desired_state()`
