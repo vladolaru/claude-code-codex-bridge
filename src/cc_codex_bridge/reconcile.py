@@ -479,6 +479,15 @@ def build_project_desired_state(
     )
     all_diagnostics = (*all_diagnostics, *skill_diagnostics, *prompt_diagnostics)
 
+    # Exclude skills whose target root is a symlink — the project (or user)
+    # already provides Codex-visible skills through the symlink.
+    codex_home_path = Path(codex_home or DEFAULT_CODEX_HOME).expanduser()
+    project_root_path = result.project.root
+    if (project_root_path / SKILLS_RELATIVE_ROOT).is_symlink():
+        all_project_skills = ()
+    if (codex_home_path / "skills").is_symlink():
+        all_global_skills = ()
+
     total_skill_count = len(all_global_skills) + len(all_project_skills)
     prompt_count = len(all_prompts)
 
