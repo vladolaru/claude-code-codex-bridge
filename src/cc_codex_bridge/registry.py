@@ -228,29 +228,27 @@ class GlobalSkillRegistry:
         return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
+def _hash_bytes(content: bytes) -> str:
+    """Length-prefixed sha256 hash of raw bytes."""
+    digest = hashlib.sha256()
+    digest.update(len(content).to_bytes(8, "big"))
+    digest.update(content)
+    return f"sha256:{digest.hexdigest()}"
+
+
 def hash_agent_file(content: str) -> str:
     """Return the deterministic content hash for one generated agent .toml file."""
-    digest = hashlib.sha256()
-    encoded = content.encode("utf-8")
-    digest.update(len(encoded).to_bytes(8, "big"))
-    digest.update(encoded)
-    return f"sha256:{digest.hexdigest()}"
+    return _hash_bytes(content.encode("utf-8"))
 
 
 def hash_prompt_content(content: bytes) -> str:
     """Return the deterministic content hash for one generated prompt file."""
-    digest = hashlib.sha256()
-    digest.update(len(content).to_bytes(8, "big"))
-    digest.update(content)
-    return f"sha256:{digest.hexdigest()}"
+    return _hash_bytes(content)
 
 
 def hash_file_content(content: bytes) -> str:
     """Return the deterministic content hash for a managed file."""
-    digest = hashlib.sha256()
-    digest.update(len(content).to_bytes(8, "big"))
-    digest.update(content)
-    return f"sha256:{digest.hexdigest()}"
+    return _hash_bytes(content)
 
 
 def hash_generated_skill(skill: GeneratedSkill) -> str:
