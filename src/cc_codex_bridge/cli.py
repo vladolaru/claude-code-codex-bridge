@@ -1690,12 +1690,13 @@ def _format_all_report(report, *, dry_run: bool = False, is_status: bool = False
     for r in report.results:
         change_count = len(r.report.changes)
         if change_count:
-            noun = "pending change" if is_status else "change"
-            count_s = c["warn"](f"{change_count} {noun}{'s' if change_count != 1 else ''}")
-            lines.append(f"{c['good']('OK:')} {r.project_root} ({count_s})")
+            if is_status:
+                detail = c["warn"](f"{change_count} pending change{'s' if change_count != 1 else ''}")
+            else:
+                detail = c["good"](f"{change_count} change{'s' if change_count != 1 else ''} applied")
+            lines.append(f"{c['good']('OK:')} {r.project_root} ({detail})")
         else:
-            label = c["good"]("in sync") if is_status else c["good"]("no changes")
-            lines.append(f"{c['good']('OK:')} {r.project_root} ({label})")
+            lines.append(f"{c['good']('OK:')} {r.project_root} ({c['good']('in sync')})")
 
     for e in report.errors:
         lines.append(f"{c['bad']('ERROR:')} {e.project_root} — {e.error}")

@@ -33,7 +33,7 @@ def format_skill_validation_diagnostics(
 def _format_skill_validation_diagnostic(diagnostic: SkillValidationDiagnostic) -> str:
     """Render one skill validation diagnostic."""
     warnings_text = "; ".join(diagnostic.warnings)
-    return f"  skill '{diagnostic.skill_name}' ({diagnostic.source_path}): {warnings_text}"
+    return f"  skill '{diagnostic.skill_name}' ({diagnostic.source_path}): bridged with warnings — {warnings_text}"
 
 
 SIBLING_SKILL_REF_RE = re.compile(r"(?<!\.)\.\./(?P<skill>[A-Za-z0-9._-]+)/")
