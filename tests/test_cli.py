@@ -1095,7 +1095,7 @@ def test_uninstall_exits_nonzero_on_cleanup_error(make_project, tmp_path: Path, 
         project_root=project_root.resolve(),
         codex_home=codex_home.resolve(),
         bridge_home=bridge_home.resolve(),
-        managed_project_files=("AGENTS.md",),  # invalid
+        managed_project_files={"AGENTS.md": ""},  # invalid
     )
     state_path.write_text(state.to_json())
 

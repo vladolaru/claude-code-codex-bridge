@@ -138,7 +138,11 @@ def test_reconcile_preserves_managed_claude_symlink(make_project, make_plugin_ve
 
     report = reconcile_desired_state(_build_desired(project_root, cache_root, codex_home))
 
-    assert report.changes == ()
+    # The only change allowed is a state update (the content hash for
+    # CLAUDE.md changes from a computed value to empty when it becomes a
+    # symlink).  No project file creates/updates/removes should happen.
+    non_state_changes = [c for c in report.changes if c.resource_kind != "state"]
+    assert non_state_changes == []
     assert claude_md.is_symlink()
     assert claude_md.resolve() == (project_root / "AGENTS.md").resolve()
 
@@ -2357,7 +2361,7 @@ def test_clean_uses_state_recorded_codex_home(make_project, tmp_path: Path):
         project_root=project_root.resolve(),
         codex_home=actual_codex.resolve(),
         bridge_home=bridge_home.resolve(),
-        managed_project_files=(),
+        managed_project_files={},
     )
     state_dir = project_state_dir(project_root, bridge_home=bridge_home)
     state_path = state_dir / "state.json"
@@ -2416,7 +2420,7 @@ def test_clean_dry_run_reports_managed_file_removal(make_project, tmp_path: Path
         project_root=project_root.resolve(),
         codex_home=codex.resolve(),
         bridge_home=bridge_home.resolve(),
-        managed_project_files=("CLAUDE.md",),
+        managed_project_files={"CLAUDE.md": ""},
     )
     state_dir = project_state_dir(project_root, bridge_home=bridge_home)
     state_path = state_dir / "state.json"
@@ -2457,7 +2461,7 @@ def test_clean_removes_full_project_skill_directory(make_project, tmp_path: Path
         project_root=project_root.resolve(),
         codex_home=codex.resolve(),
         bridge_home=bridge_home.resolve(),
-        managed_project_files=(),
+        managed_project_files={},
         managed_project_skill_dirs=("demo",),
     )
     state_dir = project_state_dir(project_root, bridge_home=bridge_home)
@@ -2601,7 +2605,7 @@ def test_clean_rejects_symlinked_projects_dir_under_bridge_home(make_project, tm
         project_root=project_root.resolve(),
         codex_home=codex_home.resolve(),
         bridge_home=bridge_home.resolve(),
-        managed_project_files=("CLAUDE.md",),
+        managed_project_files={"CLAUDE.md": ""},
     )
     state_path.write_text(state.to_json())
 
@@ -2637,7 +2641,7 @@ def test_clean_rejects_unexpected_managed_project_skill_dirs_in_state(make_proje
         project_root=project_root.resolve(),
         codex_home=codex_home.resolve(),
         bridge_home=bridge_home.resolve(),
-        managed_project_files=(),
+        managed_project_files={},
         managed_project_skill_dirs=("../../../bridge-victim-test",),
     )
     state_path.write_text(state.to_json())
@@ -2668,9 +2672,9 @@ def test_clean_rejects_unexpected_managed_project_files_in_state(make_project, t
         project_root=project_root.resolve(),
         codex_home=codex_home.resolve(),
         bridge_home=bridge_home.resolve(),
-        managed_project_files=(
-            "AGENTS.md",  # NOT a valid managed path
-        ),
+        managed_project_files={
+            "AGENTS.md": "",  # NOT a valid managed path
+        },
     )
     state_path.write_text(state.to_json())
 
@@ -2832,7 +2836,7 @@ def test_uninstall_has_errors_on_cleanup_failure(make_project, tmp_path: Path):
         project_root=project_root.resolve(),
         codex_home=codex_home.resolve(),
         bridge_home=bridge_home.resolve(),
-        managed_project_files=("AGENTS.md",),  # invalid
+        managed_project_files={"AGENTS.md": ""},  # invalid
     )
     state_path.write_text(state.to_json())
 
@@ -2937,7 +2941,7 @@ def test_clean_removes_plugin_resources(make_project, tmp_path: Path):
         project_root=project_root.resolve(),
         codex_home=codex.resolve(),
         bridge_home=bridge_home.resolve(),
-        managed_project_files=(),
+        managed_project_files={},
     )
     state_dir = project_state_dir(project_root, bridge_home=bridge_home)
     state_path = state_dir / "state.json"
@@ -2985,7 +2989,7 @@ def test_clean_dry_run_reports_plugin_resource_removal(make_project, tmp_path: P
         project_root=project_root.resolve(),
         codex_home=codex.resolve(),
         bridge_home=bridge_home.resolve(),
-        managed_project_files=(),
+        managed_project_files={},
     )
     state_dir = project_state_dir(project_root, bridge_home=bridge_home)
     state_path = state_dir / "state.json"
@@ -3028,7 +3032,7 @@ def test_clean_skips_nonexistent_plugin_dirs(make_project, tmp_path: Path):
         project_root=project_root.resolve(),
         codex_home=codex.resolve(),
         bridge_home=bridge_home.resolve(),
-        managed_project_files=(),
+        managed_project_files={},
     )
     state_dir = project_state_dir(project_root, bridge_home=bridge_home)
     state_path = state_dir / "state.json"
@@ -3083,7 +3087,7 @@ def test_clean_preserves_shared_vendored_plugin_dirs(
         project_root=project_a.resolve(),
         codex_home=codex.resolve(),
         bridge_home=bridge_home.resolve(),
-        managed_project_files=(),
+        managed_project_files={},
     )
     state_dir_a = project_state_dir(project_a, bridge_home=bridge_home)
     state_path_a = state_dir_a / "state.json"
@@ -3139,7 +3143,7 @@ def test_uninstall_removes_plugins_dir(make_project, tmp_path: Path):
         project_root=project_root.resolve(),
         codex_home=codex_home.resolve(),
         bridge_home=bridge_home.resolve(),
-        managed_project_files=(),
+        managed_project_files={},
     )
     state_dir = project_state_dir(project_root, bridge_home=bridge_home)
     state_path = state_dir / "state.json"

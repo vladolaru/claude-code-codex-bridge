@@ -28,6 +28,7 @@ from cc_codex_bridge.registry import (
     GlobalSkillEntry,
     GlobalSkillRegistry,
     hash_agent_file,
+    hash_file_content,
     hash_generated_skill,
     hash_generated_skill_files,
     hash_prompt_content,
@@ -640,6 +641,12 @@ def clean_project(
         if any(path == sd or _is_under(path, sd) for sd in skill_dirs_to_remove):
             continue
         if path.exists() and not path.is_symlink():
+            stored_hash = previous_state.managed_project_files[relative]
+            if stored_hash:
+                current_hash = hash_file_content(path.read_bytes())
+                if current_hash != stored_hash:
+                    # File was externally modified — don't remove it
+                    continue
             changes.append(Change("remove", path))
 
     # Release skill ownership claims from the global registry
@@ -1422,7 +1429,7 @@ def _compute_project_file_changes(
         )
 
     project_file_map = dict(desired.project_files)
-    managed_project_files = set(previous_state.managed_project_files) if previous_state else set()
+    managed_project_files = set(previous_state.managed_project_files.keys()) if previous_state else set()
     invalid_managed_paths = sorted(
         relative for relative in managed_project_files if not _is_allowed_managed_project_relative(relative)
     )
@@ -2122,11 +2129,21 @@ def _build_state_record(
         _project_relative(desired, path)
         for path in desired.preserved_project_files
     }
-    managed_project_paths = {
-        *(_project_relative(desired, path) for path, _ in desired.project_files),
-        *(rel for rel in preserved_relatives if rel in previously_managed),
-    }
-    managed_project_files = tuple(sorted(managed_project_paths))
+    managed_project_files: dict[str, str] = {}
+    # Files the bridge is actively writing — hash from desired content
+    for path, content in desired.project_files:
+        relative = _project_relative(desired, path)
+        managed_project_files[relative] = hash_file_content(content)
+    # Preserved files — keep tracking only if previously managed
+    for rel in sorted(preserved_relatives):
+        if rel in previously_managed:
+            full_path = desired.project_root / rel
+            if full_path.is_symlink():
+                # Track symlinked preserved files without a content hash —
+                # the bridge does not own the symlink target's content.
+                managed_project_files[rel] = ""
+            elif full_path.exists():
+                managed_project_files[rel] = hash_file_content(full_path.read_bytes())
     managed_project_skill_dirs = tuple(
         sorted(
             _normalize_dir_name(
@@ -2149,7 +2166,7 @@ def _previously_managed_set(previous_state: BridgeState | None) -> frozenset[str
     """Extract the managed project file set from previous state."""
     if previous_state is None:
         return frozenset()
-    return frozenset(previous_state.managed_project_files)
+    return frozenset(previous_state.managed_project_files.keys())
 
 
 def _state_write_needed(
