@@ -19,14 +19,14 @@ def test_bridge_state_round_trips(tmp_path: Path):
         project_root=tmp_path / "project",
         codex_home=tmp_path / "codex-home",
         bridge_home=tmp_path / "bridge-home",
-        managed_project_files=("CLAUDE.md", ".codex/config.toml"),
+        managed_project_files={"CLAUDE.md": "sha256:aaa", ".codex/config.toml": "sha256:bbb"},
     )
     path.write_text(state.to_json())
 
     loaded = BridgeState.from_path(path)
 
     assert loaded == state
-    assert json.loads(state.to_json())["version"] == 8
+    assert json.loads(state.to_json())["version"] == 9
 
 
 def test_bridge_state_handles_missing_invalid_and_unsupported_files(tmp_path: Path):
@@ -97,7 +97,7 @@ def test_bridge_state_round_trips_with_project_skill_dirs(tmp_path):
         project_root=tmp_path / "project",
         codex_home=tmp_path / "codex",
         bridge_home=tmp_path / "bridge",
-        managed_project_files=(".codex/config.toml",),
+        managed_project_files={".codex/config.toml": "sha256:ccc"},
         managed_project_skill_dirs=("helper", "review"),
     )
     path = tmp_path / "state.json"
@@ -105,6 +105,40 @@ def test_bridge_state_round_trips_with_project_skill_dirs(tmp_path):
     loaded = BridgeState.from_path(path)
     assert loaded == state
     assert loaded.managed_project_skill_dirs == ("helper", "review")
+
+
+def test_bridge_state_managed_files_with_hashes(tmp_path: Path):
+    """BridgeState stores managed_project_files as path->hash mapping."""
+    state = BridgeState(
+        project_root=tmp_path,
+        codex_home=tmp_path / "codex",
+        bridge_home=tmp_path / "bridge",
+        managed_project_files={"CLAUDE.md": "sha256:abc123"},
+    )
+    assert state.managed_project_files == {"CLAUDE.md": "sha256:abc123"}
+    # Serialization round-trip
+    json_str = state.to_json()
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json_str)
+    loaded = BridgeState.from_path(state_path)
+    assert loaded.managed_project_files == {"CLAUDE.md": "sha256:abc123"}
+
+
+def test_bridge_state_v8_migration(tmp_path: Path):
+    """v8 state files (list format) are migrated to v9 (dict with empty hashes)."""
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps({
+        "version": 8,
+        "project_root": str(tmp_path),
+        "codex_home": str(tmp_path / "codex"),
+        "bridge_home": str(tmp_path / "bridge"),
+        "managed_project_files": ["CLAUDE.md"],
+        "managed_project_skill_dirs": [],
+    }, indent=2))
+    loaded = BridgeState.from_path(state_path)
+    # v8 list entries get empty hash (unknown content)
+    assert loaded.managed_project_files == {"CLAUDE.md": ""}
+    assert loaded.version == 9
 
 
 def test_global_skill_registry_round_trips(tmp_path: Path):
