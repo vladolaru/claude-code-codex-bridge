@@ -23,6 +23,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Preserved symlink state no longer gets backfilled into a trusted hash when the symlink is later replaced with a regular file, so `clean` cannot re-adopt and remove or bootstrap-restore user-authored instructions
 
 ### Changed
+- `validate` command removed — `status` now covers everything `validate` did (discovery, plugin list, generated counts, exclusions) plus the disk diff. Use `status` where `validate` was used.
+- `print-launchagent` command removed — use `install-launchagent` directly.
 - Bootstrap is no longer a separate code path — it is handled by normal reconcile, including both AGENTS.md creation and CLAUDE.md shim replacement
 - `managed_project_files` in bridge state changed from a list of paths to a path-to-content-hash mapping
 - State version bumped from 8 to 10 (v8-v9 state files are automatically migrated on read)
@@ -229,7 +231,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- Agent naming redesign: generated agent install names and TOML filenames now use bare file stems instead of `marketplace-plugin-agent` or `scope-agent` prefixes, matching the skill naming convention introduced in 0.9.0. Agent names like `market-pirategoat-tools-architecture-reviewer.toml` become `architecture-reviewer.toml`.
+- Agent naming redesign: generated agent install names and TOML filenames now use bare file stems instead of `marketplace-plugin-agent` or `scope-agent` prefixes, matching the skill naming convention introduced in 0.9.0. Agent names like `some-cc-plugin:architecture-reviewer.toml` become `architecture-reviewer.toml`.
 - Agent collision resolution: when multiple agents share a file stem, standalone agents (user/project) win the bare name over plugin agents; among plugins, `(marketplace, plugin_name)` sort order determines priority. Collisions get `-alt`, `-alt-2`, etc. suffixes.
 - Agent name validation: generated agent names exceeding 64 characters after suffixing are now a hard error.
 
