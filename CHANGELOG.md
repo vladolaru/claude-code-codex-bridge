@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.24.0] - 2026-03-26
+
+### Added
+- `config show` and `config check` now lead with an empty line, consistent with other commands
+- `config check` output colored: heading in bold blue, ✓ in bold green, ✗ in bold red, summary verdict colored by outcome
+- `--all` output colored: `OK` in green, pending change counts in yellow, errors in red, scan notes in yellow, filtered entries dimmed
+
+### Changed
+- `status --all` no longer shows "Dry run" — status is always read-only, not a dry run of reconcile
+- `status --all` uses context-aware wording: `in sync` / `N pending changes` instead of `no changes` / `N changes`
+
 ## [0.23.0] - 2026-03-26
 
 ### Added
