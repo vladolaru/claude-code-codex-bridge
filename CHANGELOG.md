@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.5] - 2026-03-26
+
+### Changed
+- Reconcile now adopts hand-bridged project skill directories when their file tree is a subset of what the bridge would generate, instead of refusing to overwrite them
+
 ## [0.19.4] - 2026-03-26
 
 ### Fixed

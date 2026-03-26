@@ -1376,10 +1376,13 @@ def _plan_project_skill_mutations(
             continue
 
         # Directory exists but doesn't match — only update if we own it
+        # or if the existing content is a subset of what we'd generate
+        # (hand-bridged directory from the same source skill).
         if install_dir_name not in previously_managed:
-            raise ReconcileError(
-                f"Refusing to overwrite non-generated project skill directory: {destination}"
-            )
+            if not _directory_is_subset_of_skill(destination, skill):
+                raise ReconcileError(
+                    f"Refusing to overwrite non-generated project skill directory: {destination}"
+                )
         changes.append(Change("update", destination, resource_kind="project_skill"))
 
     # Detect stale project skill directories
@@ -1953,6 +1956,25 @@ def _write_skill_tree(destination: Path, skill: GeneratedSkill, *, container: Pa
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_bytes(generated_file.content)
         file_path.chmod(generated_file.mode)
+
+
+def _directory_is_subset_of_skill(path: Path, skill: GeneratedSkill) -> bool:
+    """Check whether every file in an existing directory has a counterpart in the desired skill.
+
+    Returns True when the directory file paths are a subset of what the bridge
+    would generate.  Content may differ (the bridge rewrites cross-references),
+    so only the file tree is compared.  This identifies hand-bridged directories
+    that were copied from the same source skill before the bridge existed.
+    """
+    expected_paths = {generated_file.relative_path for generated_file in skill.files}
+    actual_paths = {
+        item.relative_to(path)
+        for item in path.rglob("*")
+        if item.is_file()
+    }
+    if not actual_paths:
+        return False
+    return actual_paths <= expected_paths
 
 
 def _directory_matches_skill(path: Path, skill: GeneratedSkill) -> bool:
