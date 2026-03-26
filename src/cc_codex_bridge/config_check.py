@@ -209,10 +209,16 @@ def format_check_report(config_label: str, results: list[CheckResult]) -> str:
           ✓ scan_paths: 2 paths, all resolve
           ✗ exclude.plugins: "foo/bar" — not found
     """
-    lines: list[str] = [f"Checking {config_label}..."]
+    from cc_codex_bridge._colors import color_fns
+    c = color_fns()
+
+    lines: list[str] = [c["key"](f"Checking {config_label}...")]
 
     for result in results:
-        icon = "\u2713" if result.passed else "\u2717"
+        if result.passed:
+            icon = c["good"]("\u2713")
+        else:
+            icon = c["bad"]("\u2717")
         if result.message:
             lines.append(f"  {icon} {result.label}: {result.message}")
         else:

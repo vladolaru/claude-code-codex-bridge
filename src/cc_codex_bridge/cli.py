@@ -1142,6 +1142,7 @@ def _handle_config_show(args: argparse.Namespace) -> int:
             scope=display_scope,
         ))
     else:
+        print()
         print(format_config_show(
             global_config=global_cfg,
             project_exclusions=project_exclusions,
@@ -1178,6 +1179,7 @@ def _handle_config_check(args: argparse.Namespace) -> int:
     if getattr(args, "json", False):
         print(format_check_report_json(global_results, project_results or []))
     else:
+        print()
         print(format_check_report("global", global_results))
         if project_results is not None:
             print()
@@ -1186,10 +1188,11 @@ def _handle_config_check(args: argparse.Namespace) -> int:
         if project_results:
             total_issues += sum(1 for r in project_results if not r.passed)
         print()
+        from cc_codex_bridge._colors import color_fns as _cfns; _cc = _cfns()
         if total_issues:
-            print(f"{total_issues} issue(s) found.")
+            print(_cc["bad"](f"{total_issues} issue(s) found."))
         else:
-            print("All checks passed.")
+            print(_cc["good"]("All checks passed."))
 
     has_failures = any(not r.passed for r in global_results)
     if project_results:
@@ -1616,7 +1619,7 @@ def _handle_all_command(args: argparse.Namespace) -> int:
     if use_json:
         print(_format_all_json(report))
     else:
-        print(_format_all_report(report, dry_run=dry_run))
+        print(_format_all_report(report, dry_run=dry_run and args.command != "status", is_status=args.command == "status"))
 
     has_errors = len(report.errors) > 0
     return 1 if has_errors else 0
@@ -1657,12 +1660,15 @@ def _format_all_json(report) -> str:
     return json.dumps(payload, indent=2, sort_keys=True)
 
 
-def _format_all_report(report, *, dry_run: bool = False) -> str:
+def _format_all_report(report, *, dry_run: bool = False, is_status: bool = False) -> str:
     """Render --all report as human-readable text, including scan summary."""
-    lines: list[str] = []
+    from cc_codex_bridge._colors import color_fns
+    c = color_fns()
+
+    lines: list[str] = [""]
 
     if dry_run:
-        lines.append("Dry run — no changes applied.")
+        lines.append(c["warn"]("Dry run — no changes applied."))
         lines.append("")
 
     # Scan summary (only when scan config exists and produced results)
@@ -1670,26 +1676,29 @@ def _format_all_report(report, *, dry_run: bool = False) -> str:
     if scan is not None and (scan.bridgeable or scan.not_bridgeable or scan.filtered):
         total = len(scan.bridgeable) + len(scan.not_bridgeable) + len(scan.filtered)
         lines.append(
-            f"Scan: {total} candidates, "
+            f"{c['key']('Scan:')} {total} candidates, "
             f"{len(scan.bridgeable)} bridgeable, "
             f"{len(scan.not_bridgeable)} not bridgeable, "
             f"{len(scan.filtered)} filtered"
         )
-        for c in scan.filtered:
-            lines.append(f"  SKIP: {c.path} ({c.filter_reason})")
-        for c in scan.not_bridgeable:
-            lines.append(f"  NOTE: {c.path} ({c.filter_reason})")
+        for s in scan.filtered:
+            lines.append(f"  {c['dim']('SKIP:')} {c['dim'](str(s.path))} {c['dim'](f'({s.filter_reason})')}")
+        for s in scan.not_bridgeable:
+            lines.append(f"  {c['warn']('NOTE:')} {s.path} ({s.filter_reason})")
         lines.append("")
 
     for r in report.results:
         change_count = len(r.report.changes)
         if change_count:
-            lines.append(f"OK: {r.project_root} ({change_count} change{'s' if change_count != 1 else ''})")
+            noun = "pending change" if is_status else "change"
+            count_s = c["warn"](f"{change_count} {noun}{'s' if change_count != 1 else ''}")
+            lines.append(f"{c['good']('OK:')} {r.project_root} ({count_s})")
         else:
-            lines.append(f"OK: {r.project_root} (no changes)")
+            label = c["good"]("in sync") if is_status else c["good"]("no changes")
+            lines.append(f"{c['good']('OK:')} {r.project_root} ({label})")
 
     for e in report.errors:
-        lines.append(f"ERROR: {e.project_root} — {e.error}")
+        lines.append(f"{c['bad']('ERROR:')} {e.project_root} — {e.error}")
 
     has_scan_output = (
         scan is not None
