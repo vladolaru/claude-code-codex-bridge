@@ -1095,7 +1095,7 @@ def test_uninstall_exits_nonzero_on_cleanup_error(make_project, tmp_path: Path, 
         project_root=project_root.resolve(),
         codex_home=codex_home.resolve(),
         bridge_home=bridge_home.resolve(),
-        managed_project_files={"AGENTS.md": ""},  # invalid
+        managed_project_files={"README.md": ""},  # invalid
     )
     state_path.write_text(state.to_json())
 
@@ -1571,8 +1571,8 @@ def test_validate_works_without_plugins(make_project, tmp_path: Path, capsys):
     assert "GENERATED_SKILLS: 1" in captured.out
 
 
-def test_status_reports_bootstrap_needed(tmp_path: Path, capsys):
-    """status exits with error when CLAUDE.md exists without AGENTS.md."""
+def test_status_shows_bootstrap_as_pending_changes(tmp_path: Path, capsys):
+    """status shows pending bootstrap changes when CLAUDE.md exists without AGENTS.md."""
     project_root = tmp_path / "project"
     project_root.mkdir()
     (project_root / "CLAUDE.md").write_text("# My instructions\n")
@@ -1582,13 +1582,13 @@ def test_status_reports_bootstrap_needed(tmp_path: Path, capsys):
         "--codex-home", str(tmp_path / "codex-home"),
     ])
 
-    assert exit_code == 1
+    assert exit_code == 0
     captured = capsys.readouterr()
-    assert "Bootstrap required" in captured.err
+    assert "AGENTS.md" in captured.out
 
 
-def test_validate_reports_bootstrap_needed(tmp_path: Path, capsys):
-    """validate exits with error when CLAUDE.md exists without AGENTS.md."""
+def test_validate_succeeds_with_bootstrap_pending(tmp_path: Path, capsys):
+    """validate succeeds when CLAUDE.md exists without AGENTS.md (bootstrap is pending)."""
     project_root = tmp_path / "project"
     project_root.mkdir()
     (project_root / "CLAUDE.md").write_text("# My instructions\n")
@@ -1597,9 +1597,7 @@ def test_validate_reports_bootstrap_needed(tmp_path: Path, capsys):
         "validate", "--project", str(project_root),
     ])
 
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert "Bootstrap required" in captured.err
+    assert exit_code == 0
 
 
 def test_reconcile_dry_run_previews_bootstrap_without_mutating(tmp_path: Path, capsys):

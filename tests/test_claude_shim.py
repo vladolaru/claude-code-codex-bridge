@@ -138,19 +138,19 @@ def test_plan_claude_shim_rejects_symlinked_agents_md_target(tmp_path: Path):
     assert "symlink" in decision.reason.lower()
 
 
-def test_execute_bootstrap_rejects_symlinked_agents_md(tmp_path: Path):
-    """execute_bootstrap refuses to write through a symlinked AGENTS.md."""
-    from cc_codex_bridge.claude_shim import execute_bootstrap
-
+def test_plan_claude_shim_bootstrap_includes_agents_md_content(tmp_path: Path):
+    """Bootstrap decision carries original CLAUDE.md content as agents_md_content."""
     project_root = tmp_path / "project"
     project_root.mkdir()
-    (project_root / "CLAUDE.md").write_text("# Real instructions\n")
-    (project_root / "AGENTS.md").symlink_to(tmp_path / "external.md")
+    content = "# Real instructions\n"
+    (project_root / "CLAUDE.md").write_text(content)
 
     project = ProjectContext(root=project_root, agents_md_path=project_root / "AGENTS.md")
+    decision = plan_claude_shim(project)
 
-    with pytest.raises(ReconcileError, match="symlinked AGENTS.md"):
-        execute_bootstrap(project)
+    assert decision.action == "bootstrap"
+    assert decision.agents_md_content == content
+    assert decision.content == SHIM_CONTENT
 
 
 def test_plan_claude_shim_skips_non_agents_symlink(tmp_path: Path):

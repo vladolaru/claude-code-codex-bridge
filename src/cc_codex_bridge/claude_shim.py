@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
-
 from cc_codex_bridge.model import ClaudeShimDecision, ProjectContext, ReconcileError
 from cc_codex_bridge.text import read_utf8_text
 
@@ -40,6 +38,7 @@ def plan_claude_shim(project: ProjectContext) -> ClaudeShimDecision:
             action="bootstrap",
             path=claude_md_path,
             content=SHIM_CONTENT,
+            agents_md_content=content,
             reason="CLAUDE.md exists without AGENTS.md; will copy to AGENTS.md and replace with shim",
         )
 
@@ -102,22 +101,3 @@ def plan_claude_shim(project: ProjectContext) -> ClaudeShimDecision:
         path=claude_md_path,
         reason="CLAUDE.md exists and is not a generator-owned shim",
     )
-
-
-def execute_bootstrap(project: ProjectContext) -> None:
-    """Copy CLAUDE.md to AGENTS.md and replace CLAUDE.md with the shim.
-
-    This is a one-time operation that:
-    1. Copies the existing CLAUDE.md content to AGENTS.md
-    2. Replaces CLAUDE.md with the ``@AGENTS.md`` shim
-
-    After this, the project has the same layout as one that was set up
-    with AGENTS.md from the start, and the normal pipeline can proceed.
-    """
-    claude_md_path = project.root / "CLAUDE.md"
-    if project.agents_md_path.is_symlink():
-        raise ReconcileError(
-            f"Refusing to write through symlinked AGENTS.md: {project.agents_md_path}"
-        )
-    shutil.copy2(str(claude_md_path), str(project.agents_md_path))
-    claude_md_path.write_text(SHIM_CONTENT)

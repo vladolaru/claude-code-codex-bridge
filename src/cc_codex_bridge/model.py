@@ -152,6 +152,7 @@ class ClaudeShimDecision:
     action: str
     path: Path
     content: str | None = None
+    agents_md_content: str | None = None
     reason: str = ""
 
 

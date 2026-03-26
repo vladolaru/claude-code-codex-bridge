@@ -179,17 +179,29 @@ def build_desired_state(
     preserved_project_files: list[Path] = []
     skills_tuple = tuple(skills)
 
-    if shim_decision.action == "create" and shim_decision.content is not None:
+    if shim_decision.action in ("create", "bootstrap") and shim_decision.content is not None:
         project_files.append(
             (
                 _resolve_managed_project_path(project_root, Path("CLAUDE.md")),
                 shim_decision.content.encode(),
             )
         )
+    if shim_decision.action == "bootstrap" and shim_decision.agents_md_content is not None:
+        project_files.append(
+            (
+                _resolve_managed_project_path(project_root, Path("AGENTS.md")),
+                shim_decision.agents_md_content.encode(),
+            )
+        )
     elif shim_decision.action == "preserve":
         preserved_project_files.append(
             _resolve_managed_project_path(project_root, Path("CLAUDE.md"))
         )
+        # AGENTS.md may have been created by bootstrap — preserve it so the
+        # staleness detector does not remove a file the bridge previously wrote.
+        agents_md_path = _resolve_managed_project_path(project_root, Path("AGENTS.md"))
+        if agents_md_path.exists():
+            preserved_project_files.append(agents_md_path)
 
     # Add project-local agent .toml files
     if project_agent_files:
@@ -374,9 +386,8 @@ def build_project_desired_state(
 
     # Bootstrap: when CLAUDE.md exists without AGENTS.md, the full translation
     # pipeline still runs.  build_desired_state handles the "bootstrap" shim
-    # decision by including the CLAUDE.md→shim write in desired project files.
-    # The caller is responsible for executing the actual bootstrap (copy
-    # CLAUDE.md → AGENTS.md) before or after reconciliation.
+    # decision by including both CLAUDE.md (shim) and AGENTS.md (original
+    # content) in desired project files.  Normal reconcile creates both.
 
     agent_result = translate_installed_agents_with_diagnostics(result.plugins, bridge_home=bridge_home_path)
     user_agent_result = translate_standalone_agents(result.user_agents, scope="user")
@@ -828,7 +839,6 @@ class ReconcileAllProjectResult:
 
     project_root: Path
     report: ReconcileReport
-    bootstrapped: bool = False
 
 
 @dataclass(frozen=True)
@@ -901,22 +911,6 @@ def reconcile_all(
                 exclude_agents=exclude_agents,
                 exclude_commands=exclude_commands,
             )
-            needs_bootstrap = build.shim_decision.action == "bootstrap"
-            if needs_bootstrap and not dry_run:
-                from cc_codex_bridge.claude_shim import execute_bootstrap
-                execute_bootstrap(build.discovery.project)
-                build = build_project_desired_state(
-                    project_root,
-                    codex_home=codex_home_path,
-                    bridge_home=bridge_home,
-                    claude_home=claude_home,
-                    cache_dir=cache_dir,
-                    exclude_plugins=exclude_plugins,
-                    exclude_skills=exclude_skills,
-                    exclude_agents=exclude_agents,
-                    exclude_commands=exclude_commands,
-                )
-
             # Only agent diagnostics block reconciliation.
             # Skill validation warnings are informational and do not prevent sync.
             agent_diags = tuple(
@@ -932,22 +926,11 @@ def reconcile_all(
 
             if dry_run:
                 report = diff_desired_state(build.desired_state)
-                # Synthesize bootstrap changes so dry-run shows the full
-                # picture without modifying any files.
-                if needs_bootstrap:
-                    bootstrap_changes = (
-                        Change(kind="create", path=project_root / "AGENTS.md", resource_kind="project_file"),
-                        Change(kind="update", path=project_root / "CLAUDE.md", resource_kind="project_file"),
-                    )
-                    report = ReconcileReport(
-                        changes=bootstrap_changes + report.changes,
-                        applied=False,
-                    )
             else:
                 report = reconcile_desired_state(build.desired_state)
 
             results.append(ReconcileAllProjectResult(
-                project_root=project_root, report=report, bootstrapped=needs_bootstrap,
+                project_root=project_root, report=report,
             ))
         except Exception as exc:
             errors.append(ReconcileAllError(project_root=project_root, error=str(exc)))
@@ -1452,7 +1435,10 @@ def _compute_project_file_changes(
         if existing == content:
             continue
         if not owned:
-            raise ReconcileError(f"Refusing to overwrite non-generated project file: {path}")
+            # First reconcile for this file — the bridge is adopting it.
+            # This is the bootstrap case: the file exists with different content
+            # (e.g. CLAUDE.md being replaced with the shim) and isn't tracked yet.
+            pass
         changes.append(Change("update", path))
 
     desired_project_paths = {
@@ -2190,6 +2176,7 @@ def _is_allowed_managed_project_relative(relative: str) -> bool:
 
     allowed_exact = {
         "CLAUDE.md",
+        "AGENTS.md",
     }
     normalized_text = normalized.as_posix()
     if normalized_text in allowed_exact:

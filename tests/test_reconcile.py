@@ -1571,30 +1571,94 @@ def test_build_project_returns_bootstrap_with_desired_state(tmp_path: Path):
     assert build.desired_state is not None
 
 
-def test_execute_bootstrap_copies_claude_md_to_agents_md(tmp_path: Path):
-    """execute_bootstrap copies CLAUDE.md to AGENTS.md and writes shim."""
-    from cc_codex_bridge.claude_shim import execute_bootstrap
-    from cc_codex_bridge.model import ProjectContext
-
+def test_reconcile_creates_agents_md_from_claude_md(tmp_path: Path):
+    """First reconcile on a project with CLAUDE.md creates AGENTS.md and shim."""
     project_root = tmp_path / "project"
     project_root.mkdir()
     claude_content = "# My project instructions\n"
     (project_root / "CLAUDE.md").write_text(claude_content)
 
-    project = ProjectContext(root=project_root, agents_md_path=project_root / "AGENTS.md")
-    execute_bootstrap(project)
-
-    assert (project_root / "AGENTS.md").read_text() == claude_content
-    assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
-
-    # After bootstrap, build should proceed normally
-    from cc_codex_bridge.reconcile import build_project_desired_state
     build = build_project_desired_state(
         project_root,
         codex_home=tmp_path / "codex-home",
     )
-    assert build.shim_decision.action == "preserve"
+    assert build.shim_decision.action == "bootstrap"
     assert build.desired_state is not None
+
+    # Reconcile should create AGENTS.md and update CLAUDE.md
+    report = reconcile_desired_state(build.desired_state)
+    assert report.applied is True
+
+    assert (project_root / "AGENTS.md").read_text() == claude_content
+    assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
+
+    # After reconcile, build should see the project as preserved
+    build2 = build_project_desired_state(
+        project_root,
+        codex_home=tmp_path / "codex-home",
+    )
+    assert build2.shim_decision.action == "preserve"
+    assert build2.desired_state is not None
+
+
+def test_dry_run_shows_bootstrap_as_normal_changes(tmp_path: Path):
+    """Dry-run on unbootstrapped project shows both files as changes."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    claude_content = "# My project instructions\n"
+    (project_root / "CLAUDE.md").write_text(claude_content)
+
+    build = build_project_desired_state(
+        project_root,
+        codex_home=tmp_path / "codex-home",
+    )
+    assert build.shim_decision.action == "bootstrap"
+    assert build.desired_state is not None
+
+    # Dry-run should compute changes without mutating
+    report = diff_desired_state(build.desired_state)
+    assert report.applied is False
+
+    # Both files should appear in the change list
+    paths = {str(c.path) for c in report.changes}
+    assert str(project_root / "AGENTS.md") in paths
+    assert str(project_root / "CLAUDE.md") in paths
+
+    # No files should be mutated
+    assert not (project_root / "AGENTS.md").exists()
+    assert (project_root / "CLAUDE.md").read_text() == claude_content
+
+
+def test_reconcile_preserves_edited_agents_md(tmp_path: Path):
+    """Second reconcile doesn't overwrite AGENTS.md if user edited it."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    claude_content = "# My project instructions\n"
+    (project_root / "CLAUDE.md").write_text(claude_content)
+
+    # First reconcile: bootstrap
+    build = build_project_desired_state(
+        project_root,
+        codex_home=tmp_path / "codex-home",
+    )
+    reconcile_desired_state(build.desired_state)
+    assert (project_root / "AGENTS.md").read_text() == claude_content
+    assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
+
+    # User edits AGENTS.md
+    edited_content = "# My project instructions\n\n## Added by user\n"
+    (project_root / "AGENTS.md").write_text(edited_content)
+
+    # Second reconcile should not touch AGENTS.md — it's preserved, not in desired project_files
+    build2 = build_project_desired_state(
+        project_root,
+        codex_home=tmp_path / "codex-home",
+    )
+    assert build2.shim_decision.action == "preserve"
+
+    report2 = reconcile_desired_state(build2.desired_state)
+    # AGENTS.md should still have the user's edits
+    assert (project_root / "AGENTS.md").read_text() == edited_content
 
 
 def test_reconcile_removes_stale_global_instructions(
@@ -2654,7 +2718,7 @@ def test_clean_rejects_unexpected_managed_project_files_in_state(make_project, t
     """clean must reject corrupted managed project file paths from state.
 
     This is the counterpart to test_clean_rejects_unexpected_managed_project_skill_dirs_in_state.
-    A corrupted state file listing AGENTS.md must NOT cause clean to delete
+    A corrupted state file listing README.md must NOT cause clean to delete
     the hand-authored file.
     """
     from cc_codex_bridge.reconcile import clean_project
@@ -2673,7 +2737,7 @@ def test_clean_rejects_unexpected_managed_project_files_in_state(make_project, t
         codex_home=codex_home.resolve(),
         bridge_home=bridge_home.resolve(),
         managed_project_files={
-            "AGENTS.md": "",  # NOT a valid managed path
+            "README.md": "",  # NOT a valid managed path
         },
     )
     state_path.write_text(state.to_json())
@@ -2836,7 +2900,7 @@ def test_uninstall_has_errors_on_cleanup_failure(make_project, tmp_path: Path):
         project_root=project_root.resolve(),
         codex_home=codex_home.resolve(),
         bridge_home=bridge_home.resolve(),
-        managed_project_files={"AGENTS.md": ""},  # invalid
+        managed_project_files={"README.md": ""},  # invalid
     )
     state_path.write_text(state.to_json())
 

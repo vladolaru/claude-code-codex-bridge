@@ -685,45 +685,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    # Bootstrap: CLAUDE.md exists without AGENTS.md.
-    # For reconcile (non-dry-run), execute the bootstrap and rebuild.
-    # For reconcile --dry-run, the build already computed the full desired
-    # state (minus CLAUDE.md, which bootstrap manages separately);
-    # bootstrap changes are synthesized in the report.
-    # For validate/status, report that bootstrap is needed and exit.
-    did_bootstrap = False
-    if build.shim_decision.action == "bootstrap":
-        if args.command == "reconcile" and not getattr(args, "dry_run", False):
-            from cc_codex_bridge.claude_shim import execute_bootstrap
-            try:
-                execute_bootstrap(build.discovery.project)
-            except (ReconcileError, OSError, UnicodeError) as exc:
-                print(f"Error: {exc}", file=sys.stderr)
-                return 1
-            did_bootstrap = True
-            try:
-                build = build_project_desired_state(
-                    args.project,
-                    codex_home=getattr(args, "codex_home", None),
-                    claude_home=args.claude_home,
-                    cache_dir=args.cache_dir,
-                    exclude_plugins=getattr(args, "exclude_plugin", None) or (),
-                    exclude_skills=getattr(args, "exclude_skill", None) or (),
-                    exclude_agents=getattr(args, "exclude_agent", None) or (),
-                    exclude_commands=getattr(args, "exclude_command", None) or (),
-                )
-            except (DiscoveryError, TranslationError, ReconcileError, OSError, UnicodeError) as exc:
-                print(f"Error: {exc}", file=sys.stderr)
-                return 1
-        elif args.command != "reconcile":
-            print(
-                "Bootstrap required: CLAUDE.md exists without AGENTS.md.\n"
-                "Run `cc-codex-bridge reconcile` to copy CLAUDE.md to AGENTS.md "
-                "and replace CLAUDE.md with the @AGENTS.md shim.",
-                file=sys.stderr,
-            )
-            return 1
-
     # Split diagnostics: agent diagnostics block reconciliation,
     # skill warnings are informational only.
     agent_diags = tuple(
@@ -781,34 +742,15 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "reconcile":
-            needs_bootstrap = build.shim_decision.action == "bootstrap"
             if args.dry_run:
                 report = diff_desired_state(build.desired_state)
-                # Synthesize bootstrap changes so dry-run shows the full
-                # picture without modifying any files.
-                if needs_bootstrap:
-                    bootstrap_changes = (
-                        Change(kind="create", path=build.discovery.project.agents_md_path, resource_kind="project_file"),
-                        Change(kind="update", path=build.discovery.project.root / "CLAUDE.md", resource_kind="project_file"),
-                    )
-                    report = ReconcileReport(
-                        changes=bootstrap_changes + report.changes,
-                        applied=False,
-                    )
             else:
                 report = reconcile_desired_state(build.desired_state)
-                bootstrap_changes = ()
-                if did_bootstrap:
-                    bootstrap_changes = (
-                        Change(kind="create", path=build.discovery.project.agents_md_path, resource_kind="project_file"),
-                        Change(kind="update", path=build.discovery.project.root / "CLAUDE.md", resource_kind="project_file"),
-                    )
-                all_changes = bootstrap_changes + report.changes
-                if all_changes:
+                if report.changes:
                     _log_and_prune(
                         action="reconcile",
                         project=str(build.discovery.project.root),
-                        changes=all_changes,
+                        changes=report.changes,
                     )
             if getattr(args, "json", False):
                 print(format_reconcile_json(
@@ -1484,20 +1426,12 @@ def _handle_all_command(args: argparse.Namespace) -> int:
         return 1
 
     if not dry_run:
-        from cc_codex_bridge.reconcile import Change
         for r in report.results:
-            bootstrap_changes = ()
-            if r.bootstrapped:
-                bootstrap_changes = (
-                    Change(kind="create", path=r.project_root / "AGENTS.md", resource_kind="project_file"),
-                    Change(kind="update", path=r.project_root / "CLAUDE.md", resource_kind="project_file"),
-                )
-            all_changes = bootstrap_changes + r.report.changes
-            if all_changes:
+            if r.report.changes:
                 _log_and_prune(
                     action="reconcile",
                     project=str(r.project_root),
-                    changes=all_changes,
+                    changes=r.report.changes,
                 )
 
     if use_json:
