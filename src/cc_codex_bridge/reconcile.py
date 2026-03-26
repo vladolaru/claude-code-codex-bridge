@@ -580,8 +580,9 @@ def diff_desired_state(desired: DesiredState) -> ReconcileReport:
     """Compare current outputs to desired state without writing."""
     previous_state = _load_previous_state(desired)
     prev_managed = _previously_managed_set(previous_state)
+    prev_managed_files = previous_state.managed_project_files if previous_state else None
     plan = _plan_mutations(desired, previous_state)
-    state_write_needed = _state_write_needed(desired, prev_managed)
+    state_write_needed = _state_write_needed(desired, prev_managed, prev_managed_files)
     _validate_mutation_targets(
         desired,
         previous_state,
@@ -602,8 +603,9 @@ def reconcile_desired_state(desired: DesiredState) -> ReconcileReport:
     """Apply the desired state to disk."""
     previous_state = _load_previous_state(desired)
     prev_managed = _previously_managed_set(previous_state)
+    prev_managed_files = previous_state.managed_project_files if previous_state else None
     plan = _plan_mutations(desired, previous_state)
-    state_write_needed = _state_write_needed(desired, prev_managed)
+    state_write_needed = _state_write_needed(desired, prev_managed, prev_managed_files)
     _validate_mutation_targets(
         desired,
         previous_state,
@@ -614,7 +616,7 @@ def reconcile_desired_state(desired: DesiredState) -> ReconcileReport:
         return ReconcileReport(changes=(), applied=True)
 
     state_existed = desired.state_path.exists()
-    _apply_changes(desired, plan, prev_managed)
+    _apply_changes(desired, plan, prev_managed, prev_managed_files)
     changes = list(plan.changes)
     if state_write_needed:
         kind = "create" if not state_existed else "update"
@@ -1155,6 +1157,7 @@ def _apply_changes(
     desired: DesiredState,
     plan: _MutationPlan,
     previously_managed: frozenset[str] = frozenset(),
+    previous_managed_files: "dict[str, str] | None" = None,
 ) -> None:
     """Write all planned changes to disk."""
     from cc_codex_bridge.render_agent_toml import render_agent_toml
@@ -1248,7 +1251,7 @@ def _apply_changes(
 
     seed_config_stub(desired.bridge_home)
 
-    state_bytes = _build_state_record(desired, previously_managed).to_json().encode()
+    state_bytes = _build_state_record(desired, previously_managed, previous_managed_files).to_json().encode()
     desired.state_path.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write_file(desired.state_path, state_bytes, container=desired.bridge_home)
 
@@ -1502,10 +1505,13 @@ def _compute_project_file_changes(
                     # File was externally modified — skip update to preserve user edits
                     continue
         else:
-            # First reconcile for this file — the bridge is adopting it.
-            # This is the bootstrap case: the file exists with different content
-            # (e.g. CLAUDE.md being replaced with the shim) and isn't tracked yet.
-            pass
+            # Only CLAUDE.md may be adopted on first reconcile (bootstrap: existing
+            # content is replaced with the @AGENTS.md shim). All other project
+            # files — including project-local agent .toml files — must have been
+            # previously managed to be overwritten; raise here to protect hand-authored
+            # content.
+            if relative != "CLAUDE.md":
+                raise ReconcileError(f"Refusing to overwrite non-generated project file: {path}")
         changes.append(Change("update", path))
 
     desired_project_paths = {
@@ -2179,6 +2185,7 @@ def _cleanup_empty_parents(path: Path, stop_at: Path) -> None:
 def _build_state_record(
     desired: DesiredState,
     previously_managed: frozenset[str] = frozenset(),
+    previous_managed_files: "dict[str, str] | None" = None,
 ) -> BridgeState:
     """Build the desired stable state payload.
 
@@ -2195,7 +2202,11 @@ def _build_state_record(
     for path, content in desired.project_files:
         relative = _project_relative(desired, path)
         managed_project_files[relative] = hash_file_content(content)
-    # Preserved files — keep tracking only if previously managed
+    # Preserved files — keep tracking only if previously managed.
+    # Retain the prior stored hash rather than re-hashing on-disk bytes.
+    # Re-hashing would silently adopt drifted content as "expected",
+    # which would cause a subsequent clean to treat user-edited files as
+    # bridge-owned and delete or restore them.
     for rel in sorted(preserved_relatives):
         if rel in previously_managed:
             full_path = desired.project_root / rel
@@ -2204,7 +2215,8 @@ def _build_state_record(
                 # the bridge does not own the symlink target's content.
                 managed_project_files[rel] = ""
             elif full_path.exists():
-                managed_project_files[rel] = hash_file_content(full_path.read_bytes())
+                prior_hash = (previous_managed_files or {}).get(rel, "")
+                managed_project_files[rel] = prior_hash
     managed_project_skill_dirs = tuple(
         sorted(
             _normalize_dir_name(
@@ -2233,9 +2245,10 @@ def _previously_managed_set(previous_state: BridgeState | None) -> frozenset[str
 def _state_write_needed(
     desired: DesiredState,
     previously_managed: frozenset[str] = frozenset(),
+    previous_managed_files: "dict[str, str] | None" = None,
 ) -> bool:
     """Return True when the project-local state file must be updated."""
-    state_bytes = _build_state_record(desired, previously_managed).to_json().encode()
+    state_bytes = _build_state_record(desired, previously_managed, previous_managed_files).to_json().encode()
     return not desired.state_path.exists() or desired.state_path.read_bytes() != state_bytes
 
 

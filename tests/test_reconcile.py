@@ -4708,3 +4708,84 @@ def test_compute_project_drift_sorted_output(tmp_path: Path):
     drifted = compute_project_drift(project_root, bridge_home=bridge_home)
     assert drifted == sorted(drifted)
     assert len(drifted) == 2
+
+
+def test_reconcile_refuses_to_overwrite_preexisting_agent_toml(
+    make_plugin_version, tmp_path: Path
+):
+    """Reconcile raises ReconcileError rather than silently overwriting a
+    pre-existing, non-managed project-local agent .toml file."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# project\n")
+
+    # Create a hand-authored project-local agent file
+    agents_dir = project_root / ".codex" / "agents"
+    agents_dir.mkdir(parents=True)
+    hand_authored_toml = agents_dir / "my-agent.toml"
+    hand_authored_toml.write_text("[agent]\nname = 'my-agent'\ndescription = 'hand-authored'\n")
+
+    cache_root, version_dir = make_plugin_version(
+        "market", "plugin", "1.0.0", agent_names=(),
+    )
+    # Write a project-local agent with the same filename in .claude/agents/
+    project_agents_dir = project_root / ".claude" / "agents"
+    project_agents_dir.mkdir(parents=True)
+    (project_agents_dir / "my-agent.md").write_text(
+        "---\nname: my-agent\ndescription: Generated agent\n---\n\nDo stuff.\n"
+    )
+
+    codex_home = tmp_path / "codex-home"
+    desired = _build_desired(project_root, cache_root, codex_home)
+
+    from cc_codex_bridge.model import ReconcileError
+    with pytest.raises(ReconcileError, match="Refusing to overwrite non-generated project file"):
+        reconcile_desired_state(desired)
+
+    # The hand-authored file must not have been modified
+    assert hand_authored_toml.read_text() == "[agent]\nname = 'my-agent'\ndescription = 'hand-authored'\n"
+
+
+def test_clean_preserves_edited_agents_md_after_second_reconcile(
+    make_plugin_version, tmp_path: Path
+):
+    """Clean must not remove AGENTS.md edited by the user even after a second
+    reconcile has run — the prior-hash fix prevents re-adoption of drifted content."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    original_content = "# Original instructions\n"
+    (project_root / "CLAUDE.md").write_text(original_content)
+
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("review",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    from cc_codex_bridge.reconcile import clean_project
+
+    # First reconcile: bootstrap — creates AGENTS.md and shim
+    desired = _build_desired(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+    assert (project_root / "AGENTS.md").read_text() == original_content
+    assert (project_root / "CLAUDE.md").read_text() == "@AGENTS.md\n"
+
+    # User edits AGENTS.md
+    edited_content = "# Original instructions\n\n## Added by user\n"
+    (project_root / "AGENTS.md").write_text(edited_content)
+
+    # Second reconcile (shim action is now "preserve")
+    desired2 = _build_desired(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired2)
+
+    # AGENTS.md still has user edits
+    assert (project_root / "AGENTS.md").read_text() == edited_content
+
+    # Clean: AGENTS.md was externally modified — must NOT be removed or restored
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    report = clean_project(project_root, bridge_home=bridge_home)
+
+    assert (project_root / "AGENTS.md").exists(), "AGENTS.md was wrongly removed by clean"
+    assert (project_root / "AGENTS.md").read_text() == edited_content
+
+    removed_paths = {c.path for c in report.changes if c.kind == "remove"}
+    assert (project_root / "AGENTS.md") not in removed_paths
