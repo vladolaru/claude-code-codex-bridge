@@ -4359,3 +4359,49 @@ def test_reconcile_releases_externally_modified_file(
         if c.resource_kind == "project_file" and c.kind == "update"
     ]
     assert all(c.path != claude_md for c in project_file_updates)
+
+
+def test_compute_project_file_changes_skips_update_on_drift(tmp_path: Path):
+    """_compute_project_file_changes skips update when an owned file was externally modified."""
+    from cc_codex_bridge.reconcile import _compute_project_file_changes, DesiredState
+    from cc_codex_bridge.state import BridgeState
+    from cc_codex_bridge.registry import hash_file_content
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    # Create CLAUDE.md with known original content and record its hash.
+    original_content = b"@AGENTS.md\n"
+    claude_md = project_root / "CLAUDE.md"
+    claude_md.write_bytes(original_content)
+    original_hash = hash_file_content(original_content)
+
+    # Externally modify the file (simulating a user edit).
+    claude_md.write_bytes(b"User's custom CLAUDE.md content\n")
+
+    # Build a BridgeState that tracks the file with its original hash.
+    previous_state = BridgeState(
+        project_root=project_root,
+        codex_home=tmp_path / "codex",
+        bridge_home=tmp_path / "bridge",
+        managed_project_files={"CLAUDE.md": original_hash},
+    )
+
+    # The bridge wants to write new (different) content for CLAUDE.md.
+    desired = DesiredState(
+        project_root=project_root,
+        codex_home=tmp_path / "codex",
+        bridge_home=tmp_path / "bridge",
+        project_files=((claude_md, b"new desired shim content\n"),),
+        preserved_project_files=(),
+        skills=(),
+        state_path=tmp_path / "bridge" / "state.json",
+    )
+
+    changes = _compute_project_file_changes(desired, previous_state)
+
+    # No "update" change should be emitted — drift was detected, user edits preserved.
+    assert not any(c.kind == "update" for c in changes)
+
+    # The file on disk must still contain the user's content.
+    assert claude_md.read_bytes() == b"User's custom CLAUDE.md content\n"

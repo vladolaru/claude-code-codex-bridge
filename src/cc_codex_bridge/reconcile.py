@@ -1442,7 +1442,7 @@ def _compute_project_file_changes(
             if stored_hash:
                 current_hash = hash_file_content(existing)
                 if current_hash != stored_hash:
-                    # File was externally modified — release from management
+                    # File was externally modified — skip update to preserve user edits
                     continue
         else:
             # First reconcile for this file — the bridge is adopting it.
