@@ -567,7 +567,10 @@ def compute_project_drift(
         path = state.project_root / relative
         if not path.exists() or path.is_symlink():
             continue
-        current_hash = hash_file_content(path.read_bytes())
+        try:
+            current_hash = hash_file_content(path.read_bytes())
+        except OSError:
+            continue  # Unreadable file — skip rather than crash status
         if current_hash != stored_hash:
             drifted.append(relative)
     return sorted(drifted)
