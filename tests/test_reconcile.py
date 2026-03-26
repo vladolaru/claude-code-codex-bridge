@@ -4519,10 +4519,10 @@ def test_clean_no_bootstrap_reversal_when_agents_md_edited(
     assert not (project_root / "CLAUDE.md").exists()
 
 
-def test_clean_no_bootstrap_reversal_when_claude_md_edited(
+def test_clean_preserves_agents_md_when_edited_claude_md_still_references_it(
     make_plugin_version, tmp_path: Path
 ):
-    """When CLAUDE.md shim was edited after bootstrap, skip reversal — both files preserved."""
+    """Clean must preserve AGENTS.md when an edited CLAUDE.md still depends on it."""
     project_root = tmp_path / "project"
     project_root.mkdir()
     original_content = "# Original instructions\n"
@@ -4538,17 +4538,55 @@ def test_clean_no_bootstrap_reversal_when_claude_md_edited(
     desired = _build_desired(project_root, cache_root, codex_home)
     reconcile_desired_state(desired)
 
-    # User edits CLAUDE.md shim after bootstrap
-    (project_root / "CLAUDE.md").write_text("# Custom shim\n@AGENTS.md\n")
+    # User edits CLAUDE.md after bootstrap but still keeps the AGENTS.md dependency.
+    (project_root / "CLAUDE.md").write_text("# Custom shim\n@AGENTS.md\n\n## Local additions\n")
 
     bridge_home = tmp_path / "home" / ".cc-codex-bridge"
     report = clean_project(project_root, bridge_home=bridge_home)
 
-    # CLAUDE.md was edited — drift detection skips its removal, no bootstrap reversal
+    # CLAUDE.md was edited — drift detection skips its removal, and AGENTS.md
+    # must survive because the remaining CLAUDE.md still references it.
     assert (project_root / "CLAUDE.md").exists()
-    assert (project_root / "CLAUDE.md").read_text() == "# Custom shim\n@AGENTS.md\n"
-    # AGENTS.md should still be removed (it was unedited)
+    assert (project_root / "CLAUDE.md").read_text() == "# Custom shim\n@AGENTS.md\n\n## Local additions\n"
+    assert (project_root / "AGENTS.md").exists()
+    assert (project_root / "AGENTS.md").read_text() == original_content
+    assert not any(
+        change.path == project_root / "AGENTS.md" and change.kind == "remove"
+        for change in report.changes
+    )
+
+
+def test_clean_removes_agents_md_when_edited_claude_md_no_longer_references_it(
+    make_plugin_version, tmp_path: Path
+):
+    """Clean may remove AGENTS.md when preserved CLAUDE.md no longer depends on it."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    original_content = "# Original instructions\n"
+    (project_root / "CLAUDE.md").write_text(original_content)
+
+    cache_root, _ = make_plugin_version(
+        "market", "tools", "1.0.0", skill_names=("review",),
+    )
+    codex_home = tmp_path / "codex-home"
+
+    from cc_codex_bridge.reconcile import clean_project
+
+    desired = _build_desired(project_root, cache_root, codex_home)
+    reconcile_desired_state(desired)
+
+    (project_root / "CLAUDE.md").write_text("# Fully independent instructions\n")
+
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    report = clean_project(project_root, bridge_home=bridge_home)
+
+    assert (project_root / "CLAUDE.md").exists()
+    assert (project_root / "CLAUDE.md").read_text() == "# Fully independent instructions\n"
     assert not (project_root / "AGENTS.md").exists()
+    assert any(
+        change.path == project_root / "AGENTS.md" and change.kind == "remove"
+        for change in report.changes
+    )
 
 
 def test_clean_no_bootstrap_reversal_when_both_edited(

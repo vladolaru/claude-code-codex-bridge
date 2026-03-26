@@ -673,7 +673,6 @@ def clean_project(
     changes: list[Change] = []
 
     managed_project_files = _validated_managed_project_files(previous_state)
-    preserve_agents_md = _claude_symlink_points_to_agents(project_root_path)
 
     # Remove managed project skill directories
     managed_project_skill_dirs = _validated_managed_project_skill_dirs(previous_state)
@@ -689,8 +688,6 @@ def clean_project(
         path = project_root_path / relative
         if any(path == sd or _is_under(path, sd) for sd in skill_dirs_to_remove):
             continue
-        if preserve_agents_md and relative == "AGENTS.md":
-            continue
         if path.exists() and not path.is_symlink():
             stored_hash = managed_project_files[relative]
             if not stored_hash:
@@ -703,12 +700,23 @@ def clean_project(
                 continue
             changes.append(Change("remove", path))
 
+    claude_path = project_root_path / "CLAUDE.md"
+    agents_path = project_root_path / "AGENTS.md"
+    paths_to_remove = {c.path for c in changes if c.kind == "remove"}
+    preserve_agents_md = (
+        claude_path not in paths_to_remove
+        and _claude_depends_on_agents(project_root_path)
+    )
+    if preserve_agents_md:
+        changes = [
+            c for c in changes
+            if not (c.kind == "remove" and c.path == agents_path)
+        ]
+
     # Bootstrap reversal: when both AGENTS.md and CLAUDE.md are scheduled for
     # removal (both unedited), restore CLAUDE.md to the original content that
     # the bootstrap copied into AGENTS.md.  This way the project looks like it
     # did before the bridge was ever used.
-    agents_path = project_root_path / "AGENTS.md"
-    claude_path = project_root_path / "CLAUDE.md"
     paths_to_remove = {c.path for c in changes if c.kind == "remove"}
     bootstrap_reversal_content: bytes | None = None
     if agents_path in paths_to_remove and claude_path in paths_to_remove:
@@ -2377,6 +2385,24 @@ def _claude_symlink_points_to_agents(project_root: Path) -> bool:
         return claude_path.resolve() == agents_path.resolve()
     except OSError:
         return False
+
+
+def _claude_depends_on_agents(project_root: Path) -> bool:
+    """Return True when the current CLAUDE.md still depends on AGENTS.md."""
+    claude_path = project_root / "CLAUDE.md"
+    if _claude_symlink_points_to_agents(project_root):
+        return True
+    if not claude_path.exists() or claude_path.is_symlink():
+        return False
+    try:
+        content = read_utf8_text(
+            claude_path,
+            label="CLAUDE.md dependency check",
+            error_type=ReconcileError,
+        )
+    except ReconcileError:
+        return False
+    return "AGENTS.md" in content
 
 
 def _validated_managed_project_skill_dirs(previous_state: BridgeState) -> set[str]:
