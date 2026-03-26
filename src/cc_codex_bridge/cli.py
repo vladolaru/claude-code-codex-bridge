@@ -762,7 +762,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Check for a newer release on GitHub and upgrade in place by "
             "downloading and running the official install script. "
-            "Use --check to report the available version without installing."
+            f"Use {_c['cmd']('--check')} to report the available version without installing."
         ),
     )
     upgrade_parser.add_argument(
@@ -847,12 +847,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if getattr(args, "all", False):
         if args.project:
-            print("Error: --all and --project are mutually exclusive", file=sys.stderr)
+            from cc_codex_bridge._colors import color_fns as _cfns; _ec = _cfns()
+            print(f"Error: {_ec['cmd']('--all')} and {_ec['cmd']('--project')} are mutually exclusive", file=sys.stderr)
             return 1
         return _handle_all_command(args)
 
     if args.command == "reconcile" and args.diff and not args.dry_run:
-        print("Error: --diff requires --dry-run for reconcile", file=sys.stderr)
+        from cc_codex_bridge._colors import color_fns as _cfns; _ec = _cfns()
+        print(f"Error: {_ec['cmd']('--diff')} requires {_ec['cmd']('--dry-run')} for reconcile", file=sys.stderr)
         return 1
 
     try:
@@ -1557,7 +1559,8 @@ def _handle_clean_command(args: argparse.Namespace) -> int:
 def _handle_uninstall_command(args: argparse.Namespace) -> int:
     """Handle the uninstall command."""
     if args.json and not args.dry_run:
-        print("Error: --json requires --dry-run for uninstall", file=sys.stderr)
+        from cc_codex_bridge._colors import color_fns as _cfns; _ec = _cfns()
+        print(f"Error: {_ec['cmd']('--json')} requires {_ec['cmd']('--dry-run')} for uninstall", file=sys.stderr)
         return 1
 
     try:
