@@ -644,8 +644,13 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
 
 - `doctor`
   - run machine-level environment checks without requiring a project
-  - report Python version support, Claude CLI availability, Claude cache visibility, Codex-home writability, LaunchAgents directory access, and CLI PATH visibility
+  - report Python version support, Claude CLI availability, Claude cache visibility, Codex-home writability, LaunchAgents directory access, CLI PATH visibility, and available release version (best-effort GitHub check, 3-second timeout, silent on network failure)
   - support JSON output with `--json`
+- `upgrade`
+  - fetch the latest release version from the GitHub releases API and compare with the installed version
+  - download and execute the official `install.sh` in place when a newer version is available
+  - `--check` flag to report available version without installing
+  - blocks editable (development) installs with a message explaining both how to update the checkout and how to switch to a release install
 - `reconcile --dry-run`
   - compute reconcile changes without writing
   - print change summary
@@ -897,6 +902,8 @@ Current runtime module responsibilities:
   - config show formatting: human-readable and JSON output with source attribution (default/global/project)
 - `config_writer.py`
   - TOML read-modify-write helpers using `tomli-w`: read, write, add/remove from string lists, set nested values
+- `_colors.py`
+  - ANSI color helper: `color_fns()` returns a dict of callables (key, good, warn, bad, create, update, remove, dim) using Python 3.14's `_colorize` theme; returns no-op callables outside a TTY or when `_colorize` is unavailable
 - `interactive.py`
   - interactive CLI helpers: numbered list selection, text value prompts, TTY detection
 - `claude_shim.py`
