@@ -560,6 +560,11 @@ def compute_project_drift(
     state = BridgeState.from_path(state_dir / "state.json")
     if state is None:
         return []
+    if state.project_root != project_root_path:
+        raise ReconcileError(
+            "Bridge state belongs to a different project root: "
+            f"{state.project_root}"
+        )
 
     drifted: list[str] = []
     for relative, stored_hash in _validated_managed_project_files(state).items():

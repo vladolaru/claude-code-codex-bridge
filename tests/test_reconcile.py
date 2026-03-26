@@ -4772,6 +4772,31 @@ def test_compute_project_drift_rejects_unexpected_managed_paths(tmp_path: Path):
         compute_project_drift(project_root, bridge_home=bridge_home)
 
 
+def test_compute_project_drift_rejects_foreign_state_root(tmp_path: Path):
+    """compute_project_drift must reject state files that belong to another project."""
+    from cc_codex_bridge.reconcile import compute_project_drift
+    from cc_codex_bridge.state import BridgeState
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    foreign_project_root = tmp_path / "foreign-project"
+    foreign_project_root.mkdir()
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    state_dir = project_state_dir(project_root, bridge_home=bridge_home)
+    state_dir.mkdir(parents=True)
+
+    state = BridgeState(
+        project_root=foreign_project_root,
+        codex_home=tmp_path / "codex",
+        bridge_home=bridge_home,
+        managed_project_files={"CLAUDE.md": "sha256:deadbeef"},
+    )
+    (state_dir / "state.json").write_text(state.to_json())
+
+    with pytest.raises(ReconcileError, match="Bridge state belongs to a different project root"):
+        compute_project_drift(project_root, bridge_home=bridge_home)
+
+
 def test_reconcile_refuses_to_overwrite_preexisting_agent_toml(
     make_plugin_version, tmp_path: Path
 ):
