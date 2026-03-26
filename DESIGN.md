@@ -201,7 +201,7 @@ The project state file (at `~/.cc-codex-bridge/projects/<hash>/state.json`) reco
 - bridge home path
 - managed project files as a path-to-content-hash mapping (including `CLAUDE.md`, `AGENTS.md`, and agent `.toml` files under `.codex/agents/`)
 - managed project skill directory names (tracked separately for directory-snapshot comparison)
-- state version (currently 9; v8 state files are migrated on read)
+- state version (currently 9; v8 state files are migrated on read, and the next reconcile backfills hashes for preserved managed files from on-disk content)
 
 The global registry records:
 
@@ -658,7 +658,7 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
   - report `in_sync` vs `pending_changes`
   - report `invalid` when agent translation contains unsupported Claude tools
   - report categorized project-file vs skill create/update/remove changes
-  - report drifted managed files as a separate `DRIFTED` category (drift is computed by comparing stored content hashes against on-disk content for all managed project files; missing files, symlinks, and files without stored hashes from v8 migration are excluded from drift detection)
+  - report drifted managed files as a separate `DRIFTED` category (drift is computed by comparing stored content hashes against on-disk content for all managed project files; missing files and symlinks are excluded, and v8-migrated preserved files gain hashes on the next reconcile)
   - include agent translation diagnostics in both text and JSON output when invalid
   - report effective excluded plugin/skill/agent ids
   - support JSON output with `--json`
