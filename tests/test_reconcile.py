@@ -1544,8 +1544,8 @@ def test_build_project_resolves_same_stem_agent_collision_with_alt_suffix(
     assert result.agent_count == 2
 
 
-def test_build_project_returns_bootstrap_without_mutating(tmp_path: Path):
-    """build_project_desired_state returns bootstrap decision without writing files."""
+def test_build_project_returns_bootstrap_with_desired_state(tmp_path: Path):
+    """build_project_desired_state computes full desired state even when bootstrap is pending."""
     from cc_codex_bridge.reconcile import build_project_desired_state
 
     project_root = tmp_path / "project"
@@ -1562,9 +1562,9 @@ def test_build_project_returns_bootstrap_without_mutating(tmp_path: Path):
     assert not (project_root / "AGENTS.md").exists()
     assert (project_root / "CLAUDE.md").read_text() == claude_content
 
-    # Should return bootstrap decision for the caller to handle
+    # Should return bootstrap decision with a fully computed desired state
     assert build.shim_decision.action == "bootstrap"
-    assert build.desired_state is None
+    assert build.desired_state is not None
 
 
 def test_execute_bootstrap_copies_claude_md_to_agents_md(tmp_path: Path):

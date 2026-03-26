@@ -178,7 +178,7 @@ def build_desired_state(
     preserved_project_files: list[Path] = []
     skills_tuple = tuple(skills)
 
-    if shim_decision.action in ("create", "bootstrap") and shim_decision.content is not None:
+    if shim_decision.action == "create" and shim_decision.content is not None:
         project_files.append(
             (
                 _resolve_managed_project_path(project_root, Path("CLAUDE.md")),
@@ -371,20 +371,11 @@ def build_project_desired_state(
     result, exclusion_report = apply_sync_exclusions(result, exclusions)
     shim_decision = plan_claude_shim(result.project)
 
-    # Bootstrap needed: CLAUDE.md exists without AGENTS.md.
-    # Return early so the caller can decide whether to execute the bootstrap
-    # (reconcile) or just report it (status/validate/dry-run).
-    if shim_decision.action == "bootstrap":
-        return ProjectBuildResult(
-            desired_state=None,
-            discovery=result,
-            shim_decision=shim_decision,
-            agent_count=0,
-            skill_count=0,
-            prompt_count=0,
-            exclusion_report=exclusion_report,
-            diagnostics=(),
-        )
+    # Bootstrap: when CLAUDE.md exists without AGENTS.md, the full translation
+    # pipeline still runs.  build_desired_state handles the "bootstrap" shim
+    # decision by including the CLAUDE.md→shim write in desired project files.
+    # The caller is responsible for executing the actual bootstrap (copy
+    # CLAUDE.md → AGENTS.md) before or after reconciliation.
 
     agent_result = translate_installed_agents_with_diagnostics(result.plugins, bridge_home=bridge_home_path)
     user_agent_result = translate_standalone_agents(result.user_agents, scope="user")
@@ -894,29 +885,21 @@ def reconcile_all(
                 exclude_agents=exclude_agents,
                 exclude_commands=exclude_commands,
             )
-            did_bootstrap = False
-            if build.shim_decision.action == "bootstrap":
-                if not dry_run:
-                    from cc_codex_bridge.claude_shim import execute_bootstrap
-                    execute_bootstrap(build.discovery.project)
-                    did_bootstrap = True
-                    build = build_project_desired_state(
-                        project_root,
-                        codex_home=codex_home_path,
-                        bridge_home=bridge_home,
-                        claude_home=claude_home,
-                        cache_dir=cache_dir,
-                        exclude_plugins=exclude_plugins,
-                        exclude_skills=exclude_skills,
-                        exclude_agents=exclude_agents,
-                        exclude_commands=exclude_commands,
-                    )
-                else:
-                    errors.append(ReconcileAllError(
-                        project_root=project_root,
-                        error="bootstrap required: CLAUDE.md exists without AGENTS.md",
-                    ))
-                    continue
+            needs_bootstrap = build.shim_decision.action == "bootstrap"
+            if needs_bootstrap and not dry_run:
+                from cc_codex_bridge.claude_shim import execute_bootstrap
+                execute_bootstrap(build.discovery.project)
+                build = build_project_desired_state(
+                    project_root,
+                    codex_home=codex_home_path,
+                    bridge_home=bridge_home,
+                    claude_home=claude_home,
+                    cache_dir=cache_dir,
+                    exclude_plugins=exclude_plugins,
+                    exclude_skills=exclude_skills,
+                    exclude_agents=exclude_agents,
+                    exclude_commands=exclude_commands,
+                )
 
             # Only agent diagnostics block reconciliation.
             # Skill validation warnings are informational and do not prevent sync.
@@ -933,11 +916,22 @@ def reconcile_all(
 
             if dry_run:
                 report = diff_desired_state(build.desired_state)
+                # Synthesize bootstrap changes so dry-run shows the full
+                # picture without modifying any files.
+                if needs_bootstrap:
+                    bootstrap_changes = (
+                        Change(kind="create", path=project_root / "AGENTS.md", resource_kind="project_file"),
+                        Change(kind="update", path=project_root / "CLAUDE.md", resource_kind="project_file"),
+                    )
+                    report = ReconcileReport(
+                        changes=bootstrap_changes + report.changes,
+                        applied=False,
+                    )
             else:
                 report = reconcile_desired_state(build.desired_state)
 
             results.append(ReconcileAllProjectResult(
-                project_root=project_root, report=report, bootstrapped=did_bootstrap,
+                project_root=project_root, report=report, bootstrapped=needs_bootstrap,
             ))
         except Exception as exc:
             errors.append(ReconcileAllError(project_root=project_root, error=str(exc)))

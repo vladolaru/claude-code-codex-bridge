@@ -1602,20 +1602,25 @@ def test_validate_reports_bootstrap_needed(tmp_path: Path, capsys):
     assert "Bootstrap required" in captured.err
 
 
-def test_reconcile_dry_run_reports_bootstrap_needed(tmp_path: Path, capsys):
-    """reconcile --dry-run exits with error when bootstrap needed."""
+def test_reconcile_dry_run_previews_bootstrap_without_mutating(tmp_path: Path, capsys):
+    """reconcile --dry-run shows bootstrap changes without modifying files."""
     project_root = tmp_path / "project"
     project_root.mkdir()
-    (project_root / "CLAUDE.md").write_text("# My instructions\n")
+    claude_content = "# My instructions\n"
+    (project_root / "CLAUDE.md").write_text(claude_content)
 
     exit_code = cli.main([
         "reconcile", "--dry-run", "--project", str(project_root),
         "--codex-home", str(tmp_path / "codex-home"),
     ])
 
-    assert exit_code == 1
+    assert exit_code == 0
+    # Dry-run must NOT modify any files
+    assert not (project_root / "AGENTS.md").exists()
+    assert (project_root / "CLAUDE.md").read_text() == claude_content
+    # Should report the bootstrap changes in the output
     captured = capsys.readouterr()
-    assert "Bootstrap required" in captured.err
+    assert "AGENTS.md" in captured.out
 
 
 def test_reconcile_executes_bootstrap(tmp_path: Path, capsys):

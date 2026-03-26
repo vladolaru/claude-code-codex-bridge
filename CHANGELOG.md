@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.4] - 2026-03-26
+
+### Fixed
+- `reconcile --dry-run` now previews bootstrap changes (AGENTS.md creation + CLAUDE.md update) without modifying files, instead of erroring with "Bootstrap required"
+- `reconcile --all --dry-run` now previews bootstrap-pending projects instead of reporting them as errors
+
 ## [0.19.3] - 2026-03-26
 
 ### Fixed

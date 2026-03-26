@@ -38,6 +38,8 @@ from cc_codex_bridge.model import (
 )
 from cc_codex_bridge.bridge_home import resolve_bridge_home, project_state_dir
 from cc_codex_bridge.reconcile import (
+    Change,
+    ReconcileReport,
     build_project_desired_state,
     diff_desired_state,
     format_change_report,
@@ -683,10 +685,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    # Bootstrap: CLAUDE.md exists without AGENTS.md
+    # Bootstrap: CLAUDE.md exists without AGENTS.md.
+    # For reconcile (non-dry-run), execute the bootstrap and rebuild.
+    # For reconcile --dry-run, the build already computed the full desired
+    # state (minus CLAUDE.md, which bootstrap manages separately);
+    # bootstrap changes are synthesized in the report.
+    # For validate/status, report that bootstrap is needed and exit.
     did_bootstrap = False
     if build.shim_decision.action == "bootstrap":
-        if args.command == "reconcile" and not args.dry_run:
+        if args.command == "reconcile" and not getattr(args, "dry_run", False):
             from cc_codex_bridge.claude_shim import execute_bootstrap
             try:
                 execute_bootstrap(build.discovery.project)
@@ -708,7 +715,7 @@ def main(argv: list[str] | None = None) -> int:
             except (DiscoveryError, TranslationError, ReconcileError, OSError, UnicodeError) as exc:
                 print(f"Error: {exc}", file=sys.stderr)
                 return 1
-        else:
+        elif args.command != "reconcile":
             print(
                 "Bootstrap required: CLAUDE.md exists without AGENTS.md.\n"
                 "Run `cc-codex-bridge reconcile` to copy CLAUDE.md to AGENTS.md "
@@ -774,11 +781,22 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "reconcile":
+            needs_bootstrap = build.shim_decision.action == "bootstrap"
             if args.dry_run:
                 report = diff_desired_state(build.desired_state)
+                # Synthesize bootstrap changes so dry-run shows the full
+                # picture without modifying any files.
+                if needs_bootstrap:
+                    bootstrap_changes = (
+                        Change(kind="create", path=build.discovery.project.agents_md_path, resource_kind="project_file"),
+                        Change(kind="update", path=build.discovery.project.root / "CLAUDE.md", resource_kind="project_file"),
+                    )
+                    report = ReconcileReport(
+                        changes=bootstrap_changes + report.changes,
+                        applied=False,
+                    )
             else:
                 report = reconcile_desired_state(build.desired_state)
-                from cc_codex_bridge.reconcile import Change
                 bootstrap_changes = ()
                 if did_bootstrap:
                     bootstrap_changes = (
