@@ -224,3 +224,21 @@ def test_registry_without_prompts_defaults_empty(tmp_path):
     loaded = GlobalSkillRegistry.from_path(path)
     assert loaded is not None
     assert loaded.prompts == {}
+
+
+def test_hash_file_content_deterministic():
+    """hash_file_content returns stable sha256 hash."""
+    from cc_codex_bridge.registry import hash_file_content
+
+    content = b"@AGENTS.md\n"
+    h1 = hash_file_content(content)
+    h2 = hash_file_content(content)
+    assert h1 == h2
+    assert h1.startswith("sha256:")
+
+
+def test_hash_file_content_different_for_different_content():
+    """Different content produces different hashes."""
+    from cc_codex_bridge.registry import hash_file_content
+
+    assert hash_file_content(b"hello") != hash_file_content(b"world")

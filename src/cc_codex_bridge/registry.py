@@ -245,6 +245,14 @@ def hash_prompt_content(content: bytes) -> str:
     return f"sha256:{digest.hexdigest()}"
 
 
+def hash_file_content(content: bytes) -> str:
+    """Return the deterministic content hash for a managed file."""
+    digest = hashlib.sha256()
+    digest.update(len(content).to_bytes(8, "big"))
+    digest.update(content)
+    return f"sha256:{digest.hexdigest()}"
+
+
 def hash_generated_skill(skill: GeneratedSkill) -> str:
     """Return the deterministic content hash for one generated skill tree."""
     return hash_generated_skill_files(skill.files)
