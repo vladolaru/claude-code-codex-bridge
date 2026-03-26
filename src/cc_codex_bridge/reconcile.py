@@ -1346,6 +1346,14 @@ def _plan_project_skill_mutations(
     previous_state: BridgeState | None,
 ) -> tuple[Change, ...]:
     """Plan project-local skill directory mutations using directory-snapshot comparison."""
+    skills_root = desired.project_root / SKILLS_RELATIVE_ROOT
+    # Refuse to write through a symlinked skills root — following it would
+    # modify the symlink target (e.g. .ai/skills/) instead of .codex/skills/.
+    if skills_root.is_symlink():
+        raise ReconcileError(
+            f"Refusing to write through symlinked skills directory: "
+            f"{skills_root} -> {skills_root.resolve()}"
+        )
     desired_skills = {skill.install_dir_name: skill for skill in desired.project_skills}
     previously_managed = (
         _validated_managed_project_skill_dirs(previous_state)
@@ -1455,6 +1463,12 @@ def _plan_skill_mutations(
     Returns the change list plus the updated registry for the caller
     to pass into the agent planner.
     """
+    global_skills_root = desired.codex_home / "skills"
+    if global_skills_root.is_symlink():
+        raise ReconcileError(
+            f"Refusing to write through symlinked skills directory: "
+            f"{global_skills_root} -> {global_skills_root.resolve()}"
+        )
     desired_skills = {skill.install_dir_name: skill for skill in desired.skills}
     desired_hashes = {
         install_dir_name: hash_generated_skill(skill)
