@@ -490,7 +490,7 @@ def test_validate_succeeds_when_unsupported_agent_is_excluded(
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert "GENERATED_AGENTS: 1" in captured.out
+    assert "GENERATED_AGENTS:" in captured.out and "1" in captured.out
 
 
 def test_status_cli_reports_pending_and_json(make_project, make_plugin_version, tmp_path: Path, capsys):
@@ -1740,8 +1740,8 @@ def test_cli_exclude_command_flag(make_project, make_plugin_version, tmp_path: P
 
     assert exit_code == 0
     captured = capsys.readouterr()
-    # With one of two commands excluded, only 1 prompt should be translated
-    assert "TRANSLATED_PROMPTS: 1" in captured.out
+    # With one of two commands excluded, only 1 prompt should be generated
+    assert "GENERATED_PROMPTS:" in captured.out and "1" in captured.out
     assert "EXCLUDED_COMMANDS: 1" in captured.out
 
 
@@ -2074,3 +2074,44 @@ def test_status_drifted_files_count_in_text_output(tmp_path: Path, capsys):
     assert "DRIFTED_FILES:" in captured.out and "2" in captured.out
     assert "CLAUDE.md" in captured.out
     assert "AGENTS.md" in captured.out
+
+
+def test_print_summary_output_uses_generated_prompts_key(
+    make_project, make_plugin_version, tmp_path, capsys
+):
+    """reconcile output must use GENERATED_PROMPTS, not TRANSLATED_PROMPTS."""
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "pirategoat-tools", "1.0.0", agent_names=("reviewer",)
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\nBody.\n"
+    )
+
+    cli.main([
+        "reconcile",
+        "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(tmp_path / "codex"),
+    ])
+    captured = capsys.readouterr()
+    assert "TRANSLATED_PROMPTS" not in captured.out
+    assert "GENERATED_PROMPTS" in captured.out
+
+
+def test_print_summary_suppresses_exclusion_block_when_empty(
+    make_project, make_plugin_version, tmp_path, capsys
+):
+    """reconcile output omits the exclusion block when nothing is excluded."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "plugin", "1.0.0")
+
+    cli.main([
+        "reconcile",
+        "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(tmp_path / "codex"),
+    ])
+    captured = capsys.readouterr()
+    assert "EXCLUDED_PLUGINS" not in captured.out
+    assert "EXCLUDED_SKILLS" not in captured.out

@@ -1899,44 +1899,45 @@ def _print_summary(
     prompt_count: int,
     exclusion_report: ExclusionReport,
 ) -> None:
-    """Print a human-readable discovery summary."""
+    """Print a human-readable discovery summary for the reconcile command."""
     from cc_codex_bridge import __version__
+    from cc_codex_bridge.render import padded_key, render_exclusion_block
 
     c = _status_color_fns()
-    # Project metadata
-    print()
-    print(f"{c['key']('VERSION:')} v{__version__}")
-    print(f"{c['key']('PROJECT_ROOT:')} {result.project.root}")
-    print(f"{c['key']('AGENTS_MD:')} {result.project.agents_md_path}")
-    print(f"{c['key']('CLAUDE_MD_ACTION:')} {shim_action}")
-    # Plugin discovery
-    print()
-    print(f"{c['key']('PLUGINS_FOUND:')} {len(result.plugins)}")
+
+    def _k(key: str) -> str:
+        return padded_key(key, c)
+
+    # Group 1: project metadata
+    lines: list[str] = [""]
+    lines.append(f"{_k('VERSION')} v{__version__}")
+    lines.append(f"{_k('PROJECT_ROOT')} {result.project.root}")
+    lines.append(f"{_k('AGENTS_MD')} {result.project.agents_md_path}")
+    lines.append(f"{_k('CLAUDE_MD_ACTION')} {shim_action}")
+
+    # Group 2: plugin discovery
+    lines.append("")
+    lines.append(f"{_k('PLUGINS_FOUND')} {len(result.plugins)}")
     for plugin in result.plugins:
-        print(f"  {plugin.marketplace}/{plugin.plugin_name}@{plugin.version_text}")
-        print(f"    source  = {plugin.source_path}")
-        print(f"    skills  = {len(plugin.skills)}")
-        print(f"    agents  = {len(plugin.agents)}")
-        print(f"    prompts = {len(plugin.commands)}")
-    # Translation output
-    print()
-    print(f"{c['key']('GENERATED_AGENTS:')} {agent_count}")
-    print(f"{c['key']('GENERATED_SKILLS:')} {skill_count}")
-    print(f"{c['key']('TRANSLATED_PROMPTS:')} {prompt_count}")
-    # Exclusions
-    print()
-    print(f"{c['key']('EXCLUDED_PLUGINS:')} {len(exclusion_report.plugins)}")
-    for plugin_id in exclusion_report.plugins:
-        print(f"  {c['dim'](plugin_id)}")
-    print(f"{c['key']('EXCLUDED_SKILLS:')} {len(exclusion_report.skills)}")
-    for skill_id in exclusion_report.skills:
-        print(f"  {c['dim'](skill_id)}")
-    print(f"{c['key']('EXCLUDED_AGENTS:')} {len(exclusion_report.agents)}")
-    for agent_id in exclusion_report.agents:
-        print(f"  {c['dim'](agent_id)}")
-    print(f"{c['key']('EXCLUDED_COMMANDS:')} {len(exclusion_report.commands)}")
-    for command_id in exclusion_report.commands:
-        print(f"  {c['dim'](command_id)}")
+        lines.append(f"  {plugin.marketplace}/{plugin.plugin_name}@{plugin.version_text}")
+        lines.append(f"    source  = {plugin.source_path}")
+        lines.append(f"    skills  = {len(plugin.skills)}")
+        lines.append(f"    agents  = {len(plugin.agents)}")
+        lines.append(f"    prompts = {len(plugin.commands)}")
+
+    # Group 3: translation output (GENERATED_, not TRANSLATED_)
+    lines.append("")
+    lines.append(f"{_k('GENERATED_AGENTS')} {agent_count}")
+    lines.append(f"{_k('GENERATED_SKILLS')} {skill_count}")
+    lines.append(f"{_k('GENERATED_PROMPTS')} {prompt_count}")
+
+    # Group 4: exclusions (suppressed when all zero)
+    excl_lines = render_exclusion_block(exclusion_report, c)
+    if excl_lines:
+        lines.append("")
+        lines.extend(excl_lines)
+
+    print("\n".join(lines))
 
 
 def _build_status_payload(
