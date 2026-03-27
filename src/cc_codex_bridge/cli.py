@@ -168,10 +168,11 @@ def _handle_upgrade_command(args: argparse.Namespace) -> int:
     """Handle the upgrade command."""
     from cc_codex_bridge import __version__
     from cc_codex_bridge._colors import color_fns
+    from cc_codex_bridge.render import padded_key
 
     c = color_fns()
     print()
-    print(f"{c['key']('INSTALLED:')} v{__version__}")
+    print(f"{padded_key('INSTALLED', c)} v{__version__}")
 
     if _is_editable_install():
         print(c["warn"]("Development install detected — upgrade is not supported."))
@@ -186,7 +187,7 @@ def _handle_upgrade_command(args: argparse.Namespace) -> int:
         print(f"{c['warn']('WARNING:')} Could not reach GitHub — check your connection.")
         return 1
 
-    print(f"{c['key']('LATEST:')}    v{latest}")
+    print(f"{padded_key('LATEST', c)} v{latest}")
 
     from cc_codex_bridge.model import SemVer
     try:
@@ -1668,7 +1669,7 @@ def _format_all_report(report, *, dry_run: bool = False, is_status: bool = False
     lines: list[str] = [""]
 
     if dry_run:
-        lines.append(c["warn"]("Dry run — no changes applied."))
+        lines.append(c["warn"]("Dry run — the following changes are pending:"))
         lines.append("")
 
     # Scan summary (only when scan config exists and produced results)
@@ -1834,7 +1835,7 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
         plist_path = la_dir / f"{GLOBAL_LAUNCHAGENT_LABEL}.plist"
         print()
         if not plist_path.exists():
-            print(f"{c['warn']('AUTOSYNC:')} not installed")
+            print(f"{c['key']('AUTOSYNC:')} {c['warn']('not installed')}")
             return 0
         result = subprocess.run(
             ["launchctl", "list", GLOBAL_LAUNCHAGENT_LABEL],
@@ -1884,7 +1885,7 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
     per_project_plists = [p for p in existing_plists if p != destination]
     if per_project_plists:
         print("")
-        print(c["warn"]("WARNING: Found existing per-project LaunchAgent plists."))
+        print(f"{c['warn']('WARNING:')} Found existing per-project LaunchAgent plists.")
         print(f"These are no longer needed with the global {c['cmd']('reconcile --all')} plist.")
         print("Remove them with:")
         for plist_path in per_project_plists:

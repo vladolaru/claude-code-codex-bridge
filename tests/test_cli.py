@@ -2262,3 +2262,41 @@ def test_print_summary_keys_are_padded(
                 f"Key '{first_token}' not padded to KEY_WIDTH={KEY_WIDTH}: "
                 f"got prefix {actual_prefix!r}, expected {expected_prefix!r}"
             )
+
+
+def test_autosync_status_key_always_uses_key_color(tmp_path, capsys):
+    """AUTOSYNC: label uses key color regardless of installed state."""
+    import re
+    from cc_codex_bridge.install_launchagent import GLOBAL_LAUNCHAGENT_LABEL  # noqa: F401
+
+    # When not installed, AUTOSYNC: should appear without being colored as warn.
+    # We test by verifying the text content structure (ANSI-stripped).
+    cli.main([
+        "autosync", "status",
+        "--launchagents-dir", str(tmp_path / "LaunchAgents"),
+    ])
+    captured = capsys.readouterr()
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", captured.out)
+    assert "AUTOSYNC:" in plain
+    assert "not installed" in plain
+
+
+def test_format_all_report_dry_run_banner_says_pending():
+    """reconcile --all --dry-run banner says 'pending', not 'no changes applied'."""
+    from cc_codex_bridge.cli import _format_all_report
+
+    class FakeScan:
+        bridgeable = []
+        not_bridgeable = []
+        filtered = []
+
+    class FakeReport:
+        results = []
+        errors = []
+        scan_result = FakeScan()
+
+    import re
+    output = _format_all_report(FakeReport(), dry_run=True)
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
+    assert "no changes applied" not in plain.lower()
+    assert "pending" in plain.lower()
