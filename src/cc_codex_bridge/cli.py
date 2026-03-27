@@ -1896,6 +1896,7 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
         prog_args = plist.get("ProgramArguments", [])
         # ProgramArguments[0] is argv[0] (the name); skip it to avoid repeating the executable.
         args_val = " ".join(prog_args[1:]) if len(prog_args) > 1 else " ".join(prog_args)
+        workdir_val = plist.get("WorkingDirectory", "")
         run_at_load = plist.get("RunAtLoad", False)
         stdout_val = plist.get("StandardOutPath", "")
         stderr_val = plist.get("StandardErrorPath", "")
@@ -1919,6 +1920,7 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
             f"  {_k('PLIST')} {plist_path}",
             f"  {_k('INTERVAL')} {_default(_fmt_interval(interval_val), interval_val == DEFAULT_START_INTERVAL)}",
             f"  {_k('EXECUTABLE')} {_default(executable_val, executable_val == default_executable)}",
+            f"  {_k('WORKING_DIR')} {_default(workdir_val, workdir_val == str(Path.home()))}",
             f"  {_k('STARTS_AT_LOGIN')} {_default(starts_at_login_s, run_at_load is True)}",
             f"  {_k('LOG_STDOUT')} {_default(stdout_val, stdout_val == default_stdout)}",
             f"  {_k('LOG_STDERR')} {_default(stderr_val, stderr_val == default_stderr)}",
