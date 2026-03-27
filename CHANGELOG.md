@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-03-27
+
+First stable release. The core bridge pipeline (reconcile, status, clean,
+doctor, autosync, config, log) is complete and has been running in daily use.
+No breaking changes from 0.26.0 — this is a stability declaration.
+
 ## [0.26.0] - 2026-03-27
 
 ### Added
