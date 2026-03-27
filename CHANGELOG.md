@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `autosync status` now displays full agent configuration: label, plist path,
+  interval (raw + human-readable), executable path, working directory, PATH
+  environment status (`set (N entries)` / `not set`), start-at-login, and log
+  file paths — values matching their defaults are marked `(default)` in dim
+- `autosync status` output restructured: overall status and command at the top,
+  followed by an indented `CONFIGURATION:` section
+- `autosync install` bakes the current shell `PATH` into the plist
+  `EnvironmentVariables` so the LaunchAgent can locate the `claude` CLI at
+  runtime (macOS strips PATH in LaunchAgents, causing "Claude CLI not found"
+  errors on every scheduled run)
+
+### Fixed
+- LaunchAgent was silently failing on every scheduled run because `claude` was
+  not on the stripped macOS LaunchAgent PATH — re-run `autosync install` to
+  pick up the fix
+
 ## [0.25.0] - 2026-03-27
 
 ### Changed
