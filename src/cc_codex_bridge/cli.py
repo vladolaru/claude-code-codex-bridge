@@ -1847,22 +1847,72 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
         return 0
 
     if sub == "status":
-        from cc_codex_bridge.install_launchagent import DEFAULT_LAUNCHAGENTS_DIR as _LA_DIR
+        import plistlib
         import subprocess
+        from cc_codex_bridge.install_launchagent import (
+            DEFAULT_LAUNCHAGENTS_DIR as _LA_DIR,
+            DEFAULT_LOGS_DIR as _LOGS_DIR,
+        )
+        from cc_codex_bridge.render import padded_key
+
         la_dir = Path(args.launchagents_dir or _LA_DIR).expanduser().resolve()
         plist_path = la_dir / f"{GLOBAL_LAUNCHAGENT_LABEL}.plist"
         print()
         if not plist_path.exists():
-            print(f"{c['key']('AUTOSYNC:')} {c['warn']('not installed')}")
+            print(f"{padded_key('AUTOSYNC', c)} {c['warn']('not installed')}")
             return 0
+
         result = subprocess.run(
             ["launchctl", "list", GLOBAL_LAUNCHAGENT_LABEL],
             capture_output=True, text=True,
         )
         loaded = result.returncode == 0
         status_s = c["good"]("installed and loaded") if loaded else c["warn"]("installed, not loaded")
-        print(f"{c['key']('AUTOSYNC:')} {status_s}")
-        print(f"  {plist_path}")
+
+        try:
+            plist = plistlib.loads(plist_path.read_bytes())
+        except Exception:
+            plist = {}
+
+        def _k(key: str) -> str:
+            return padded_key(key, c)
+
+        def _default(value: str, is_default: bool) -> str:
+            return f"{value}  {c['dim']('(default)')}" if is_default else value
+
+        def _fmt_interval(seconds: int) -> str:
+            if seconds % 3600 == 0:
+                human = f"every {seconds // 3600}h"
+            elif seconds % 60 == 0:
+                human = f"every {seconds // 60}m"
+            else:
+                human = f"every {seconds}s"
+            return f"{seconds}s ({human})"
+
+        label_val = plist.get("Label", GLOBAL_LAUNCHAGENT_LABEL)
+        interval_val = plist.get("StartInterval", DEFAULT_START_INTERVAL)
+        prog_args = plist.get("ProgramArguments", [])
+        command_val = " ".join(prog_args)
+        run_at_load = plist.get("RunAtLoad", False)
+        stdout_val = plist.get("StandardOutPath", "")
+        stderr_val = plist.get("StandardErrorPath", "")
+
+        default_logs = Path(_LOGS_DIR).expanduser().resolve()
+        default_stdout = str(default_logs / f"{GLOBAL_LAUNCHAGENT_LABEL}.out.log")
+        default_stderr = str(default_logs / f"{GLOBAL_LAUNCHAGENT_LABEL}.err.log")
+
+        run_at_load_s = c["good"]("true") if run_at_load else c["warn"]("false")
+        lines = [
+            f"{_k('AUTOSYNC')} {status_s}",
+            f"{_k('LABEL')} {_default(label_val, label_val == GLOBAL_LAUNCHAGENT_LABEL)}",
+            f"{_k('PLIST')} {plist_path}",
+            f"{_k('INTERVAL')} {_default(_fmt_interval(interval_val), interval_val == DEFAULT_START_INTERVAL)}",
+            f"{_k('COMMAND')} {c['cmd'](command_val)}",
+            f"{_k('RUN_AT_LOAD')} {_default(run_at_load_s, run_at_load is True)}",
+            f"{_k('LOG_STDOUT')} {_default(stdout_val, stdout_val == default_stdout)}",
+            f"{_k('LOG_STDERR')} {_default(stderr_val, stderr_val == default_stderr)}",
+        ]
+        print("\n".join(lines))
         return 0
 
     # sub == "install"
