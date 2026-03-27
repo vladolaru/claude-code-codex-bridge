@@ -22,7 +22,7 @@ class LogEntry:
     """One activity log entry."""
 
     timestamp: datetime
-    action: str     # "reconcile", "clean", "uninstall", "install-launchagent"
+    action: str     # "reconcile", "clean", "uninstall", "autosync-install"
     project: str
     changes: tuple[LogChange, ...]
 

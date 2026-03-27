@@ -240,7 +240,7 @@ cc-codex-bridge uninstall --dry-run            # preview what would be removed
 
 ### Activity log
 
-State-changing operations (reconcile, clean, install-launchagent) are logged as daily JSONL files under `~/.cc-codex-bridge/logs/`.
+State-changing operations (reconcile, clean, autosync install) are logged as daily JSONL files under `~/.cc-codex-bridge/logs/`.
 
 ```bash
 cc-codex-bridge log show                     # last 7 days
