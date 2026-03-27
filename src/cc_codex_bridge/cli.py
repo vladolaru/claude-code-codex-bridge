@@ -1912,11 +1912,13 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
         starts_at_login_s = c["good"]("yes") if run_at_load else c["warn"]("no")
         lines = [
             f"{_k('OVERALL STATUS')} {status_s}",
+            f"{_k('RUNS')} {c['cmd'](args_val)}",
+            "",
+            c["key"]("CONFIGURATION:"),
             f"{_k('LABEL')} {_default(label_val, label_val == GLOBAL_LAUNCHAGENT_LABEL)}",
             f"{_k('PLIST')} {plist_path}",
             f"{_k('INTERVAL')} {_default(_fmt_interval(interval_val), interval_val == DEFAULT_START_INTERVAL)}",
             f"{_k('EXECUTABLE')} {_default(executable_val, executable_val == default_executable)}",
-            f"{_k('RUNS')} {c['cmd'](args_val)}",
             f"{_k('STARTS_AT_LOGIN')} {_default(starts_at_login_s, run_at_load is True)}",
             f"{_k('LOG_STDOUT')} {_default(stdout_val, stdout_val == default_stdout)}",
             f"{_k('LOG_STDERR')} {_default(stderr_val, stderr_val == default_stderr)}",
