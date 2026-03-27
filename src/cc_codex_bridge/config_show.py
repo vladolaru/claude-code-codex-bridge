@@ -72,12 +72,12 @@ def format_config_show(
             scope=scope,
         )
         label = f"Exclude {kind}:"
+        lines.append(label)
         if entries:
-            lines.append(label)
             for value, source in entries:
                 lines.append(f"  {value:<24}({source})")
         else:
-            lines.append(f"{label:<24}(none)")
+            lines.append("  (none)")
         lines.append("")
 
     # Remove trailing blank line

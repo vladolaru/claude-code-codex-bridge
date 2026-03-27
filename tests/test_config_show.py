@@ -203,7 +203,7 @@ def test_merged_deduplicates_overlapping_exclusions():
 
 
 def test_none_shown_for_empty_sections():
-    """Each exclusion category with no entries shows '(none)'."""
+    """Each exclusion category with no entries shows '(none)' on the line after the header."""
     output = format_config_show(
         global_config=BridgeConfig(),
         project_exclusions=None,
@@ -213,11 +213,40 @@ def test_none_shown_for_empty_sections():
     )
 
     lines = output.splitlines()
-    # Check that each section header is followed by (none) when empty
+    # Check that each section header is followed by "  (none)" on the next line
     for section_key in ("Exclude plugins:", "Exclude skills:", "Exclude agents:", "Exclude commands:"):
-        section_lines = [l for l in lines if section_key in l]
-        assert len(section_lines) == 1
-        assert "(none)" in section_lines[0]
+        idx = next(i for i, l in enumerate(lines) if section_key in l)
+        # Header line should not contain "(none)"
+        assert "(none)" not in lines[idx], (
+            f"Expected '{section_key}' header to be on its own line"
+        )
+        # The line immediately after the header should be "  (none)"
+        assert lines[idx + 1] == "  (none)", (
+            f"Expected '  (none)' after '{section_key}' but got: {repr(lines[idx + 1])}"
+        )
+
+
+def test_format_config_show_exclusion_none_indented_consistently():
+    """Empty exclusion sections show '  (none)' indented, not '(none)' after padded label."""
+    from cc_codex_bridge.config import BridgeConfig
+    from cc_codex_bridge.config_show import format_config_show
+
+    cfg = BridgeConfig()  # all defaults, no exclusions
+    output = format_config_show(
+        global_config=cfg,
+        project_exclusions=None,
+        scan_paths=(),
+        exclude_paths=(),
+        scope="global",
+    )
+    lines = output.splitlines()
+    # Find lines containing "(none)"
+    none_lines = [line for line in lines if "(none)" in line]
+    # All (none) entries should be indented with 2 spaces
+    for line in none_lines:
+        assert line.startswith("  "), (
+            f"Expected '  (none)' to be indented but got: {repr(line)}"
+        )
 
 
 # ---------------------------------------------------------------------------
