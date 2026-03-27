@@ -2115,3 +2115,47 @@ def test_print_summary_suppresses_exclusion_block_when_empty(
     captured = capsys.readouterr()
     assert "EXCLUDED_PLUGINS" not in captured.out
     assert "EXCLUDED_SKILLS" not in captured.out
+
+
+def test_print_summary_keys_are_padded(
+    make_project, make_plugin_version, tmp_path, capsys
+):
+    """reconcile summary keys are padded to KEY_WIDTH (column alignment)."""
+    import re
+    from cc_codex_bridge.render import KEY_WIDTH
+
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "pirategoat-tools", "1.0.0", agent_names=("reviewer",)
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\nBody.\n"
+    )
+
+    cli.main([
+        "reconcile",
+        "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(tmp_path / "codex"),
+    ])
+    captured = capsys.readouterr()
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", captured.out)
+
+    # Every UPPER_CASE: line should have the key column padded to KEY_WIDTH chars.
+    # padded_key() produces e.g. "VERSION:          " (ljust to KEY_WIDTH), so
+    # the value starts at column KEY_WIDTH in each such line.
+    for line in plain.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Lines starting with an all-caps key followed by colon
+        first_token = stripped.split()[0] if stripped.split() else ""
+        if first_token and first_token.isupper() and first_token.endswith(":"):
+            # padded_key() left-justifies key+colon to KEY_WIDTH; verify the
+            # first KEY_WIDTH characters match the key padded out to KEY_WIDTH.
+            expected_prefix = first_token.ljust(KEY_WIDTH)
+            actual_prefix = stripped[:KEY_WIDTH]
+            assert actual_prefix == expected_prefix, (
+                f"Key '{first_token}' not padded to KEY_WIDTH={KEY_WIDTH}: "
+                f"got prefix {actual_prefix!r}, expected {expected_prefix!r}"
+            )

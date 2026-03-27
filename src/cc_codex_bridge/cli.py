@@ -934,14 +934,14 @@ def main(argv: list[str] | None = None) -> int:
                     skill_diagnostics=skill_diags,
                 ))
             else:
-                _print_summary(
+                print(_print_summary(
                     build.discovery,
                     build.shim_decision.action,
                     build.agent_count,
                     build.skill_count,
                     build.prompt_count,
                     build.exclusion_report,
-                )
+                ))
                 if args.diff:
                     print(format_diff_report(build.desired_state, report))
                 else:
@@ -1898,8 +1898,8 @@ def _print_summary(
     skill_count: int,
     prompt_count: int,
     exclusion_report: ExclusionReport,
-) -> None:
-    """Print a human-readable discovery summary for the reconcile command."""
+) -> str:
+    """Return a human-readable discovery summary for the reconcile command."""
     from cc_codex_bridge import __version__
     from cc_codex_bridge.render import padded_key, render_exclusion_block
 
@@ -1937,7 +1937,7 @@ def _print_summary(
         lines.append("")
         lines.extend(excl_lines)
 
-    print("\n".join(lines))
+    return "\n".join(lines)
 
 
 def _build_status_payload(
