@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+- CLI output: introduce `render.py` as single source of truth for key-value
+  column width (`KEY_WIDTH=18`), change-line symbols (+/~/−), and exclusion
+  block rendering
+- Rename `TRANSLATED_PROMPTS` key to `GENERATED_PROMPTS` in `reconcile` and
+  `status` output — consistent terminology with agents and skills
+- `reconcile`/`clean` change list now uses colored +/~/− symbols instead of
+  `CREATE:`/`UPDATE:`/`REMOVE:` prefixes — matches `log show` output
+- `status` pending-change detail lines now use indented +/~/− format
+  (consistent with `reconcile`/`clean`) instead of `SKILL_CREATE:`/`AGENT_UPDATE:` flat keys
+- `status`/`reconcile` exclusion block suppressed entirely when nothing is
+  excluded (was always emitting 4 zero-count lines)
+- `reconcile`/`status` summary keys padded to `KEY_WIDTH` for column alignment
+- `log show` change symbols and action column are now colored
+- `uninstall` output now uses colors (was the only major formatter with no colors)
+- `doctor` CHECK lines use fixed-width column layout instead of `status=ok message=`
+  inline key=value format
+- `autosync status`: `AUTOSYNC:` label always uses key color (was `warn` when inactive)
+- `autosync install`: only `WARNING:` label colored, not the full warning sentence
+- `reconcile --all --dry-run` banner: "the following changes are pending" (was
+  "no changes applied")
+- `upgrade`: `padded_key()` used for `INSTALLED:`/`LATEST:` alignment (was
+  manual hardcoded spacing)
+- `config show`: exclusion section empty-state uses consistent indented `(none)`
+  line (was appended to padded label at inconsistent column)
+
 ## [0.24.0] - 2026-03-26
 
 ### Added
