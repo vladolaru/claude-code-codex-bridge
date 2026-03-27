@@ -278,6 +278,27 @@ def test_format_entries_human_readable(tmp_path):
     assert "- prompt" in output
 
 
+def test_format_entries_uses_change_symbols():
+    """format_log_entries uses the same +/~/- symbols as format_change_report."""
+    import re
+
+    entry = LogEntry(
+        timestamp=datetime(2026, 3, 21, 14, 0, 0),
+        action="reconcile",
+        project="/tmp/proj",
+        changes=(
+            LogChange(type="create", artifact="skill", path="/a"),
+            LogChange(type="update", artifact="agent", path="/b"),
+            LogChange(type="remove", artifact="project_file", path="/c"),
+        ),
+    )
+    output = format_log_entries([entry])
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
+    assert "+" in plain
+    assert "~" in plain
+    assert "-" in plain
+
+
 def test_format_entries_empty():
     """format_log_entries with no entries returns a no-entries message."""
     output = format_log_entries([])

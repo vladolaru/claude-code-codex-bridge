@@ -1333,13 +1333,11 @@ def _no_changes_message() -> str:
 
 
 def format_change_report(report: ReconcileReport) -> str:
-    """Format a file-level summary of changes."""
+    """Format a file-level change list using colored +/~/- symbols."""
     if not report.changes:
         return _no_changes_message()
-    return "\n".join(
-        f"{change.kind.upper()}: {change.path}{f' ({change.resource_kind})' if change.resource_kind else ''}"
-        for change in report.changes
-    )
+    from cc_codex_bridge.render import render_change_list
+    return render_change_list(report.changes)
 
 
 def format_diff_report(desired: DesiredState, report: ReconcileReport) -> str:

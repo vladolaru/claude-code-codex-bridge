@@ -15,6 +15,7 @@ from cc_codex_bridge.discover import discover
 from cc_codex_bridge.model import ReconcileError, TranslationError
 from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME, GlobalSkillRegistry
 from cc_codex_bridge.reconcile import (
+    Change,
     ReconcileReport,
     build_desired_state,
     build_project_desired_state,
@@ -439,7 +440,7 @@ def test_diff_report_includes_unified_diff_for_updated_text_files(
     report = diff_desired_state(updated)
     rendered = format_diff_report(updated, report)
 
-    assert "UPDATE:" in rendered
+    assert "~" in rendered
     assert "@@" in rendered
     assert "-Old body." in rendered
     assert "+New body." in rendered
@@ -821,6 +822,34 @@ def test_format_change_report_handles_empty_report():
     assert format_change_report(ReconcileReport(changes=(), applied=False)).strip() == "All good. No changes needed."
 
 
+def test_format_change_report_uses_change_symbols():
+    """format_change_report uses +/~/- symbols, not CREATE:/UPDATE:/REMOVE: prefixes."""
+    import re
+
+    report = ReconcileReport(
+        changes=(
+            Change(kind="create", path=Path("/a/skill"), resource_kind="skill"),
+            Change(kind="update", path=Path("/b/agent.toml"), resource_kind="agent"),
+            Change(kind="remove", path=Path("/c/file"), resource_kind=""),
+        ),
+        applied=True,
+    )
+    output = format_change_report(report)
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
+
+    assert "+" in plain
+    assert "~" in plain
+    assert "-" in plain
+    assert "CREATE:" not in plain
+    assert "UPDATE:" not in plain
+    assert "REMOVE:" not in plain
+    assert "/a/skill" in plain
+    assert "/b/agent.toml" in plain
+    assert "/c/file" in plain
+    assert "(skill)" in plain
+    assert "(agent)" in plain
+
+
 def test_format_diff_report_handles_no_changes(make_project, make_plugin_version, tmp_path: Path):
     """No-op diffs render the short form."""
     project_root, _agents_md = make_project()
@@ -864,7 +893,7 @@ def test_format_diff_report_includes_global_instructions_diff(
 
     # Should not crash and should include a diff for global instructions
     rendered = format_diff_report(desired, report)
-    assert "CREATE:" in rendered
+    assert "+" in rendered
     global_path = str(codex_home / "AGENTS.md")
     assert global_path in rendered
 
@@ -1073,7 +1102,7 @@ def test_diff_report_skips_remove_and_skill_changes_in_diff_output(
     report = diff_desired_state(updated)
     rendered = format_diff_report(updated, report)
 
-    assert "REMOVE:" in rendered
+    assert "-" in rendered
     agent_toml_path = str(
         codex_home / "agents" / "reviewer.toml"
     )
@@ -1261,7 +1290,7 @@ def test_diff_report_skips_skill_create_changes(
 
     rendered = format_diff_report(desired, report)
 
-    assert "CREATE:" in rendered
+    assert "+" in rendered
     assert "(skill)" in rendered
     skill_path = str(codex_home / "skills" / "prompt-engineer")
     assert f"--- {skill_path}" not in rendered

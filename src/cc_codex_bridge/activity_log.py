@@ -88,9 +88,6 @@ def build_log_entry_from_changes(
     )
 
 
-_CHANGE_SYMBOLS = {"create": "+", "update": "~", "remove": "-"}
-
-
 def format_log_entries(entries: list[LogEntry], *, json_output: bool = False) -> str:
     """Format log entries for display."""
     if json_output:
@@ -99,13 +96,19 @@ def format_log_entries(entries: list[LogEntry], *, json_output: bool = False) ->
     if not entries:
         return "No log entries found."
 
+    from cc_codex_bridge._colors import color_fns
+    from cc_codex_bridge.render import CHANGE_SYMBOLS
+    c = color_fns()
+
     lines: list[str] = []
     for entry in entries:
         ts = entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")
-        lines.append(f"{ts}  {entry.action:<20s} {entry.project}")
+        action_colored = c["key"](f"{entry.action:<20s}")
+        lines.append(f"{ts}  {action_colored} {entry.project}")
         for change in entry.changes:
-            symbol = _CHANGE_SYMBOLS.get(change.type, "?")
-            lines.append(f"  {symbol} {change.artifact:<16s} {change.path}")
+            symbol = CHANGE_SYMBOLS.get(change.type, "?")
+            color_fn = c.get(change.type, c["dim"])
+            lines.append(f"  {color_fn(symbol)} {color_fn(f'{change.artifact:<16s}')} {change.path}")
         lines.append("")
 
     return "\n".join(lines).rstrip()
