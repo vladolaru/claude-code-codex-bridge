@@ -1672,8 +1672,11 @@ def _format_all_report(report, *, dry_run: bool = False, is_status: bool = False
 
     if dry_run:
         any_pending = any(len(r.report.changes) > 0 for r in report.results)
+        has_errors = len(report.errors) > 0
         if any_pending:
             lines.append(c["warn"]("Dry run — the following changes are pending:"))
+        elif has_errors:
+            lines.append(c["warn"]("Dry run — errors encountered:"))
         else:
             lines.append(c["dim"]("Dry run — everything is in sync."))
         lines.append("")

@@ -2330,3 +2330,29 @@ def test_format_all_report_dry_run_banner_says_pending_when_changes_exist():
     plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
     assert "pending" in plain.lower()
     assert "in sync" not in plain.lower()
+
+
+def test_format_all_report_dry_run_banner_says_errors_when_errors_only():
+    """reconcile --all --dry-run banner does not say 'in sync' when there are errors."""
+    from cc_codex_bridge.cli import _format_all_report
+    from pathlib import Path
+
+    class FakeScan:
+        bridgeable = []
+        not_bridgeable = []
+        filtered = []
+
+    class FakeError:
+        project_root = Path("/fake/missing-project")
+        error = "project directory not found"
+
+    class FakeReport:
+        results = []
+        errors = [FakeError()]
+        scan_result = FakeScan()
+
+    import re
+    output = _format_all_report(FakeReport(), dry_run=True)
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
+    assert "in sync" not in plain.lower()
+    assert "errors" in plain.lower()
