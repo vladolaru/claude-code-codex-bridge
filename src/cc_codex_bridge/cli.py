@@ -1553,7 +1553,9 @@ def _handle_clean_command(args: argparse.Namespace) -> int:
         print(format_clean_json(report, project_root=project_root, dry_run=args.dry_run))
     else:
         if args.dry_run:
-            print("Dry run — the following would be removed:")
+            from cc_codex_bridge._colors import color_fns as _cfns
+            _cc = _cfns()
+            print(_cc["warn"]("Dry run — the following would be removed:"))
         else:
             print("Cleaned:")
         print(format_change_report(report))

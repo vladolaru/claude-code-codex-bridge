@@ -90,7 +90,7 @@ def render_change_line(
     color_fn = c.get(kind, c["dim"])
     colored = color_fn(f"{symbol} {path}")
     if resource_kind:
-        return f"  {colored}  ({resource_kind})"
+        return f"  {colored}  {c['dim'](f'({resource_kind})')}"
     return f"  {colored}"
 
 
