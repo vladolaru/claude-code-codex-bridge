@@ -1671,7 +1671,11 @@ def _format_all_report(report, *, dry_run: bool = False, is_status: bool = False
     lines: list[str] = [""]
 
     if dry_run:
-        lines.append(c["warn"]("Dry run — the following changes are pending:"))
+        any_pending = any(len(r.report.changes) > 0 for r in report.results)
+        if any_pending:
+            lines.append(c["warn"]("Dry run — the following changes are pending:"))
+        else:
+            lines.append(c["dim"]("Dry run — everything is in sync."))
         lines.append("")
 
     # Scan summary (only when scan config exists and produced results)

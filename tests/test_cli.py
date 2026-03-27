@@ -2281,8 +2281,8 @@ def test_autosync_status_key_always_uses_key_color(tmp_path, capsys):
     assert "not installed" in plain
 
 
-def test_format_all_report_dry_run_banner_says_pending():
-    """reconcile --all --dry-run banner says 'pending', not 'no changes applied'."""
+def test_format_all_report_dry_run_banner_in_sync_when_no_changes():
+    """reconcile --all --dry-run banner says 'in sync' when no projects have changes."""
     from cc_codex_bridge.cli import _format_all_report
 
     class FakeScan:
@@ -2298,5 +2298,35 @@ def test_format_all_report_dry_run_banner_says_pending():
     import re
     output = _format_all_report(FakeReport(), dry_run=True)
     plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
-    assert "no changes applied" not in plain.lower()
+    assert "pending" not in plain.lower()
+    assert "in sync" in plain.lower()
+
+
+def test_format_all_report_dry_run_banner_says_pending_when_changes_exist():
+    """reconcile --all --dry-run banner says 'pending' when projects have changes."""
+    from cc_codex_bridge.cli import _format_all_report
+    from cc_codex_bridge.reconcile import Change, ReconcileReport
+    from pathlib import Path
+
+    class FakeScan:
+        bridgeable = []
+        not_bridgeable = []
+        filtered = []
+
+    class FakeResult:
+        project_root = Path("/fake/project")
+        report = ReconcileReport(
+            changes=(Change(kind="create", path=Path("/fake/skill"), resource_kind="skill"),),
+            applied=False,
+        )
+
+    class FakeReport:
+        results = [FakeResult()]
+        errors = []
+        scan_result = FakeScan()
+
+    import re
+    output = _format_all_report(FakeReport(), dry_run=True)
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
     assert "pending" in plain.lower()
+    assert "in sync" not in plain.lower()
