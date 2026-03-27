@@ -83,7 +83,7 @@ If a behavior is described differently in multiple docs:
 - state tracking for generator-owned outputs
 - project-level artifact cleanup via `clean`
 - machine-level full artifact removal via `uninstall`
-- macOS LaunchAgent rendering and installation for scheduled reconcile runs
+- macOS LaunchAgent rendering, installation, uninstallation, and status reporting for scheduled reconcile runs via `autosync` subcommands
 - activity logging for state-changing operations with retention-based auto-prune
 - log viewing and manual pruning via `log show` and `log prune`
 - CLI-native config management via `config` subcommands (show, check, scan, exclude, log)
@@ -96,7 +96,6 @@ If a behavior is described differently in multiple docs:
 - hand-authored Codex-specific skills
 - filesystem-wide project discovery (scan-based discovery via `config.toml` is in scope; unbounded filesystem traversal is not)
 - watcher mode
-- automatic `launchctl bootstrap`
 - runtime execution of Claude commands (translated prompts serve as context/instructions, not executable workflows)
 
 ## 4. Runtime Model
@@ -737,13 +736,25 @@ Global and project exclusions are **unioned** (both apply). CLI `--exclude-*` fl
 
 Log commands are utility commands independent of the reconcile pipeline.
 
-### LaunchAgent commands
+### Autosync commands
 
-- `install-launchagent`
-  - write the global plist into a LaunchAgents directory and print the `launchctl bootstrap` next step
-  - warn about existing per-project plists with removal commands
+The `autosync` subcommand group manages automatic background reconciliation on macOS via LaunchAgents. Autosync commands have their own parser and do not accept pipeline flags (`--project`, `--cache-dir`, `--claude-home`, `--codex-home`).
 
-LaunchAgent commands have their own parser and do not accept pipeline flags (`--project`, `--cache-dir`, `--claude-home`, `--codex-home`). They produce a global plist that runs `reconcile --all`.
+- `autosync install`
+  - render a global LaunchAgent plist that runs `reconcile --all` on a recurring interval
+  - boot out any running instance, write the plist atomically, and load it via `launchctl bootstrap`
+  - re-running updates the plist and reloads the agent
+  - warn about stale per-project plists with removal commands
+  - log the operation as `autosync-install` in the activity log
+  - flags: `--interval`, `--label`, `--python-executable`, `--cli-path`, `--logs-dir`, `--launchagents-dir`
+- `autosync uninstall`
+  - boot out and remove the bridge LaunchAgent plist
+  - flags: `--label`, `--launchagents-dir`
+- `autosync status`
+  - report whether the bridge LaunchAgent is installed and loaded
+  - display full configuration: label, plist path, interval, executable, working directory, PATH env status, starts-at-login, log paths
+  - indicate default values with `(default)` labels
+  - flags: `--launchagents-dir`
 
 ### CLI invariants
 
@@ -762,14 +773,18 @@ Current design:
 
 - macOS scheduling is supported through `launchd`
 - a single global LaunchAgent runs `reconcile --all` to reconcile all registered projects
-- the global plist label is `com.openai.codex-bridge.reconcile-all`
+- the global plist label is `cc-codex-bridge.autosync`
+- the label prefix for all bridge plists is `cc-codex-bridge.`
 - the default interval is 1800 seconds (30 minutes)
 - the plist uses `RunAtLoad` and `StartInterval`
+- the plist includes `WorkingDirectory` set to `$HOME`
+- the current process `PATH` is baked into the plist's `EnvironmentVariables.PATH` at install time, so the agent can locate the `claude` CLI even though macOS LaunchAgents run with a stripped PATH
+- the plist prefers the `cc-codex-bridge` console script (located via `shutil.which`) over direct Python execution, so macOS shows the tool name in background-activity notifications instead of the Python interpreter
+- falls back to invoking `cli.py` via the Python interpreter when the console script is not on PATH
 - logs go to `~/Library/Logs/codex-bridge/` by default
-- `install-launchagent` does not require `--project` — it produces the global plist
-- `install-launchagent` warns about existing per-project plists and prints `launchctl bootout` commands
-
-The tool installs the plist file but does not run `launchctl` automatically.
+- `autosync install` writes the plist atomically, boots out any running instance, and loads the new plist via `launchctl bootstrap` — the agent is active immediately after install
+- `autosync uninstall` boots out and removes the plist
+- `autosync status` reports install/load state and full plist configuration
 
 Per-project LaunchAgent plists are no longer generated. The legacy `build_launchagent_plist()` function is preserved for backwards compatibility but is not used by the CLI.
 
@@ -787,7 +802,7 @@ State-changing CLI operations write a log entry after successful completion:
 
 - `reconcile` (single-project and `--all`)
 - `clean`
-- `install-launchagent`
+- `autosync install`
 
 `uninstall` is excluded from logging because it removes bridge infrastructure including the logs directory. Operations with no changes (e.g., an idempotent reconcile) are not logged.
 
@@ -796,7 +811,7 @@ State-changing CLI operations write a log entry after successful completion:
 Each JSON line contains:
 
 - `timestamp` — ISO 8601 datetime
-- `action` — the CLI command name (`reconcile`, `clean`, `install-launchagent`)
+- `action` — the operation name (`reconcile`, `clean`, `autosync-install`)
 - `project` — resolved project root path (or `global` for machine-level operations)
 - `changes` — array of `{type, artifact, path}` objects where:
   - `type` is `create`, `update`, or `remove`
@@ -931,6 +946,8 @@ Current runtime module responsibilities:
   - rewrites plugin-qualified skill and command references in generated content to their Codex equivalents
 - `validate_skill.py`
   - validates generated skill metadata against the Agent Skills Standard (name, description, file structure)
+- `render.py`
+  - shared rendering primitives for consistent CLI output: key-value column width (`KEY_WIDTH`), change-line symbols and colors (`CHANGE_SYMBOLS`), padded key formatting (`padded_key()`), change line rendering (`render_change_line()`), change list rendering (`render_change_list()`), and exclusion block rendering (`render_exclusion_block()`)
 - `reconcile.py`
   - desired-state modeling, diffing, atomic apply, report formatting
   - shared project build pipeline via `build_project_desired_state()`
@@ -940,7 +957,7 @@ Current runtime module responsibilities:
 - `state.py`
   - project-local managed-state serialization and validation
 - `install_launchagent.py`
-  - LaunchAgent label generation, plist rendering, plist installation
+  - LaunchAgent label generation, plist rendering (per-project and global with PATH baking), plist installation via `launchctl bootstrap`, plist uninstallation via `launchctl bootout`
   - bridge LaunchAgent plist discovery via `find_bridge_launchagents()`
 - `release_bundle.py`
   - GitHub Release installer asset generation for offline wheelhouse installs
@@ -962,7 +979,7 @@ The suite currently verifies:
 - reconcile idempotence, stale cleanup, ownership safety, diff reporting, and global instructions bridging
 - CLI command behavior including multi-source integration
 - end-to-end multi-source scenario testing with all discovery scopes
-- LaunchAgent rendering and installation (global plist model)
+- LaunchAgent rendering, installation, uninstallation, and status reporting (global plist model with PATH baking)
 - plugin resource detection, path rewriting, and transitive dependency detection
 - plugin resource vendoring through skill and agent translation pipelines
 - plugin resource ownership tracking in the global registry with multi-project ownership and content hash fast path
@@ -989,7 +1006,7 @@ These are current implemented simplifications, not necessarily permanent design 
   post-parse validation of supported runtime shapes
 - exclusion ids are exact-match identifiers, not wildcard/glob patterns
 - commands are translated to native Codex prompt files (`~/.codex/prompts/`) rather than Codex skills, avoiding namespace collisions with the skill directory entirely
-- LaunchAgent scheduling is supported; watcher mode is not
+- LaunchAgent scheduling with automatic `launchctl bootstrap/bootout` is supported; watcher mode is not
 
 Any change to these constraints should update this file.
 
