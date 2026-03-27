@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-03-27
+
+### Fixed
+- DESIGN.md synced with current architecture: `autosync` subcommand group,
+  `render.py` module, LaunchAgent label and PATH baking changes
+- Stale `install-launchagent` references in README.md activity log section and
+  `LogEntry.action` docstring updated to `autosync install` / `autosync-install`
+
 ## [1.0.0] - 2026-03-27
 
 First stable release. The core bridge pipeline (reconcile, status, clean,
