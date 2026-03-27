@@ -88,6 +88,7 @@ def format_doctor_report(checks: Iterable[DoctorCheck]) -> str:
     """Render doctor checks in a stable human-readable form."""
     from cc_codex_bridge import __version__
     from cc_codex_bridge._colors import color_fns
+    from cc_codex_bridge.render import padded_key
 
     materialized = tuple(checks)
     c = color_fns()
@@ -103,23 +104,34 @@ def format_doctor_report(checks: Iterable[DoctorCheck]) -> str:
     n_warn = sum(1 for check in materialized if check.status == "warning")
     n_err = sum(1 for check in materialized if check.status == "error")
 
+    # Compute name column width from actual check names (minimum 12).
+    name_width = max((len(ch.name) for ch in materialized), default=0)
+    name_width = max(name_width, 12)
+    # Status values: "ok" (2), "warning" (7), "error" (5) — pad to 9 for breathing room.
+    status_width = 9
+
+    def _k(key: str) -> str:
+        return padded_key(key, c)
+
     lines = [
         "",
-        f"{c['key']('VERSION:')} v{__version__}",
-        f"{c['key']('STATUS:')} {colored_status}",
-        f"{c['key']('CHECKS_OK:')} {c['good'](str(n_ok)) if n_ok else str(n_ok)}",
-        f"{c['key']('CHECKS_WARNING:')} {c['warn'](str(n_warn)) if n_warn else str(n_warn)}",
-        f"{c['key']('CHECKS_ERROR:')} {c['bad'](str(n_err)) if n_err else str(n_err)}",
+        f"{_k('VERSION')} v{__version__}",
+        f"{_k('STATUS')} {colored_status}",
+        f"{_k('CHECKS_OK')} {c['good'](str(n_ok)) if n_ok else str(n_ok)}",
+        f"{_k('CHECKS_WARNING')} {c['warn'](str(n_warn)) if n_warn else str(n_warn)}",
+        f"{_k('CHECKS_ERROR')} {c['bad'](str(n_err)) if n_err else str(n_err)}",
+        "",
     ]
     for check in materialized:
         if check.status == "ok":
-            status_s = c["good"](check.status)
+            status_s = c["good"](check.status.ljust(status_width))
         elif check.status == "warning":
-            status_s = c["warn"](check.status)
+            status_s = c["warn"](check.status.ljust(status_width))
         else:
-            status_s = c["bad"](check.status)
+            status_s = c["bad"](check.status.ljust(status_width))
+        name_s = check.name.ljust(name_width)
         lines.append(
-            f"{c['key']('CHECK:')} {check.name} status={status_s} message={check.message}"
+            f"  {c['key']('CHECK')}  {name_s}  {status_s}  {check.message}"
         )
     return "\n".join(lines)
 

@@ -201,3 +201,28 @@ def test_run_doctor_config_check_warns_on_invalid_toml(tmp_path: Path):
     )
     config_check = next(c for c in checks if c.name == "config")
     assert config_check.status == "warning"
+
+
+def test_format_doctor_report_check_lines_do_not_use_inline_equals():
+    """Doctor CHECK lines must not use 'status=ok' or 'message=...' inline format."""
+    from cc_codex_bridge.doctor import DoctorCheck, format_doctor_report
+    import re
+
+    checks = (
+        DoctorCheck(name="python", status="ok", message="Using Python 3.11"),
+        DoctorCheck(name="claude_cli", status="warning", message="Not found on PATH"),
+    )
+    output = format_doctor_report(checks)
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
+
+    assert "status=ok" not in plain
+    assert "status=warning" not in plain
+    assert "message=" not in plain
+    # Substance still present
+    assert "python" in plain
+    assert "claude_cli" in plain
+    assert "Using Python 3.11" in plain
+    assert "Not found on PATH" in plain
+    # Check structure: each check has a row starting with "  CHECK"
+    check_rows = [line for line in plain.splitlines() if line.startswith("  CHECK")]
+    assert len(check_rows) == 2
