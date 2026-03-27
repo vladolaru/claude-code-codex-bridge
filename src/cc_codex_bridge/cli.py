@@ -2065,6 +2065,7 @@ def format_status_report(
         diagnostics=diagnostics, skill_diagnostics=skill_diagnostics,
         drifted_files=drifted_files,
     )
+    from cc_codex_bridge.render import padded_key, render_change_line, render_exclusion_block
     c = _status_color_fns()
     categorized = payload["categorized_changes"]
     project_files = categorized["project_files"]
@@ -2073,10 +2074,8 @@ def format_status_report(
     prompts = categorized["prompts"]
     global_changes = categorized["global"]
 
-    # Pad key+colon before coloring so ANSI codes don't affect ljust width.
-    _W = len("TRANSLATED_PROMPTS:")  # 19 — longest summary key
     def _k(key: str) -> str:
-        return c["key"](f"{key}:".ljust(_W))
+        return padded_key(key, c)
 
     status_val = payload['status']
     if status_val == "in_sync":
@@ -2097,6 +2096,14 @@ def format_status_report(
         update_s = c["update"](f"update = {n_update}") if n_update else f"update = {n_update}"
         remove_s = c["remove"](f"remove = {n_remove}") if n_remove else f"remove = {n_remove}"
         return f"{create_s} {update_s} {remove_s}"
+
+    def _detail_lines(cat: dict) -> list[str]:
+        """Return indented +/~/- lines for all changes in a category."""
+        result = []
+        for kind in ("create", "update", "remove"):
+            for path in cat[kind]:
+                result.append(render_change_line(kind, path, c=c))
+        return result
 
     # Group 1: project metadata
     lines = [""]
@@ -2123,70 +2130,45 @@ def format_status_report(
     lines.append("")
     lines.append(f"{_k('GENERATED_AGENTS')} {payload['agent_count']}")
     lines.append(f"{_k('GENERATED_SKILLS')} {payload['skill_count']}")
-    lines.append(f"{_k('TRANSLATED_PROMPTS')} {payload['prompt_count']}")
+    lines.append(f"{_k('GENERATED_PROMPTS')} {payload['prompt_count']}")
 
     # Group 4: pending changes
     lines.append("")
     lines.append(f"{_k('PENDING_CHANGES')} {colored_pending}")
     lines.append(f"{_k('PROJECT_FILES')} {_counts(project_files)}")
+    lines.extend(_detail_lines(project_files))
     lines.append(f"{_k('SKILLS')} {_counts(skills)}")
+    lines.extend(_detail_lines(skills))
     lines.append(f"{_k('AGENTS')} {_counts(agents)}")
+    lines.extend(_detail_lines(agents))
     lines.append(f"{_k('PROMPTS')} {_counts(prompts)}")
+    lines.extend(_detail_lines(prompts))
     lines.append(f"{_k('GLOBAL')} {_counts(global_changes)}")
+    lines.extend(_detail_lines(global_changes))
+
     for diagnostic in payload["diagnostics"]:
         lines.append(f"{c['bad']('DIAGNOSTIC:')} {diagnostic['message']}")
     for warning in payload["skill_warnings"]:
         lines.append(f"{c['key']('SKILL_WARNING:')} {c['warn'](warning['message'])}")
-    for path in project_files["create"]:
-        lines.append(f"{c['key']('PROJECT_FILE_CREATE:')} {c['create'](path)}")
-    for path in project_files["update"]:
-        lines.append(f"{c['key']('PROJECT_FILE_UPDATE:')} {c['update'](path)}")
-    for path in project_files["remove"]:
-        lines.append(f"{c['key']('PROJECT_FILE_REMOVE:')} {c['remove'](path)}")
-    for path in skills["create"]:
-        lines.append(f"{c['key']('SKILL_CREATE:')} {c['create'](path)}")
-    for path in skills["update"]:
-        lines.append(f"{c['key']('SKILL_UPDATE:')} {c['update'](path)}")
-    for path in skills["remove"]:
-        lines.append(f"{c['key']('SKILL_REMOVE:')} {c['remove'](path)}")
-    for path in agents["create"]:
-        lines.append(f"{c['key']('AGENT_CREATE:')} {c['create'](path)}")
-    for path in agents["update"]:
-        lines.append(f"{c['key']('AGENT_UPDATE:')} {c['update'](path)}")
-    for path in agents["remove"]:
-        lines.append(f"{c['key']('AGENT_REMOVE:')} {c['remove'](path)}")
-    for path in prompts["create"]:
-        lines.append(f"{c['key']('PROMPT_CREATE:')} {c['create'](path)}")
-    for path in prompts["update"]:
-        lines.append(f"{c['key']('PROMPT_UPDATE:')} {c['update'](path)}")
-    for path in prompts["remove"]:
-        lines.append(f"{c['key']('PROMPT_REMOVE:')} {c['remove'](path)}")
-    for path in global_changes["create"]:
-        lines.append(f"{c['key']('GLOBAL_CREATE:')} {c['create'](path)}")
-    for path in global_changes["update"]:
-        lines.append(f"{c['key']('GLOBAL_UPDATE:')} {c['update'](path)}")
-    for path in global_changes["remove"]:
-        lines.append(f"{c['key']('GLOBAL_REMOVE:')} {c['remove'](path)}")
+
     drifted = payload.get("drifted_files", [])
     if drifted:
         lines.append(f"{_k('DRIFTED_FILES')} {c['warn'](str(len(drifted)))}")
         for path in drifted:
             lines.append(f"  {c['warn'](path)}")
 
-    # Group 5: exclusions
-    lines.append("")
-    lines.append(f"{_k('EXCLUDED_PLUGINS')} {len(payload['excluded']['plugins'])}")
-    for plugin_id in payload["excluded"]["plugins"]:
-        lines.append(f"  {c['dim'](plugin_id)}")
-    lines.append(f"{_k('EXCLUDED_SKILLS')} {len(payload['excluded']['skills'])}")
-    for skill_id in payload["excluded"]["skills"]:
-        lines.append(f"  {c['dim'](skill_id)}")
-    lines.append(f"{_k('EXCLUDED_AGENTS')} {len(payload['excluded']['agents'])}")
-    for agent_id in payload["excluded"]["agents"]:
-        lines.append(f"  {c['dim'](agent_id)}")
-    lines.append(f"{_k('EXCLUDED_COMMANDS')} {len(payload['excluded']['commands'])}")
-    for command_id in payload["excluded"]["commands"]:
-        lines.append(f"  {c['dim'](command_id)}")
+    # Group 5: exclusions (suppressed when all zero)
+    from cc_codex_bridge.exclusions import ExclusionReport as _ER
+    _excl = _ER(
+        plugins=frozenset(payload["excluded"]["plugins"]),
+        skills=frozenset(payload["excluded"]["skills"]),
+        agents=frozenset(payload["excluded"]["agents"]),
+        commands=frozenset(payload["excluded"]["commands"]),
+    )
+    excl_lines = render_exclusion_block(_excl, c)
+    if excl_lines:
+        lines.append("")
+        lines.extend(excl_lines)
 
     return "\n".join(lines)
 

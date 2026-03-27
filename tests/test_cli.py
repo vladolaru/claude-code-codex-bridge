@@ -1640,7 +1640,7 @@ def test_status_reports_prompt_count(make_project, tmp_path: Path, capsys):
 
     assert exit_code == 0
     captured = capsys.readouterr()
-    assert "TRANSLATED_PROMPTS: 1" in captured.out
+    assert "GENERATED_PROMPTS: 1" in captured.out
 
 
 def test_status_json_includes_prompt_count(make_project, tmp_path: Path, capsys):
@@ -1700,7 +1700,69 @@ def test_validate_reports_prompt_count(make_project, tmp_path: Path, capsys):
 
     assert exit_code == 0
     captured = capsys.readouterr()
-    assert "TRANSLATED_PROMPTS: 2" in captured.out
+    assert "GENERATED_PROMPTS: 2" in captured.out
+
+
+def test_status_report_uses_generated_prompts_key(
+    make_project, make_plugin_version, tmp_path, capsys
+):
+    """status output must use GENERATED_PROMPTS, not TRANSLATED_PROMPTS."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "plugin", "1.0.0")
+
+    cli.main([
+        "status",
+        "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(tmp_path / "codex"),
+    ])
+    captured = capsys.readouterr()
+    assert "TRANSLATED_PROMPTS" not in captured.out
+    assert "GENERATED_PROMPTS" in captured.out
+
+
+def test_status_report_suppresses_exclusion_block_when_empty(
+    make_project, make_plugin_version, tmp_path, capsys
+):
+    """status output omits the exclusion block when nothing is excluded."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "plugin", "1.0.0")
+
+    cli.main([
+        "status",
+        "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(tmp_path / "codex"),
+    ])
+    captured = capsys.readouterr()
+    assert "EXCLUDED_PLUGINS" not in captured.out
+    assert "EXCLUDED_SKILLS" not in captured.out
+
+
+def test_status_report_detail_lines_use_change_symbols(
+    make_project, make_plugin_version, tmp_path, capsys
+):
+    """Pending change detail lines use +/~/- not SKILL_CREATE:/AGENT_CREATE: etc."""
+    import re
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "pirategoat-tools", "1.0.0", skill_names=("my-skill",)
+    )
+    (version_dir / "skills" / "my-skill" / "SKILL.md").write_text(
+        "---\nname: my-skill\ndescription: Test skill\n---\nBody.\n"
+    )
+
+    cli.main([
+        "status",
+        "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(tmp_path / "codex"),
+    ])
+    captured = capsys.readouterr()
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", captured.out)
+    assert "SKILL_CREATE:" not in plain
+    assert "AGENT_CREATE:" not in plain
+    assert "PROJECT_FILE_CREATE:" not in plain
 
 
 def test_cli_exclude_command_flag(make_project, make_plugin_version, tmp_path: Path, capsys):
