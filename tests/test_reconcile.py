@@ -850,6 +850,25 @@ def test_format_change_report_uses_change_symbols():
     assert "(agent)" in plain
 
 
+def test_format_change_report_preserves_restore_actions():
+    """Non-CRUD actions stay readable in formatted reports."""
+    import re
+
+    report = ReconcileReport(
+        changes=(
+            Change(kind="restore", path=Path("/a/CLAUDE.md"), resource_kind="project_file"),
+        ),
+        applied=False,
+    )
+
+    output = format_change_report(report)
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
+
+    assert "restore" in plain.lower()
+    assert "/a/CLAUDE.md" in plain
+    assert "?" not in plain
+
+
 def test_format_diff_report_handles_no_changes(make_project, make_plugin_version, tmp_path: Path):
     """No-op diffs render the short form."""
     project_root, _agents_md = make_project()

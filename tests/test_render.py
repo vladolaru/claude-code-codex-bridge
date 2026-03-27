@@ -126,9 +126,16 @@ def test_render_change_line_no_resource_kind_no_parens():
     assert ")" not in line
 
 
-def test_render_change_line_unknown_kind_uses_question_mark():
-    line = strip_ansi(render_change_line("unknown_kind", "some/path"))
-    assert "?" in line
+def test_render_change_line_restore_preserves_action_name():
+    line = strip_ansi(render_change_line("restore", "some/path"))
+    assert "restore" in line.lower()
+    assert "?" not in line
+
+
+def test_render_change_line_unknown_kind_falls_back_to_kind_name():
+    line = strip_ansi(render_change_line("archive", "some/path"))
+    assert "archive" in line.lower()
+    assert "?" not in line
 
 
 def test_render_change_line_path_object_accepted():

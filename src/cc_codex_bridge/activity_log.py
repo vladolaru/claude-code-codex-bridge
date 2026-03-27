@@ -12,7 +12,7 @@ from pathlib import Path
 class LogChange:
     """One artifact mutation within a log entry."""
 
-    type: str       # "create", "update", "remove"
+    type: str       # e.g. "create", "update", "remove", "restore"
     artifact: str   # "skill", "agent", "prompt", "project_file", "plugin_resource"
     path: str
 
@@ -97,7 +97,7 @@ def format_log_entries(entries: list[LogEntry], *, json_output: bool = False) ->
         return "No log entries found."
 
     from cc_codex_bridge._colors import color_fns
-    from cc_codex_bridge.render import CHANGE_SYMBOLS
+    from cc_codex_bridge.render import change_color, change_label
     c = color_fns()
 
     lines: list[str] = []
@@ -106,9 +106,11 @@ def format_log_entries(entries: list[LogEntry], *, json_output: bool = False) ->
         action_colored = c["key"](f"{entry.action:<20s}")
         lines.append(f"{ts}  {action_colored} {entry.project}")
         for change in entry.changes:
-            symbol = CHANGE_SYMBOLS.get(change.type, "?")
-            color_fn = c.get(change.type, c["dim"])
-            lines.append(f"  {color_fn(symbol)} {color_fn(f'{change.artifact:<16s}')} {change.path}")
+            label = change_label(change.type)
+            color_fn = change_color(change.type, c)
+            lines.append(
+                f"  {color_fn(label)} {color_fn(f'{change.artifact:<16s}')} {change.path}"
+            )
         lines.append("")
 
     return "\n".join(lines).rstrip()

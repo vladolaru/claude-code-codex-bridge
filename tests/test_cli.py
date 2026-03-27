@@ -2356,3 +2356,34 @@ def test_format_all_report_dry_run_banner_says_errors_when_errors_only():
     plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
     assert "in sync" not in plain.lower()
     assert "errors" in plain.lower()
+
+
+def test_format_all_report_dry_run_banner_says_scan_findings_when_skips_exist():
+    """Skipped or unsupported scan results must not be summarized as in-sync."""
+    from cc_codex_bridge.cli import _format_all_report
+    from pathlib import Path
+
+    class FakeCandidate:
+        def __init__(self, path: str, reason: str):
+            self.path = Path(path)
+            self.filter_reason = reason
+            self.status = "filtered"
+
+    class FakeScan:
+        bridgeable = []
+        not_bridgeable = [FakeCandidate("/fake/partial", "no_agents_or_claude_md")]
+        filtered = [FakeCandidate("/fake/skipped", "no_git")]
+
+    class FakeReport:
+        results = []
+        errors = []
+        scan_result = FakeScan()
+
+    import re
+    output = _format_all_report(FakeReport(), dry_run=True)
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
+
+    assert "in sync" not in plain.lower()
+    assert "scan found" in plain.lower()
+    assert "SKIP:" in plain
+    assert "NOTE:" in plain

@@ -39,7 +39,10 @@ CHANGE_SYMBOLS: dict[str, str] = {
     "update": "~",
     "remove": "-",
 }
-"""Canonical symbols for change kinds. Single definition used everywhere."""
+"""Canonical symbolic labels for CRUD-style change kinds.
+
+Extended reconcile actions deliberately fall back to their explicit kind names.
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +78,8 @@ def render_change_line(
     """Return a single indented colored change line.
 
     Args:
-        kind: Change kind — ``"create"``, ``"update"``, or ``"remove"``.
+        kind: Change kind, including CRUD actions and extended verbs such as
+            ``"restore"``.
         path: File path for the changed artifact.
         resource_kind: Optional resource type label shown in parentheses.
         c: Color dict from :func:`~cc_codex_bridge._colors.color_fns`.
@@ -86,9 +90,9 @@ def render_change_line(
     """
     if c is None:
         c = _load_colors()
-    symbol = CHANGE_SYMBOLS.get(kind, "?")
-    color_fn = c.get(kind, c["dim"])
-    colored = color_fn(f"{symbol} {path}")
+    action = change_label(kind)
+    color_fn = change_color(kind, c)
+    colored = color_fn(f"{action} {path}")
     if resource_kind:
         return f"  {colored}  {c['dim'](f'({resource_kind})')}"
     return f"  {colored}"
@@ -174,6 +178,23 @@ def render_exclusion_block(
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+
+def change_label(kind: str) -> str:
+    """Return the canonical human-readable label for a change kind.
+
+    CRUD actions stay compact. Any other kind remains self-describing.
+    """
+    return CHANGE_SYMBOLS.get(kind, kind.replace("_", " "))
+
+
+def change_color(kind: str, c: dict) -> object:
+    """Return the color function for a change kind."""
+    if kind in c:
+        return c[kind]
+    if kind == "restore":
+        return c["warn"]
+    return c["dim"]
 
 
 def _load_colors() -> dict:

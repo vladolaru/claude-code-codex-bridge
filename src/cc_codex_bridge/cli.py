@@ -1663,12 +1663,23 @@ def _format_all_json(report) -> str:
     return json.dumps(payload, indent=2, sort_keys=True)
 
 
+def _scan_has_output(scan) -> bool:
+    """Return True when scan discovery produced any candidates."""
+    return bool(scan is not None and (scan.bridgeable or scan.not_bridgeable or scan.filtered))
+
+
+def _scan_has_findings(scan) -> bool:
+    """Return True when scan discovery found skipped or unsupported repositories."""
+    return bool(scan is not None and (scan.not_bridgeable or scan.filtered))
+
+
 def _format_all_report(report, *, dry_run: bool = False, is_status: bool = False) -> str:
     """Render --all report as human-readable text, including scan summary."""
     from cc_codex_bridge._colors import color_fns
     c = color_fns()
 
     lines: list[str] = [""]
+    scan = report.scan_result
 
     if dry_run:
         any_pending = any(len(r.report.changes) > 0 for r in report.results)
@@ -1677,13 +1688,14 @@ def _format_all_report(report, *, dry_run: bool = False, is_status: bool = False
             lines.append(c["warn"]("Dry run — the following changes are pending:"))
         elif has_errors:
             lines.append(c["warn"]("Dry run — errors encountered:"))
+        elif _scan_has_findings(scan):
+            lines.append(c["warn"]("Dry run — scan found skipped or unsupported repositories:"))
         else:
             lines.append(c["dim"]("Dry run — everything is in sync."))
         lines.append("")
 
     # Scan summary (only when scan config exists and produced results)
-    scan = report.scan_result
-    if scan is not None and (scan.bridgeable or scan.not_bridgeable or scan.filtered):
+    if _scan_has_output(scan):
         total = len(scan.bridgeable) + len(scan.not_bridgeable) + len(scan.filtered)
         lines.append(
             f"{c['key']('Scan:')} {total} candidates, "
@@ -1711,10 +1723,7 @@ def _format_all_report(report, *, dry_run: bool = False, is_status: bool = False
     for e in report.errors:
         lines.append(f"{c['bad']('ERROR:')} {e.project_root} — {e.error}")
 
-    has_scan_output = (
-        scan is not None
-        and (scan.bridgeable or scan.not_bridgeable or scan.filtered)
-    )
+    has_scan_output = _scan_has_output(scan)
     if not report.results and not report.errors and not has_scan_output:
         lines.append("No registered projects.")
 

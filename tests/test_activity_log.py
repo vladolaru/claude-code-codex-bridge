@@ -302,6 +302,27 @@ def test_format_entries_uses_change_symbols():
     assert "-" in plain
 
 
+def test_format_entries_preserves_restore_actions():
+    """Non-CRUD actions remain readable in activity logs too."""
+    import re
+
+    entry = LogEntry(
+        timestamp=datetime(2026, 3, 21, 14, 0, 0),
+        action="clean",
+        project="/tmp/proj",
+        changes=(
+            LogChange(type="restore", artifact="project_file", path="/tmp/CLAUDE.md"),
+        ),
+    )
+
+    output = format_log_entries([entry])
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
+
+    assert "restore" in plain.lower()
+    assert "/tmp/CLAUDE.md" in plain
+    assert "?" not in plain
+
+
 def test_format_entries_empty():
     """format_log_entries with no entries returns a no-entries message."""
     output = format_log_entries([])
