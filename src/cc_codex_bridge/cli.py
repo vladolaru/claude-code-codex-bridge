@@ -1860,7 +1860,7 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
         plist_path = la_dir / f"{GLOBAL_LAUNCHAGENT_LABEL}.plist"
         print()
         if not plist_path.exists():
-            print(f"{padded_key('AUTOSYNC', c)} {c['warn']('not installed')}")
+            print(f"{padded_key('OVERALL STATUS', c)} {c['warn']('not installed')}")
             return 0
 
         result = subprocess.run(
@@ -1911,7 +1911,7 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
 
         starts_at_login_s = c["good"]("yes") if run_at_load else c["warn"]("no")
         lines = [
-            f"{_k('AUTOSYNC')} {status_s}",
+            f"{_k('OVERALL STATUS')} {status_s}",
             f"{_k('LABEL')} {_default(label_val, label_val == GLOBAL_LAUNCHAGENT_LABEL)}",
             f"{_k('PLIST')} {plist_path}",
             f"{_k('INTERVAL')} {_default(_fmt_interval(interval_val), interval_val == DEFAULT_START_INTERVAL)}",
