@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-03-27
+
 ### Changed
 - CLI output: introduce `render.py` as single source of truth for key-value
   column width (`KEY_WIDTH=18`), change-line symbols (+/~/−), and exclusion
