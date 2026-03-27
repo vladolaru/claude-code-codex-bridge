@@ -89,8 +89,17 @@ def build_global_launchagent_plist(
     cli_path: str | Path | None = None,
     label: str | None = None,
     logs_dir: str | Path | None = None,
+    path_env: str | None = None,
 ) -> bytes:
-    """Render a global LaunchAgent plist that periodically runs reconcile --all."""
+    """Render a global LaunchAgent plist that periodically runs reconcile --all.
+
+    ``path_env`` overrides the PATH baked into ``EnvironmentVariables``.
+    When omitted the current process PATH is used so that the agent can
+    locate the ``claude`` CLI even though macOS LaunchAgents run with a
+    stripped PATH.
+    """
+    import os
+
     if interval_seconds <= 0:
         raise ReconcileError("LaunchAgent interval must be a positive integer")
 
@@ -112,16 +121,22 @@ def build_global_launchagent_plist(
         program = python_path
         program_arguments = [python_path, cli_script_path, "reconcile", "--all"]
 
+    # Bake the current PATH into the plist so the agent can find the claude
+    # CLI at runtime. macOS LaunchAgents run with a stripped PATH that omits
+    # user-level directories like ~/.local/bin, /opt/homebrew/bin, etc.
+    effective_path = path_env if path_env is not None else os.environ.get("PATH", "")
+
     payload: dict[str, Any] = {
+        "EnvironmentVariables": {"PATH": effective_path},
         "Label": label_value,
+        "ProcessType": "Background",
         "Program": program,
         "ProgramArguments": program_arguments,
-        "WorkingDirectory": str(Path.home()),
         "RunAtLoad": True,
-        "StartInterval": interval_seconds,
-        "StandardOutPath": str(stdout_path),
         "StandardErrorPath": str(stderr_path),
-        "ProcessType": "Background",
+        "StandardOutPath": str(stdout_path),
+        "StartInterval": interval_seconds,
+        "WorkingDirectory": str(Path.home()),
     }
     return plistlib.dumps(payload, sort_keys=True)
 
