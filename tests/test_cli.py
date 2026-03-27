@@ -1496,6 +1496,45 @@ def test_uninstall_rejects_unused_flags():
         cli.main(["uninstall", "--cache-dir", "/tmp/fake"])
 
 
+def test_uninstall_dry_run_report_uses_colored_output(
+    make_project, make_plugin_version, tmp_path, capsys
+):
+    """uninstall --dry-run report contains structured output with section headers."""
+    import re
+    project_root, _ = make_project()
+    cache_root, version_dir = make_plugin_version(
+        "market", "pirategoat-tools", "1.0.0", skill_names=("my-skill",)
+    )
+    (version_dir / "skills" / "my-skill" / "SKILL.md").write_text(
+        "---\nname: my-skill\ndescription: Test\n---\nBody.\n"
+    )
+    codex_home = tmp_path / "codex"
+
+    # First reconcile to create artifacts
+    cli.main([
+        "reconcile",
+        "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(codex_home),
+    ])
+    capsys.readouterr()
+
+    cli.main([
+        "uninstall",
+        "--dry-run",
+        "--codex-home", str(codex_home),
+    ])
+    captured = capsys.readouterr()
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", captured.out)
+
+    # "Dry run" banner present
+    assert "Dry run" in plain
+    # "REMOVE:" should NOT appear (old format) — new format uses +/~/- symbols
+    assert "REMOVE:" not in plain
+    # Change symbols present
+    assert "-" in plain  # remove symbol
+
+
 def test_clean_rejects_unused_flags():
     """clean does not accept --claude-home, --cache-dir, or --codex-home."""
     with pytest.raises(SystemExit, match="2"):

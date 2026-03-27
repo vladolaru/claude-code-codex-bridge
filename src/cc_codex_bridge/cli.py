@@ -1756,42 +1756,44 @@ def _format_uninstall_json(report) -> str:
 
 def _format_uninstall_report(report, *, dry_run: bool = False) -> str:
     """Render uninstall report as human-readable text."""
+    from cc_codex_bridge._colors import color_fns
+    from cc_codex_bridge.render import render_change_line
+
+    c = color_fns()
     lines: list[str] = []
 
     if dry_run:
-        lines.append("Dry run — the following would be removed:")
+        lines.append(c["warn"]("Dry run — the following would be removed:"))
         lines.append("")
 
     for result in report.projects:
-        lines.append(f"--- Project: {result.root} ---")
+        lines.append(f"--- {c['key']('Project:')} {result.root} ---")
         if result.status == "skipped":
-            lines.append(f"SKIPPED: {result.skip_reason}")
+            lines.append(f"  {c['warn']('SKIPPED:')} {result.skip_reason}")
         elif result.status == "no_state":
-            lines.append("NO_STATE: no bridge state file found")
+            lines.append(f"  {c['warn']('NO_STATE:')} no bridge state file found")
         else:
             for change in result.changes:
-                suffix = f" ({change.resource_kind})" if change.resource_kind else ""
-                lines.append(f"REMOVE: {change.path}{suffix}")
+                lines.append(render_change_line(change.kind, change.path, change.resource_kind, c))
             if not result.changes:
-                lines.append("Ownership released (no files removed).")
+                lines.append(f"  {c['dim']('Ownership released (no files removed).')}")
         lines.append("")
 
     if report.global_removals or report.launchagent_removals:
-        lines.append("--- Global ---")
+        lines.append(f"--- {c['key']('Global')} ---")
         for change in report.global_removals:
-            suffix = f" ({change.resource_kind})" if change.resource_kind else ""
-            lines.append(f"REMOVE: {change.path}{suffix}")
+            lines.append(render_change_line(change.kind, change.path, change.resource_kind, c))
         lines.append("")
 
     if report.launchagent_removals:
-        lines.append("--- LaunchAgents ---")
+        lines.append(f"--- {c['key']('LaunchAgents')} ---")
         for removal in report.launchagent_removals:
-            lines.append(f"REMOVE: {removal.path}")
-            lines.append(f"BOOTOUT: {removal.bootout_command}")
+            lines.append(render_change_line("remove", removal.path, c=c))
+            lines.append(f"  {c['dim'](f'bootout: {removal.bootout_command}')}")
         lines.append("")
 
     if not report.projects and not report.global_removals and not report.launchagent_removals:
-        lines.append("Nothing to uninstall.")
+        lines.append(c["good"]("Nothing to uninstall."))
 
     # Add trailing summary when there are projects to report on
     if report.projects:
