@@ -1788,7 +1788,7 @@ def _format_uninstall_report(report, *, dry_run: bool = False) -> str:
     if report.launchagent_removals:
         lines.append(f"--- {c['key']('LaunchAgents')} ---")
         for removal in report.launchagent_removals:
-            lines.append(render_change_line("remove", removal.path, c=c))
+            lines.append(render_change_line("remove", removal.path, "", c))
             lines.append(f"  {c['dim'](f'bootout: {removal.bootout_command}')}")
         lines.append("")
 
