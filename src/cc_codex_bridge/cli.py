@@ -2149,7 +2149,7 @@ def format_status_report(
     for diagnostic in payload["diagnostics"]:
         lines.append(f"{c['bad']('DIAGNOSTIC:')} {diagnostic['message']}")
     for warning in payload["skill_warnings"]:
-        lines.append(f"{c['key']('SKILL_WARNING:')} {c['warn'](warning['message'])}")
+        lines.append(f"{c['warn']('SKILL_WARNING:')} {warning['message']}")
 
     drifted = payload.get("drifted_files", [])
     if drifted:
@@ -2158,8 +2158,7 @@ def format_status_report(
             lines.append(f"  {c['warn'](path)}")
 
     # Group 5: exclusions (suppressed when all zero)
-    from cc_codex_bridge.exclusions import ExclusionReport as _ER
-    _excl = _ER(
+    _excl = ExclusionReport(
         plugins=frozenset(payload["excluded"]["plugins"]),
         skills=frozenset(payload["excluded"]["skills"]),
         agents=frozenset(payload["excluded"]["agents"]),

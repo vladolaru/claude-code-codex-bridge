@@ -1737,6 +1737,8 @@ def test_status_report_suppresses_exclusion_block_when_empty(
     captured = capsys.readouterr()
     assert "EXCLUDED_PLUGINS" not in captured.out
     assert "EXCLUDED_SKILLS" not in captured.out
+    assert "EXCLUDED_AGENTS" not in captured.out
+    assert "EXCLUDED_COMMANDS" not in captured.out
 
 
 def test_status_report_detail_lines_use_change_symbols(
