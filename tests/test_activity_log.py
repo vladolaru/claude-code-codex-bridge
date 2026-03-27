@@ -259,6 +259,8 @@ def test_prune_ignores_non_jsonl_files(tmp_path):
 
 def test_format_entries_human_readable(tmp_path):
     """format_log_entries produces human-readable output."""
+    import re
+
     entry = _make_entry(
         action="reconcile",
         project="/proj",
@@ -270,12 +272,13 @@ def test_format_entries_human_readable(tmp_path):
         timestamp=datetime(2026, 3, 21, 14, 32, 7),
     )
     output = format_log_entries([entry])
-    assert "2026-03-21 14:32:07" in output
-    assert "reconcile" in output
-    assert "/proj" in output
-    assert "+ skill" in output
-    assert "~ agent" in output
-    assert "- prompt" in output
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
+    assert "2026-03-21 14:32:07" in plain
+    assert "reconcile" in plain
+    assert "/proj" in plain
+    assert "+ skill" in plain
+    assert "~ agent" in plain
+    assert "- prompt" in plain
 
 
 def test_format_entries_uses_change_symbols():
