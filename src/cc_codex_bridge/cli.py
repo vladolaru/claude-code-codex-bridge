@@ -1848,6 +1848,7 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
 
     if sub == "status":
         import plistlib
+        import shutil
         import subprocess
         from cc_codex_bridge.install_launchagent import (
             DEFAULT_LAUNCHAGENTS_DIR as _LA_DIR,
@@ -1891,8 +1892,10 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
 
         label_val = plist.get("Label", GLOBAL_LAUNCHAGENT_LABEL)
         interval_val = plist.get("StartInterval", DEFAULT_START_INTERVAL)
+        executable_val = plist.get("Program", "")
         prog_args = plist.get("ProgramArguments", [])
-        command_val = " ".join(prog_args)
+        # ProgramArguments[0] is argv[0] (the name); skip it to avoid repeating the executable.
+        args_val = " ".join(prog_args[1:]) if len(prog_args) > 1 else " ".join(prog_args)
         run_at_load = plist.get("RunAtLoad", False)
         stdout_val = plist.get("StandardOutPath", "")
         stderr_val = plist.get("StandardErrorPath", "")
@@ -1901,14 +1904,20 @@ def _handle_launchagent_command(args: argparse.Namespace) -> int:
         default_stdout = str(default_logs / f"{GLOBAL_LAUNCHAGENT_LABEL}.out.log")
         default_stderr = str(default_logs / f"{GLOBAL_LAUNCHAGENT_LABEL}.err.log")
 
-        run_at_load_s = c["good"]("true") if run_at_load else c["warn"]("false")
+        # Default executable: cc-codex-bridge console script on PATH.
+        default_executable = shutil.which("cc-codex-bridge") or ""
+        if default_executable:
+            default_executable = str(Path(default_executable).resolve())
+
+        starts_at_login_s = c["good"]("yes") if run_at_load else c["warn"]("no")
         lines = [
             f"{_k('AUTOSYNC')} {status_s}",
             f"{_k('LABEL')} {_default(label_val, label_val == GLOBAL_LAUNCHAGENT_LABEL)}",
             f"{_k('PLIST')} {plist_path}",
             f"{_k('INTERVAL')} {_default(_fmt_interval(interval_val), interval_val == DEFAULT_START_INTERVAL)}",
-            f"{_k('COMMAND')} {c['cmd'](command_val)}",
-            f"{_k('RUN_AT_LOAD')} {_default(run_at_load_s, run_at_load is True)}",
+            f"{_k('EXECUTABLE')} {_default(executable_val, executable_val == default_executable)}",
+            f"{_k('RUNS')} {c['cmd'](args_val)}",
+            f"{_k('STARTS_AT_LOGIN')} {_default(starts_at_login_s, run_at_load is True)}",
             f"{_k('LOG_STDOUT')} {_default(stdout_val, stdout_val == default_stdout)}",
             f"{_k('LOG_STDERR')} {_default(stderr_val, stderr_val == default_stderr)}",
         ]
