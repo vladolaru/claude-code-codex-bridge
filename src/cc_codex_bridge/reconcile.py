@@ -1485,6 +1485,15 @@ def format_diff_report(desired: DesiredState, report: ReconcileReport) -> str:
     return "\n".join(lines)
 
 
+def _partition_mcp_servers_by_scope(
+    servers: tuple,
+) -> tuple[dict, dict]:
+    """Split MCP servers into (global, project) dicts keyed by name."""
+    global_servers = {s.name: s for s in servers if s.scope == "global"}
+    project_servers = {s.name: s for s in servers if s.scope == "project"}
+    return global_servers, project_servers
+
+
 def _plan_mcp_server_mutations(
     desired: DesiredState,
     previous_state: BridgeState | None,
@@ -1501,8 +1510,9 @@ def _plan_mcp_server_mutations(
 
     changes: list[Change] = []
 
+    global_servers, project_servers = _partition_mcp_servers_by_scope(desired.mcp_servers)
+
     # --- Global scope ---
-    global_servers = {s.name: s for s in desired.mcp_servers if s.scope == "global"}
     global_config_path = desired.codex_home / "config.toml"
 
     # Determine previously owned global MCP servers for this project
@@ -1548,7 +1558,6 @@ def _plan_mcp_server_mutations(
             changes.append(Change("remove", global_config_path, resource_kind="mcp_server"))
 
     # --- Project scope ---
-    project_servers = {s.name: s for s in desired.mcp_servers if s.scope == "project"}
     project_config_path = desired.project_root / ".codex" / "config.toml"
     previously_owned_project: set[str] = set()
     if previous_state is not None:
@@ -1593,9 +1602,9 @@ def _apply_mcp_server_changes(
 
     managed_mcp_servers: dict[str, str] = {}
 
-    # --- Global scope ---
-    global_servers = {s.name: s for s in desired.mcp_servers if s.scope == "global"}
+    global_servers, project_servers = _partition_mcp_servers_by_scope(desired.mcp_servers)
 
+    # --- Global scope ---
     if global_servers or previously_owned_global:
         global_config_path = desired.codex_home / "config.toml"
         doc = read_codex_config(global_config_path)
@@ -1607,7 +1616,6 @@ def _apply_mcp_server_changes(
         write_codex_config(global_config_path, doc)
 
     # --- Project scope ---
-    project_servers = {s.name: s for s in desired.mcp_servers if s.scope == "project"}
     previously_owned_project: set[str] = set()
     if previous_state is not None:
         previously_owned_project = set(previous_state.managed_mcp_servers)
