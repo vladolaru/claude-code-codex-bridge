@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 
@@ -10,7 +10,7 @@ from cc_codex_bridge.model import ReconcileError
 from cc_codex_bridge.text import read_utf8_text
 
 
-STATE_VERSION = 10
+STATE_VERSION = 11
 
 # Accept state files from this version onward (migration supported).
 _MIN_STATE_VERSION = 8
@@ -27,6 +27,7 @@ class BridgeState:
     bridge_home: Path
     managed_project_files: dict[str, str]
     managed_project_skill_dirs: tuple[str, ...] = ()
+    managed_mcp_servers: dict[str, str] = field(default_factory=dict)
     version: int = STATE_VERSION
 
     @classmethod
@@ -63,6 +64,7 @@ class BridgeState:
             bridge_home=_read_absolute_path(data, "bridge_home", path),
             managed_project_files=managed_files,
             managed_project_skill_dirs=tuple(_read_string_list(data, "managed_project_skill_dirs", path)),
+            managed_mcp_servers=_read_string_dict(data, "managed_mcp_servers", path),
             version=STATE_VERSION,
         )
 
@@ -75,6 +77,7 @@ class BridgeState:
             "bridge_home": str(self.bridge_home),
             "managed_project_files": dict(self.managed_project_files),
             "managed_project_skill_dirs": list(self.managed_project_skill_dirs),
+            "managed_mcp_servers": dict(self.managed_mcp_servers),
         }
         return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
