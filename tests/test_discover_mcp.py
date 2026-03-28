@@ -66,6 +66,10 @@ class TestDetectTransport:
     def test_unrecognized_type_without_command_or_url_yields_none(self):
         assert _detect_transport({"type": "websocket"}) is None
 
+    def test_type_http_without_url_yields_none(self):
+        """type=http without url field should return None (skip), not 'http'."""
+        assert _detect_transport({"type": "http"}) is None, "type=http without url must be skipped"
+
 
 # -- _extract_servers ----------------------------------------------------------
 

@@ -104,7 +104,7 @@ def _detect_transport(config: dict) -> str | None:
     if server_type == "sse":
         return None
     if server_type == "http":
-        return "http"
+        return "http" if "url" in config else None
     if "command" in config:
         return "stdio"
     if "url" in config:
