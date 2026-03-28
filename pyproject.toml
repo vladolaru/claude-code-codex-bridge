@@ -13,6 +13,7 @@ authors = [{ name = "Vlad Olaru" }]
 dependencies = [
   "PyYAML>=6.0",
   "tomli-w>=1.0",
+  "tomlkit>=0.12",
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",
