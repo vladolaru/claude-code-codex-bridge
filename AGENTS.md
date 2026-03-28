@@ -26,7 +26,9 @@ claude-code-codex-bridge/
 │   └── workflows/
 ├── docs/
 │   ├── agent-skills-standard.md
-│   └── codex-cli-reference.md
+│   ├── claude-code-mcp-reference.md
+│   ├── codex-cli-reference.md
+│   └── mcp-bridge-mapping.md
 ├── src/
 │   └── cc_codex_bridge/
 │       ├── __main__.py
@@ -152,7 +154,7 @@ Also check `DESIGN.md` for the canonical description of the current implemented 
 - Review `.claude/docs/analysis/` for prior investigations and technical findings.
 - Review spec documents in `.claude/docs/plans/`, such as `*-spec.md`, for the intended contract and constraints.
 - Review implementation plans in `.claude/docs/plans/`, such as `*-implementation-plan.md`, for sequencing, scope, and expected milestones.
-- Consult `docs/agent-skills-standard.md` and `docs/codex-cli-reference.md` for the authoritative domain references that the bridge targets. These supersede earlier research notes in `.claude/docs/research/`.
+- Consult `docs/agent-skills-standard.md`, `docs/codex-cli-reference.md`, `docs/claude-code-mcp-reference.md`, and `docs/mcp-bridge-mapping.md` for the authoritative domain references that the bridge targets. These supersede earlier research notes in `.claude/docs/research/`.
 - Update `DESIGN.md` whenever the implemented architecture changes materially.
 - Update the relevant analysis, spec, or plan docs when the command surface, architecture, or implementation direction changes materially.
 
