@@ -1421,7 +1421,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
                 cache_dir=getattr(args, "cache_dir", None),
                 claude_home=getattr(args, "claude_home", None),
             )
-        except Exception as exc:
+        except (DiscoveryError, OSError, UnicodeError) as exc:
             print(f"Error: discovery failed: {exc}", file=sys.stderr)
             return 1
 

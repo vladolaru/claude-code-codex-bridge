@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from cc_codex_bridge import cli
 
 
@@ -61,3 +63,21 @@ def test_config_exclude_list_json():
     from cc_codex_bridge import cli
     exit_code = cli.main(["config", "exclude", "list", "--global", "--json"])
     assert exit_code == 0
+
+
+def test_config_exclude_add_unexpected_error_propagates(tmp_path, monkeypatch):
+    """Unexpected exceptions from discover() propagate instead of being caught."""
+    import cc_codex_bridge.discover as discover_module
+    from cc_codex_bridge import cli
+
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# test\n")
+
+    def _boom(**kwargs):
+        raise RuntimeError("unexpected internal error")
+
+    monkeypatch.setattr(discover_module, "discover", _boom)
+
+    with pytest.raises(RuntimeError, match="unexpected internal error"):
+        cli.main(["config", "exclude", "add", "plugin", "some/plugin", "--project", str(project_root)])
