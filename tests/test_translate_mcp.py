@@ -1,0 +1,354 @@
+"""Tests for MCP server translation from Claude Code to Codex config."""
+
+from __future__ import annotations
+
+import pytest
+
+from cc_codex_bridge.model import (
+    DiscoveredMcpServer,
+    GeneratedMcpServer,
+    McpTranslationDiagnostic,
+    McpTranslationResult,
+)
+from cc_codex_bridge.translate_mcp import translate_mcp_servers
+
+
+# -- stdio servers -----------------------------------------------------------
+
+class TestStdioTranslation:
+    """Translation of stdio MCP servers."""
+
+    def test_command_args_env_map_directly(self):
+        """stdio: command, args, and env map directly to output."""
+        server = DiscoveredMcpServer(
+            name="my-stdio",
+            scope="global",
+            transport="stdio",
+            source="user-global",
+            config={
+                "command": "node",
+                "args": ["server.js", "--port", "3000"],
+                "env": {"NODE_ENV": "production"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        assert len(result.servers) == 1
+        gen = result.servers[0]
+        assert gen.name == "my-stdio"
+        assert gen.scope == "global"
+        assert gen.toml_table["command"] == "node"
+        assert gen.toml_table["args"] == ["server.js", "--port", "3000"]
+        assert gen.toml_table["env"] == {"NODE_ENV": "production"}
+        assert "type" not in gen.toml_table
+        assert len(result.diagnostics) == 0
+
+    def test_empty_env_omitted(self):
+        """stdio: empty env dict is omitted from output."""
+        server = DiscoveredMcpServer(
+            name="srv",
+            scope="project",
+            transport="stdio",
+            source="project-local",
+            config={
+                "command": "python",
+                "args": ["-m", "myserver"],
+                "env": {},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert "env" not in gen.toml_table
+
+    def test_missing_args_omitted(self):
+        """stdio: missing args is omitted from output."""
+        server = DiscoveredMcpServer(
+            name="srv",
+            scope="global",
+            transport="stdio",
+            source="user-global",
+            config={"command": "my-server"},
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["command"] == "my-server"
+        assert "args" not in gen.toml_table
+
+    def test_type_field_stripped(self):
+        """stdio: type field in config is stripped from output."""
+        server = DiscoveredMcpServer(
+            name="srv",
+            scope="project",
+            transport="stdio",
+            source="project-shared",
+            config={
+                "type": "stdio",
+                "command": "npx",
+                "args": ["@my/server"],
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert "type" not in gen.toml_table
+        assert gen.toml_table["command"] == "npx"
+        assert gen.toml_table["args"] == ["@my/server"]
+
+
+# -- HTTP servers ------------------------------------------------------------
+
+class TestHttpTranslation:
+    """Translation of HTTP MCP servers."""
+
+    def test_url_maps_directly(self):
+        """HTTP: url maps directly to output."""
+        server = DiscoveredMcpServer(
+            name="http-srv",
+            scope="global",
+            transport="http",
+            source="user-global",
+            config={"url": "https://example.com/mcp"},
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["url"] == "https://example.com/mcp"
+        assert "type" not in gen.toml_table
+
+    def test_headers_become_http_headers(self):
+        """HTTP: headers is renamed to http_headers."""
+        server = DiscoveredMcpServer(
+            name="http-srv",
+            scope="project",
+            transport="http",
+            source="project-local",
+            config={
+                "url": "https://example.com/mcp",
+                "headers": {"X-Custom": "value", "Accept": "application/json"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["http_headers"] == {
+            "X-Custom": "value",
+            "Accept": "application/json",
+        }
+        assert "headers" not in gen.toml_table
+
+    def test_bearer_token_with_braces_extracted(self):
+        """HTTP: Authorization 'Bearer ${TOKEN}' extracted to bearer_token_env_var."""
+        server = DiscoveredMcpServer(
+            name="auth-srv",
+            scope="global",
+            transport="http",
+            source="user-global",
+            config={
+                "url": "https://api.example.com/mcp",
+                "headers": {
+                    "Authorization": "Bearer ${MY_API_TOKEN}",
+                    "X-Extra": "keep-me",
+                },
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["bearer_token_env_var"] == "MY_API_TOKEN"
+        assert gen.toml_table["http_headers"] == {"X-Extra": "keep-me"}
+        assert "Authorization" not in gen.toml_table.get("http_headers", {})
+
+    def test_bearer_token_without_braces_extracted(self):
+        """HTTP: Authorization 'Bearer $TOKEN' (no braces) also extracted."""
+        server = DiscoveredMcpServer(
+            name="auth-srv",
+            scope="project",
+            transport="http",
+            source="project-local",
+            config={
+                "url": "https://api.example.com/mcp",
+                "headers": {"Authorization": "Bearer $API_KEY"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["bearer_token_env_var"] == "API_KEY"
+        # No other headers remain, so http_headers should be omitted
+        assert "http_headers" not in gen.toml_table
+
+    def test_non_bearer_authorization_preserved(self):
+        """HTTP: non-Bearer Authorization header stays in http_headers."""
+        server = DiscoveredMcpServer(
+            name="basic-auth-srv",
+            scope="global",
+            transport="http",
+            source="user-global",
+            config={
+                "url": "https://example.com/mcp",
+                "headers": {"Authorization": "Basic dXNlcjpwYXNz"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["http_headers"] == {"Authorization": "Basic dXNlcjpwYXNz"}
+        assert "bearer_token_env_var" not in gen.toml_table
+
+    def test_empty_headers_after_extraction_omitted(self):
+        """HTTP: empty headers after Bearer extraction -> http_headers omitted."""
+        server = DiscoveredMcpServer(
+            name="auth-only-srv",
+            scope="project",
+            transport="http",
+            source="project-shared",
+            config={
+                "url": "https://api.example.com/mcp",
+                "headers": {"Authorization": "Bearer ${SECRET_TOKEN}"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["bearer_token_env_var"] == "SECRET_TOKEN"
+        assert "http_headers" not in gen.toml_table
+
+    def test_type_field_stripped(self):
+        """HTTP: type field in config is stripped from output."""
+        server = DiscoveredMcpServer(
+            name="http-srv",
+            scope="global",
+            transport="http",
+            source="user-global",
+            config={
+                "type": "streamable-http",
+                "url": "https://example.com/mcp",
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert "type" not in gen.toml_table
+        assert gen.toml_table["url"] == "https://example.com/mcp"
+
+
+# -- Diagnostics (warnings) -------------------------------------------------
+
+class TestDiagnostics:
+    """Diagnostic warnings during translation."""
+
+    def test_headers_helper_warning(self):
+        """headersHelper present produces a warning diagnostic."""
+        server = DiscoveredMcpServer(
+            name="helper-srv",
+            scope="global",
+            transport="http",
+            source="user-global",
+            config={
+                "url": "https://example.com/mcp",
+                "headersHelper": "some-helper-command",
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        assert len(result.servers) == 1
+        assert len(result.diagnostics) == 1
+        diag = result.diagnostics[0]
+        assert diag.server_name == "helper-srv"
+        assert "headersHelper" in diag.message
+        assert "no Codex equivalent" in diag.message
+
+    def test_oauth_config_warning(self):
+        """OAuth config detected produces a warning diagnostic."""
+        server = DiscoveredMcpServer(
+            name="oauth-srv",
+            scope="project",
+            transport="http",
+            source="project-local",
+            config={
+                "url": "https://example.com/mcp",
+                "oauth": {"client_id": "abc123"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        assert len(result.servers) == 1
+        assert len(result.diagnostics) == 1
+        diag = result.diagnostics[0]
+        assert diag.server_name == "oauth-srv"
+        assert "OAuth" in diag.message or "oauth" in diag.message
+        assert "codex mcp login" in diag.message
+
+
+# -- Multiple servers and metadata preservation ------------------------------
+
+class TestMultipleServers:
+    """Translation of multiple servers in a single call."""
+
+    def test_multiple_servers(self):
+        """Multiple servers translate independently in one call."""
+        servers = (
+            DiscoveredMcpServer(
+                name="stdio-one",
+                scope="global",
+                transport="stdio",
+                source="user-global",
+                config={"command": "node", "args": ["a.js"]},
+            ),
+            DiscoveredMcpServer(
+                name="http-two",
+                scope="project",
+                transport="http",
+                source="project-local",
+                config={"url": "https://two.example.com/mcp"},
+            ),
+            DiscoveredMcpServer(
+                name="stdio-three",
+                scope="project",
+                transport="stdio",
+                source="project-shared",
+                config={"command": "python", "args": ["-m", "srv"], "env": {"KEY": "val"}},
+            ),
+        )
+        result = translate_mcp_servers(servers)
+
+        assert len(result.servers) == 3
+        names = [s.name for s in result.servers]
+        assert "stdio-one" in names
+        assert "http-two" in names
+        assert "stdio-three" in names
+
+
+class TestScopeAndSourcePreserved:
+    """Scope and source_description are preserved from input."""
+
+    def test_scope_preserved(self):
+        """Scope from DiscoveredMcpServer is preserved in GeneratedMcpServer."""
+        server = DiscoveredMcpServer(
+            name="test-srv",
+            scope="project",
+            transport="stdio",
+            source="project-local",
+            config={"command": "test"},
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.scope == "project"
+
+    def test_source_description_derived(self):
+        """source_description is derived from the input source field."""
+        server = DiscoveredMcpServer(
+            name="test-srv",
+            scope="global",
+            transport="stdio",
+            source="user-global",
+            config={"command": "test"},
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.source_description  # non-empty
+        assert "user-global" in gen.source_description
