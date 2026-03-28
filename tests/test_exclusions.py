@@ -612,3 +612,30 @@ def test_multiple_mcp_servers_excluded(tmp_path: Path):
     assert len(filtered.mcp_servers) == 1
     assert filtered.mcp_servers[0].name == "playwright"
     assert set(report.mcp_servers) == {"context7", "wpcom"}
+
+
+def test_apply_sync_exclusions_preserves_mcp_discovery_degraded(tmp_path: Path) -> None:
+    """The mcp_discovery_degraded flag must survive exclusion filtering."""
+    discovery = DiscoveryResult(
+        project=ProjectContext(
+            root=tmp_path / "project",
+            agents_md_path=tmp_path / "project" / "AGENTS.md",
+        ),
+        plugins=(),
+        mcp_servers=(
+            DiscoveredMcpServer(
+                name="kept-server",
+                scope="global",
+                config={"command": "some-cmd"},
+                transport="stdio",
+                source="~/.claude.json",
+            ),
+        ),
+        mcp_discovery_degraded=True,
+    )
+    exclusions = SyncExclusions()
+    filtered, _report = apply_sync_exclusions(discovery, exclusions)
+
+    assert filtered.mcp_discovery_degraded is True, (
+        "mcp_discovery_degraded must be forwarded through apply_sync_exclusions"
+    )

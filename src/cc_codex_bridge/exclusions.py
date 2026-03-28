@@ -288,6 +288,7 @@ def apply_sync_exclusions(
         project_commands=tuple(kept_project_commands),
         user_claude_md=discovery.user_claude_md,
         mcp_servers=tuple(kept_mcp_servers),
+        mcp_discovery_degraded=discovery.mcp_discovery_degraded,
     )
     report = ExclusionReport(
         plugins=tuple(sorted(set(excluded_plugins))),
