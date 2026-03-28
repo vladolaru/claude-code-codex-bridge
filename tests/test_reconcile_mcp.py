@@ -19,14 +19,6 @@ from cc_codex_bridge.reconcile import (
 from cc_codex_bridge.translate_mcp import translate_mcp_servers
 
 
-def _make_project(tmp_path: Path) -> Path:
-    """Create a minimal project with AGENTS.md."""
-    project = tmp_path / "project"
-    project.mkdir()
-    (project / "AGENTS.md").write_text("# Test\n")
-    return project
-
-
 def _write_claude_json(path: Path, servers: dict, project_root: Path | None = None, project_servers: dict | None = None) -> None:
     """Write a ~/.claude.json with MCP servers."""
     data: dict = {}
@@ -68,8 +60,8 @@ def _build_and_reconcile(
 class TestGlobalMcpReconcile:
     """Tests for global-scope MCP server reconciliation."""
 
-    def test_fresh_reconcile_creates_global_config(self, tmp_path):
-        project = _make_project(tmp_path)
+    def test_fresh_reconcile_creates_global_config(self, tmp_path, make_project):
+        project, _ = make_project()
         codex_home = tmp_path / "codex"
         bridge_home = tmp_path / "bridge"
 
@@ -91,8 +83,8 @@ class TestGlobalMcpReconcile:
         assert "[mcp_servers.wpcom]" in content
         assert "npx wpcom" in content
 
-    def test_idempotent_reconcile(self, tmp_path):
-        project = _make_project(tmp_path)
+    def test_idempotent_reconcile(self, tmp_path, make_project):
+        project, _ = make_project()
         codex_home = tmp_path / "codex"
         bridge_home = tmp_path / "bridge"
 
@@ -111,8 +103,8 @@ class TestGlobalMcpReconcile:
         mcp_changes = [c for c in report.changes if c.resource_kind == "mcp_server"]
         assert len(mcp_changes) == 0
 
-    def test_stale_server_removed(self, tmp_path):
-        project = _make_project(tmp_path)
+    def test_stale_server_removed(self, tmp_path, make_project):
+        project, _ = make_project()
         codex_home = tmp_path / "codex"
         bridge_home = tmp_path / "bridge"
 
@@ -152,8 +144,8 @@ class TestGlobalMcpReconcile:
 class TestProjectMcpReconcile:
     """Tests for project-scope MCP server reconciliation."""
 
-    def test_project_servers_in_project_config(self, tmp_path):
-        project = _make_project(tmp_path)
+    def test_project_servers_in_project_config(self, tmp_path, make_project):
+        project, _ = make_project()
         codex_home = tmp_path / "codex"
         bridge_home = tmp_path / "bridge"
 
@@ -175,8 +167,8 @@ class TestProjectMcpReconcile:
         assert "[mcp_servers.figma]" in content
         assert "mcp.figma.com" in content
 
-    def test_mixed_scopes_separate_files(self, tmp_path):
-        project = _make_project(tmp_path)
+    def test_mixed_scopes_separate_files(self, tmp_path, make_project):
+        project, _ = make_project()
         codex_home = tmp_path / "codex"
         bridge_home = tmp_path / "bridge"
 
@@ -212,8 +204,8 @@ class TestProjectMcpReconcile:
 class TestDryRun:
     """Tests for MCP dry-run behavior."""
 
-    def test_dry_run_reports_without_writing(self, tmp_path):
-        project = _make_project(tmp_path)
+    def test_dry_run_reports_without_writing(self, tmp_path, make_project):
+        project, _ = make_project()
         codex_home = tmp_path / "codex"
         bridge_home = tmp_path / "bridge"
 
@@ -249,8 +241,8 @@ class TestDryRun:
         config_path = codex_home / "config.toml"
         assert not config_path.exists()
 
-    def test_no_servers_no_config_file(self, tmp_path):
-        project = _make_project(tmp_path)
+    def test_no_servers_no_config_file(self, tmp_path, make_project):
+        project, _ = make_project()
         codex_home = tmp_path / "codex"
         bridge_home = tmp_path / "bridge"
 
@@ -263,11 +255,11 @@ class TestDryRun:
 class TestCleanMcpServers:
     """Tests for MCP server cleanup during clean_project."""
 
-    def test_clean_removes_project_mcp_servers(self, tmp_path):
+    def test_clean_removes_project_mcp_servers(self, tmp_path, make_project):
         """clean_project removes bridge-owned MCP entries from project config.toml."""
         from cc_codex_bridge.reconcile import clean_project
 
-        project = _make_project(tmp_path)
+        project, _ = make_project()
         codex_home = tmp_path / "codex"
         bridge_home = tmp_path / "bridge"
 
@@ -295,11 +287,11 @@ class TestCleanMcpServers:
         # write_codex_config removes the file when content is empty.
         assert not project_config.exists()
 
-    def test_clean_removes_global_mcp_when_last_owner(self, tmp_path):
+    def test_clean_removes_global_mcp_when_last_owner(self, tmp_path, make_project):
         """clean_project removes global MCP entries when this is the last owner."""
         from cc_codex_bridge.reconcile import clean_project
 
-        project = _make_project(tmp_path)
+        project, _ = make_project()
         codex_home = tmp_path / "codex"
         bridge_home = tmp_path / "bridge"
 
@@ -328,18 +320,13 @@ class TestCleanMcpServers:
         # Since it was the only entry, write_codex_config removes the file.
         assert not global_config.exists()
 
-    def test_clean_preserves_global_mcp_with_other_owners(self, tmp_path):
+    def test_clean_preserves_global_mcp_with_other_owners(self, tmp_path, make_project):
         """clean_project preserves global MCP entries when another project still owns them."""
         from cc_codex_bridge.reconcile import clean_project
         from cc_codex_bridge.registry import GlobalSkillRegistry, GLOBAL_REGISTRY_FILENAME
 
-        project_a = tmp_path / "project-a"
-        project_a.mkdir()
-        (project_a / "AGENTS.md").write_text("# A\n")
-
-        project_b = tmp_path / "project-b"
-        project_b.mkdir()
-        (project_b / "AGENTS.md").write_text("# B\n")
+        project_a, _ = make_project("project-a")
+        project_b, _ = make_project("project-b")
 
         codex_home = tmp_path / "codex"
         bridge_home = tmp_path / "bridge"
@@ -380,11 +367,11 @@ class TestCleanMcpServers:
         assert len(registry.mcp_servers["wpcom"].owners) == 1
         assert registry.mcp_servers["wpcom"].owners[0] == project_b.resolve()
 
-    def test_clean_removes_mixed_scope_mcp_servers(self, tmp_path):
+    def test_clean_removes_mixed_scope_mcp_servers(self, tmp_path, make_project):
         """clean_project handles both global and project MCP server cleanup."""
         from cc_codex_bridge.reconcile import clean_project
 
-        project = _make_project(tmp_path)
+        project, _ = make_project()
         codex_home = tmp_path / "codex"
         bridge_home = tmp_path / "bridge"
 
@@ -423,11 +410,11 @@ class TestCleanMcpServers:
 class TestUninstallMcpServers:
     """Tests for MCP server cleanup during uninstall."""
 
-    def test_uninstall_removes_global_mcp_from_config(self, tmp_path):
+    def test_uninstall_removes_global_mcp_from_config(self, tmp_path, make_project):
         """uninstall_all removes remaining MCP entries from global config.toml."""
         from cc_codex_bridge.reconcile import uninstall_all
 
-        project = _make_project(tmp_path)
+        project, _ = make_project()
         codex_home = tmp_path / "codex"
         bridge_home = tmp_path / "bridge"
         launchagents_dir = tmp_path / "LaunchAgents"
@@ -464,12 +451,12 @@ class TestUninstallMcpServers:
 class TestUserAuthoredMcpPreservation:
     """Verify that user-authored MCP entries are never adopted as managed."""
 
-    def test_user_authored_project_entry_not_tracked_as_managed(self, tmp_path):
+    def test_user_authored_project_entry_not_tracked_as_managed(self, tmp_path, make_project):
         """A pre-existing user-authored MCP entry with the same name as a
         bridge-discovered server must not be recorded in managed_mcp_servers.
         Otherwise ``clean`` would delete it even though the bridge never wrote it.
         """
-        project = _make_project(tmp_path)
+        project, _ = make_project()
         codex_home = tmp_path / "codex"
         bridge_home = tmp_path / "bridge"
 
@@ -507,11 +494,11 @@ class TestUserAuthoredMcpPreservation:
         state = BridgeState.from_path(state_path)
         assert "figma" not in state.managed_mcp_servers
 
-    def test_clean_preserves_user_authored_entry(self, tmp_path):
+    def test_clean_preserves_user_authored_entry(self, tmp_path, make_project):
         """After reconcile skips a user-authored entry, clean must not remove it."""
         from cc_codex_bridge.reconcile import clean_project
 
-        project = _make_project(tmp_path)
+        project, _ = make_project()
         codex_home = tmp_path / "codex"
         bridge_home = tmp_path / "bridge"
 
@@ -542,12 +529,12 @@ class TestUserAuthoredMcpPreservation:
         content = project_config.read_text()
         assert "user-authored.example.com" in content
 
-    def test_user_authored_global_entry_not_tracked_in_registry(self, tmp_path):
+    def test_user_authored_global_entry_not_tracked_in_registry(self, tmp_path, make_project):
         """A pre-existing user-authored global MCP entry with the same name
         as a bridge-discovered server must not be recorded in the registry.
         Otherwise ``clean`` would delete it.
         """
-        project = _make_project(tmp_path)
+        project, _ = make_project()
         codex_home = tmp_path / "codex"
         bridge_home = tmp_path / "bridge"
 
@@ -592,12 +579,12 @@ class TestUserAuthoredMcpPreservation:
 class TestCorruptConfigTomlPlanning:
     """Corrupt config.toml must be caught during planning, not during apply."""
 
-    def test_diff_with_corrupt_global_config_toml_raises_cleanly(self, tmp_path: Path) -> None:
+    def test_diff_with_corrupt_global_config_toml_raises_cleanly(self, tmp_path: Path, make_project) -> None:
         """Corrupt global config.toml must be caught during planning (diff), not during apply."""
         from cc_codex_bridge.claude_shim import plan_claude_shim
         from cc_codex_bridge.model import DiscoveryResult, ProjectContext
 
-        project = _make_project(tmp_path)
+        project, _ = make_project()
         codex_home = tmp_path / "codex-home"
         codex_home.mkdir()
         bridge_home = tmp_path / "bridge-home"
@@ -631,12 +618,12 @@ class TestCorruptConfigTomlPlanning:
         with pytest.raises(ValueError, match="invalid TOML"):
             diff_desired_state(desired)
 
-    def test_diff_with_corrupt_project_config_toml_raises_cleanly(self, tmp_path: Path) -> None:
+    def test_diff_with_corrupt_project_config_toml_raises_cleanly(self, tmp_path: Path, make_project) -> None:
         """Corrupt project config.toml must be caught during planning (diff), not during apply."""
         from cc_codex_bridge.claude_shim import plan_claude_shim
         from cc_codex_bridge.model import DiscoveryResult, ProjectContext
 
-        project = _make_project(tmp_path)
+        project, _ = make_project()
         codex_home = tmp_path / "codex-home"
         bridge_home = tmp_path / "bridge-home"
 
@@ -669,13 +656,13 @@ class TestCorruptConfigTomlPlanning:
         with pytest.raises(ValueError, match="invalid TOML"):
             diff_desired_state(desired)
 
-    def test_reconcile_with_corrupt_global_config_toml_raises_before_registry_write(self, tmp_path: Path) -> None:
+    def test_reconcile_with_corrupt_global_config_toml_raises_before_registry_write(self, tmp_path: Path, make_project) -> None:
         """Corrupt config.toml must prevent registry writes — no orphaned ownership."""
         from cc_codex_bridge.claude_shim import plan_claude_shim
         from cc_codex_bridge.model import DiscoveryResult, ProjectContext
         from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
 
-        project = _make_project(tmp_path)
+        project, _ = make_project()
         codex_home = tmp_path / "codex-home"
         codex_home.mkdir()
         bridge_home = tmp_path / "bridge-home"
@@ -747,9 +734,9 @@ def _build_and_reconcile_degraded(
 class TestDegradedDiscoveryPreservation:
     """Verify that corrupt config files don't trigger stale-entry removal."""
 
-    def test_degraded_discovery_preserves_existing_mcp_entries(self, tmp_path):
+    def test_degraded_discovery_preserves_existing_mcp_entries(self, tmp_path, make_project):
         """When MCP discovery is degraded, previously-bridged entries survive."""
-        project = _make_project(tmp_path)
+        project, _ = make_project()
         codex_home = tmp_path / "codex"
         bridge_home = tmp_path / "bridge"
 
