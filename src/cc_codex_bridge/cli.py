@@ -523,34 +523,74 @@ def build_parser() -> argparse.ArgumentParser:
 
     exclude_add_parser = config_exclude_subparsers.add_parser(
         "add", help="Add an exclusion",
+        description=(
+            "Add a sync exclusion so reconcile skips the specified entity. "
+            "Runs discovery to verify the entity exists before saving. "
+            "When inside a project, writes to the project config by default; "
+            "use " + _c["cmd"]("--global") + " to write to the global config instead. "
+            "Both positional arguments are optional — omit them for an "
+            "interactive selection prompt (TTY only)."
+        ),
     )
     exclude_add_parser.add_argument(
         "kind", nargs="?", choices=["plugin", "skill", "agent", "command"],
         help="Entity kind to exclude.",
     )
     exclude_add_parser.add_argument("entity_id", nargs="?", help="Entity ID to exclude.")
-    exclude_add_parser.add_argument("--global", dest="force_global", action="store_true")
-    exclude_add_parser.add_argument("--project", type=Path)
-    exclude_add_parser.add_argument("--cache-dir", type=Path)
-    exclude_add_parser.add_argument("--claude-home", type=Path)
+    exclude_add_parser.add_argument(
+        "--global", dest="force_global", action="store_true",
+        help="Write to the global config (~/.cc-codex-bridge/config.toml) instead of the project config.",
+    )
+    exclude_add_parser.add_argument(
+        "--project", type=Path,
+        help="Target project directory (default: current working directory).",
+    )
 
     exclude_remove_parser = config_exclude_subparsers.add_parser(
         "remove", help="Remove an exclusion",
+        description=(
+            "Remove a previously added sync exclusion. "
+            "When inside a project, targets the project config by default; "
+            "use " + _c["cmd"]("--global") + " to target the global config instead. "
+            "Both positional arguments are optional — omit them for an "
+            "interactive selection prompt (TTY only)."
+        ),
     )
     exclude_remove_parser.add_argument(
         "kind", nargs="?", choices=["plugin", "skill", "agent", "command"],
+        help="Entity kind to remove from exclusions.",
     )
-    exclude_remove_parser.add_argument("entity_id", nargs="?")
-    exclude_remove_parser.add_argument("--global", dest="force_global", action="store_true")
-    exclude_remove_parser.add_argument("--project", type=Path)
+    exclude_remove_parser.add_argument(
+        "entity_id", nargs="?",
+        help="Entity ID to remove from exclusions.",
+    )
+    exclude_remove_parser.add_argument(
+        "--global", dest="force_global", action="store_true",
+        help="Target the global config (~/.cc-codex-bridge/config.toml) instead of the project config.",
+    )
+    exclude_remove_parser.add_argument(
+        "--project", type=Path,
+        help="Target project directory (default: current working directory).",
+    )
 
     exclude_list_parser = config_exclude_subparsers.add_parser(
         "list", help="Show current exclusions",
+        description=(
+            "Display all configured sync exclusions. "
+            "When inside a project, shows the project config by default; "
+            "use " + _c["cmd"]("--global") + " to show the global config instead."
+        ),
     )
-    exclude_list_parser.add_argument("--global", dest="force_global", action="store_true")
-    exclude_list_parser.add_argument("--project", type=Path)
     exclude_list_parser.add_argument(
-        "--json", dest="json", action="store_true", help="Output as JSON",
+        "--global", dest="force_global", action="store_true",
+        help="Show only global exclusions (~/.cc-codex-bridge/config.toml).",
+    )
+    exclude_list_parser.add_argument(
+        "--project", type=Path,
+        help="Target project directory (default: current working directory).",
+    )
+    exclude_list_parser.add_argument(
+        "--json", dest="json", action="store_true", help="Output as JSON.",
     )
 
     # -- config log subcommands --
@@ -570,9 +610,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     retention_parser = config_log_subparsers.add_parser(
         "set-retention", help="Set log retention period in days",
+        description=(
+            "Set how many days of activity log files to keep. "
+            "Logs older than this are deleted automatically after every "
+            "logged operation and by " + _c["cmd"]("log prune") + ". "
+            "Saved to the global config (~/.cc-codex-bridge/config.toml)."
+        ),
     )
     retention_parser.add_argument(
-        "days", nargs="?", type=int, help="Number of days to retain logs.",
+        "days", nargs="?", type=int,
+        help="Number of days to retain logs (interactive prompt if omitted, default: 90).",
     )
 
     log_parser = subparsers.add_parser(
@@ -1336,7 +1383,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
     bridge_home = resolve_bridge_home()
     scope = resolve_config_scope(
         force_global=getattr(args, "force_global", False),
-        project_dir=getattr(args, "project", None),
+        project_dir=getattr(args, "project", None) or Path.cwd(),
         bridge_home=bridge_home,
     )
 
