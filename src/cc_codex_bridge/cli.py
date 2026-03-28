@@ -1387,6 +1387,12 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
         bridge_home=bridge_home,
     )
 
+    scope_label = (
+        f" (project: {scope.config_path})"
+        if scope.target == "project"
+        else " (global)"
+    )
+
     subcmd = getattr(args, "config_exclude_command", None)
 
     # -- list --
@@ -1489,7 +1495,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
             discovery=discovery,
             scope=scope.target,
         )
-        print(result.message)
+        print(f"{result.message}{scope_label}")
         return 0 if result.success else 1
 
     # -- remove --
@@ -1542,7 +1548,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
             entity_id=entity_id,
             config_path=scope.config_path,
         )
-        print(result.message)
+        print(f"{result.message}{scope_label}")
         return 0 if result.success else 1
 
     print(f"Error: unknown exclude command `{subcmd}`", file=sys.stderr)

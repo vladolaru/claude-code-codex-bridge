@@ -161,3 +161,99 @@ def test_config_exclude_add_global_does_not_offer_project_entities(
     assert exit_code == 1
     captured = capsys.readouterr()
     assert "not found" in captured.out.lower() or "not found" in captured.err.lower()
+
+
+def test_config_exclude_add_shows_scope_in_message(
+    tmp_path, monkeypatch, capsys,
+):
+    """Success message should indicate which config file was modified."""
+    import cc_codex_bridge.discover as discover_module
+    from cc_codex_bridge.model import DiscoveryResult, ProjectContext, InstalledPlugin, SemVer
+    from cc_codex_bridge import cli
+
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# test\n")
+
+    cache_root = tmp_path / "cache"
+    mp_dir = cache_root / "test-mp" / "test-plugin" / "1.0.0"
+    mp_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(discover_module, "discover", lambda **kw: DiscoveryResult(
+        project=ProjectContext(root=project_root, agents_md_path=project_root / "AGENTS.md"),
+        plugins=(InstalledPlugin(
+            marketplace="test-mp",
+            plugin_name="test-plugin",
+            version_text="1.0.0",
+            version=SemVer(1, 0, 0),
+            installed_path=mp_dir,
+            source_path=mp_dir,
+            skills=(),
+            agents=(),
+            commands=(),
+        ),),
+        user_skills=(),
+        user_agents=(),
+        user_commands=(),
+        project_skills=(),
+        project_agents=(),
+        project_commands=(),
+        user_claude_md=None,
+    ))
+
+    monkeypatch.chdir(project_root)
+
+    # Default scope (project) should show project attribution
+    exit_code = cli.main([
+        "config", "exclude", "add", "plugin", "test-mp/test-plugin",
+    ])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "project" in captured.out.lower(), f"Expected 'project' in output: {captured.out}"
+
+
+def test_config_exclude_add_global_shows_scope_in_message(
+    tmp_path, monkeypatch, capsys,
+):
+    """Global scope message should say '(global)'."""
+    import cc_codex_bridge.discover as discover_module
+    from cc_codex_bridge.model import DiscoveryResult, ProjectContext, InstalledPlugin, SemVer
+    from cc_codex_bridge import cli
+
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# test\n")
+
+    cache_root = tmp_path / "cache"
+    mp_dir = cache_root / "test-mp" / "test-plugin" / "1.0.0"
+    mp_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(discover_module, "discover", lambda **kw: DiscoveryResult(
+        project=ProjectContext(root=project_root, agents_md_path=project_root / "AGENTS.md"),
+        plugins=(InstalledPlugin(
+            marketplace="test-mp",
+            plugin_name="test-plugin",
+            version_text="1.0.0",
+            version=SemVer(1, 0, 0),
+            installed_path=mp_dir,
+            source_path=mp_dir,
+            skills=(),
+            agents=(),
+            commands=(),
+        ),),
+        user_skills=(),
+        user_agents=(),
+        user_commands=(),
+        project_skills=(),
+        project_agents=(),
+        project_commands=(),
+        user_claude_md=None,
+    ))
+
+    monkeypatch.chdir(project_root)
+    exit_code = cli.main([
+        "config", "exclude", "add", "--global", "plugin", "test-mp/test-plugin",
+    ])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "(global)" in captured.out.lower(), f"Expected '(global)' in output: {captured.out}"
