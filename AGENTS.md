@@ -119,8 +119,10 @@ The bridge translates between two ecosystems. Authoritative reference documents 
 
 - `docs/agent-skills-standard.md` — the open Agent Skills standard (from [agentskills.io](https://agentskills.io/)): skill directory structure, `SKILL.md` format, frontmatter fields, progressive disclosure, client implementation contract, and script conventions.
 - `docs/codex-cli-reference.md` — Codex CLI specifics (from [developers.openai.com/codex](https://developers.openai.com/codex/) and the [Codex source](https://github.com/openai/codex)): instructions discovery (`AGENTS.md`), skill discovery hierarchy, agent role configuration, agent file auto-discovery, and Claude Code vs Codex comparison.
+- `docs/claude-code-mcp-reference.md` — Claude Code MCP server configuration format: `~/.claude.json` structure, per-project scoping, `.mcp.json` project-shared format, stdio/HTTP/SSE transports, and `headersHelper`/`oauth` fields.
+- `docs/mcp-bridge-mapping.md` — MCP bridge mapping rules: how each CC MCP field maps to Codex `config.toml` format, transport-specific translation, bearer token extraction, and unsupported feature handling.
 
-Consult these before making design decisions that depend on how Codex discovers skills, loads instructions, or defines agent roles.
+Consult these before making design decisions that depend on how Codex discovers skills, loads instructions, defines agent roles, or configures MCP servers.
 
 ## Canonical Architecture
 
