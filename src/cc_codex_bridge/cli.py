@@ -929,6 +929,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
+    if build.discovery.mcp_discovery_degraded:
+        print(
+            "Warning: MCP discovery degraded — one or more config files "
+            "contain malformed JSON. Previously-bridged MCP entries are "
+            "preserved. Fix the config file and re-run to restore normal "
+            "operation.",
+            file=sys.stderr,
+        )
+
     # Split diagnostics: agent diagnostics block reconciliation,
     # skill warnings are informational only.
     agent_diags = tuple(
