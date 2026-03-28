@@ -424,6 +424,7 @@ def build_project_desired_state(
             agent_count=0,
             skill_count=0,
             prompt_count=0,
+            mcp_server_count=0,
             exclusion_report=exclusion_report,
             diagnostics=tuple(all_diagnostics),
         )
