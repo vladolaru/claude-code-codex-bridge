@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Iterable
 
 from cc_codex_bridge.model import GeneratedSkill, GeneratedSkillFile, ReconcileError
@@ -49,14 +50,23 @@ class GlobalPromptEntry:
 
 
 @dataclass(frozen=True)
+class GlobalMcpServerEntry:
+    """One bridged MCP server ownership record."""
+
+    content_hash: str
+    owners: tuple[Path, ...]
+
+
+@dataclass(frozen=True)
 class GlobalSkillRegistry:
-    """Validated global generated-skill, agent, prompt, and plugin resource ownership registry."""
+    """Validated global generated-skill, agent, prompt, plugin resource, and MCP server ownership registry."""
 
     skills: dict[str, GlobalSkillEntry]
     projects: tuple[Path, ...] = ()
     agents: dict[str, GlobalAgentEntry] = None  # type: ignore[assignment]
     prompts: dict[str, GlobalPromptEntry] = None  # type: ignore[assignment]
     plugin_resources: dict[str, GlobalPluginResourceEntry] = None  # type: ignore[assignment]
+    mcp_servers: dict[str, GlobalMcpServerEntry] = None  # type: ignore[assignment]
     version: int = GLOBAL_REGISTRY_VERSION
 
     def __post_init__(self) -> None:
@@ -66,6 +76,8 @@ class GlobalSkillRegistry:
             object.__setattr__(self, "prompts", {})
         if self.plugin_resources is None:
             object.__setattr__(self, "plugin_resources", {})
+        if self.mcp_servers is None:
+            object.__setattr__(self, "mcp_servers", {})
 
     @classmethod
     def from_path(cls, path: Path) -> "GlobalSkillRegistry | None":
@@ -182,12 +194,34 @@ class GlobalSkillRegistry:
                 owners=resource_owners,
             )
 
+        raw_mcp_servers = data.get("mcp_servers", {})
+        if not isinstance(raw_mcp_servers, dict):
+            raise ReconcileError(f"Invalid global skill registry file: {path}")
+
+        mcp_servers: dict[str, GlobalMcpServerEntry] = {}
+        for server_name, raw_server_entry in raw_mcp_servers.items():
+            normalized_server_name = _require_mcp_server_key_name(server_name, path)
+            if not isinstance(raw_server_entry, dict):
+                raise ReconcileError(f"Invalid global skill registry file: {path}")
+            server_content_hash = _require_content_hash(raw_server_entry, path)
+            server_owners = tuple(
+                sorted(
+                    _read_owner_path_list(raw_server_entry, "owners", path),
+                    key=str,
+                )
+            )
+            mcp_servers[normalized_server_name] = GlobalMcpServerEntry(
+                content_hash=server_content_hash,
+                owners=server_owners,
+            )
+
         return cls(
             skills=skills,
             projects=tuple(sorted(projects, key=str)),
             agents=agents,
             prompts=prompts,
             plugin_resources=plugin_resources,
+            mcp_servers=mcp_servers,
             version=GLOBAL_REGISTRY_VERSION,
         )
 
@@ -201,6 +235,13 @@ class GlobalSkillRegistry:
                     "owners": [str(owner) for owner in sorted(entry.owners, key=str)],
                 }
                 for agent_filename, entry in sorted(self.agents.items())
+            },
+            "mcp_servers": {
+                server_name: {
+                    "content_hash": entry.content_hash,
+                    "owners": [str(owner) for owner in sorted(entry.owners, key=str)],
+                }
+                for server_name, entry in sorted(self.mcp_servers.items())
             },
             "plugin_resources": {
                 dir_name: {
@@ -358,6 +399,21 @@ def _require_plugin_resource_dir_name(value: str, path: Path) -> str:
     if candidate.endswith(".toml"):
         raise ReconcileError(f"Invalid global skill registry file: {path}")
 
+    return candidate
+
+
+_MCP_SERVER_KEY_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+def _require_mcp_server_key_name(value: str, path: Path) -> str:
+    """Validate one MCP server key name.
+
+    Server names must be simple identifiers: alphanumeric characters, hyphens,
+    and underscores only.  No slashes, dots, spaces, or path components.
+    """
+    candidate = value.strip()
+    if not candidate or not _MCP_SERVER_KEY_RE.match(candidate):
+        raise ReconcileError(f"Invalid global skill registry file: {path}")
     return candidate
 
 

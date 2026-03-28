@@ -11,8 +11,10 @@ from cc_codex_bridge.model import ReconcileError
 from cc_codex_bridge.registry import (
     GLOBAL_REGISTRY_FILENAME,
     GlobalAgentEntry,
+    GlobalMcpServerEntry,
     GlobalPluginResourceEntry,
     GlobalPromptEntry,
+    GlobalSkillEntry,
     GlobalSkillRegistry,
     hash_agent_file,
     hash_prompt_content,
@@ -242,3 +244,156 @@ def test_hash_file_content_different_for_different_content():
     from cc_codex_bridge.registry import hash_file_content
 
     assert hash_file_content(b"hello") != hash_file_content(b"world")
+
+
+# ---------------------------------------------------------------------------
+# MCP server registry support
+# ---------------------------------------------------------------------------
+
+
+def test_mcp_server_entry_construction():
+    """GlobalMcpServerEntry stores content_hash and owners."""
+    entry = GlobalMcpServerEntry(
+        content_hash="sha256:abc123",
+        owners=(Path("/a/project"),),
+    )
+    assert entry.content_hash == "sha256:abc123"
+    assert entry.owners == (Path("/a/project"),)
+
+
+def test_registry_round_trips_with_mcp_servers(tmp_path: Path):
+    """Registry with mcp_servers serializes and deserializes correctly."""
+    registry = GlobalSkillRegistry(
+        skills={},
+        mcp_servers={
+            "wpcom": GlobalMcpServerEntry(
+                content_hash="sha256:def456",
+                owners=(Path("/a/project"),),
+            ),
+        },
+        projects=(Path("/a/project"),),
+    )
+    path = tmp_path / GLOBAL_REGISTRY_FILENAME
+    path.write_text(registry.to_json())
+
+    loaded = GlobalSkillRegistry.from_path(path)
+    assert loaded is not None
+    assert "wpcom" in loaded.mcp_servers
+    assert loaded.mcp_servers["wpcom"].content_hash == "sha256:def456"
+    assert loaded.mcp_servers["wpcom"].owners == (Path("/a/project"),)
+
+
+def test_registry_missing_mcp_servers_key_treated_as_empty(tmp_path: Path):
+    """A version 1 registry file without a mcp_servers key loads with empty dict."""
+    path = tmp_path / GLOBAL_REGISTRY_FILENAME
+    path.write_text(json.dumps({"version": 1, "skills": {}}, indent=2) + "\n")
+
+    loaded = GlobalSkillRegistry.from_path(path)
+    assert loaded is not None
+    assert loaded.mcp_servers == {}
+
+
+def test_registry_mcp_servers_default_is_empty_dict():
+    """MCP servers defaults to empty dict when not provided."""
+    registry = GlobalSkillRegistry(skills={})
+    assert registry.mcp_servers == {}
+
+
+@pytest.mark.parametrize(
+    "valid_name",
+    ["wpcom", "context-a8c", "linear_server", "MyServer123", "a"],
+)
+def test_registry_mcp_server_valid_key_names(tmp_path: Path, valid_name: str):
+    """Simple alphanumeric names with hyphens and underscores are valid MCP server keys."""
+    path = tmp_path / GLOBAL_REGISTRY_FILENAME
+    data = {
+        "version": 1,
+        "skills": {},
+        "mcp_servers": {
+            valid_name: {
+                "content_hash": "sha256:abc123",
+                "owners": ["/a/project"],
+            },
+        },
+    }
+    path.write_text(json.dumps(data, indent=2) + "\n")
+
+    loaded = GlobalSkillRegistry.from_path(path)
+    assert loaded is not None
+    assert valid_name in loaded.mcp_servers
+
+
+@pytest.mark.parametrize(
+    "invalid_name",
+    ["path/separator", "back\\slash", "has space", "has.dot", "../traversal", "", "/absolute"],
+)
+def test_registry_mcp_server_invalid_key_names_rejected(tmp_path: Path, invalid_name: str):
+    """MCP server keys with path separators, dots, spaces, or empty strings are rejected."""
+    path = tmp_path / GLOBAL_REGISTRY_FILENAME
+    data = {
+        "version": 1,
+        "skills": {},
+        "mcp_servers": {
+            invalid_name: {
+                "content_hash": "sha256:abc123",
+                "owners": ["/a/project"],
+            },
+        },
+    }
+    path.write_text(json.dumps(data, indent=2) + "\n")
+
+    with pytest.raises(ReconcileError):
+        GlobalSkillRegistry.from_path(path)
+
+
+def test_registry_mcp_server_entry_with_multiple_owners(tmp_path: Path):
+    """MCP server entry supports multiple sorted owners."""
+    registry = GlobalSkillRegistry(
+        skills={},
+        mcp_servers={
+            "wpcom": GlobalMcpServerEntry(
+                content_hash="sha256:multi",
+                owners=(Path("/a/project-a"), Path("/b/project-b")),
+            ),
+        },
+    )
+    path = tmp_path / GLOBAL_REGISTRY_FILENAME
+    path.write_text(registry.to_json())
+
+    loaded = GlobalSkillRegistry.from_path(path)
+    assert loaded is not None
+    assert loaded.mcp_servers["wpcom"].owners == (
+        Path("/a/project-a"),
+        Path("/b/project-b"),
+    )
+
+
+def test_registry_mcp_servers_coexist_with_skills_and_agents(tmp_path: Path):
+    """Registry with mcp_servers plus skills and agents all coexist."""
+    registry = GlobalSkillRegistry(
+        skills={"my-skill": GlobalSkillEntry(
+            content_hash="sha256:skill1",
+            owners=(Path("/a/project"),),
+        )},
+        agents={
+            "reviewer.toml": GlobalAgentEntry(
+                content_hash="sha256:agent1",
+                owners=(Path("/a/project"),),
+            ),
+        },
+        mcp_servers={
+            "wpcom": GlobalMcpServerEntry(
+                content_hash="sha256:mcp1",
+                owners=(Path("/a/project"),),
+            ),
+        },
+        projects=(Path("/a/project"),),
+    )
+    path = tmp_path / GLOBAL_REGISTRY_FILENAME
+    path.write_text(registry.to_json())
+
+    loaded = GlobalSkillRegistry.from_path(path)
+    assert loaded is not None
+    assert "my-skill" in loaded.skills
+    assert "reviewer.toml" in loaded.agents
+    assert "wpcom" in loaded.mcp_servers
