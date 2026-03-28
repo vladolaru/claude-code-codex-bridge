@@ -255,6 +255,13 @@ The global registry records:
 - stale managed outputs are removed when no longer desired
 - cleanup uses the codex_home recorded in bridge state, not the caller-supplied value, to ensure registry operations target the correct global state
 - project-local generated skill directories are removed as whole directories, not individual files, consistent with global skill directory ownership
+- MCP entries in `config.toml` are ownership-aware: only bridge-owned entries (tracked in state or registry) are modified; user-authored entries with the same name are never touched or adopted
+- user-authored MCP entries that collide with bridge-discovered servers are skipped during apply and excluded from state/registry tracking — `clean` will not remove them
+- when MCP discovery is degraded (config file exists but contains malformed JSON), stale-entry removal is suppressed — previously-bridged entries survive until the file is fixed
+
+#### Known limitation: multi-project global MCP update on first reconcile
+
+When project B first encounters a global MCP server already created by project A with different content, B adds itself as a co-owner in the registry but cannot update `config.toml` because the entry is not in B's `owned` set. The registry records B's desired hash while the disk retains A's content. This self-heals on B's second reconcile (B is then in `previously_owned_global`) or on A's next reconcile. This is accepted because MCP servers overwhelmingly come from plugins with identical configs across projects — the scenario of two projects wanting different content for the same global MCP server name is not realistic in practice. Do not attempt to fix this without a concrete real-world use case that demonstrates the need.
 
 ## 7. Discovery Architecture
 
