@@ -161,6 +161,7 @@ class _MutationPlan:
     changes: tuple[Change, ...]
     registry_writes: tuple[_RegistryWrite, ...]
     project_file_changes: tuple[Change, ...] = ()
+    mcp_previously_owned_global: frozenset[str] = frozenset()
 
 
 def build_desired_state(
@@ -1254,14 +1255,7 @@ def _apply_changes(
     """Write all planned changes to disk."""
     from cc_codex_bridge.render_agent_toml import render_agent_toml
 
-    # Snapshot the registry for MCP owned-set computation BEFORE any writes.
-    previously_owned_global_mcp: set[str] = set()
-    registry_path = desired.bridge_home / GLOBAL_REGISTRY_FILENAME
-    if registry_path.is_file() and not registry_path.is_symlink():
-        pre_apply_snapshot = _load_registry_snapshot(registry_path)
-        for name, entry in pre_apply_snapshot.registry.mcp_servers.items():
-            if desired.project_root in entry.owners:
-                previously_owned_global_mcp.add(name)
+    previously_owned_global_mcp = set(plan.mcp_previously_owned_global)
 
     desired_map = dict(desired.project_files)
     skills_by_name = {skill.install_dir_name: skill for skill in desired.skills}
@@ -1496,12 +1490,12 @@ def _plan_mcp_server_mutations(
     previous_state: BridgeState | None,
     snapshot: _RegistrySnapshot,
     updated_registry: GlobalSkillRegistry,
-) -> tuple[tuple[Change, ...], GlobalSkillRegistry]:
+) -> tuple[tuple[Change, ...], GlobalSkillRegistry, frozenset[str]]:
     """Plan MCP server config.toml mutations for both global and project scope.
 
     Global servers are tracked in the global registry.
     Project servers are tracked in the project state.
-    Returns changes and updated registry.
+    Returns changes, updated registry, and the set of previously owned global MCP servers.
     """
     from cc_codex_bridge.toml_config import hash_mcp_server_table
 
@@ -1574,7 +1568,7 @@ def _plan_mcp_server_mutations(
     for name in sorted(previously_owned_project - set(project_servers)):
         changes.append(Change("remove", project_config_path, resource_kind="mcp_server"))
 
-    return tuple(changes), updated_registry
+    return tuple(changes), updated_registry, frozenset(previously_owned_global)
 
 
 def _apply_mcp_server_changes(
@@ -1693,7 +1687,7 @@ def _plan_mutations(
     plugin_resource_changes, updated_registry = _plan_plugin_resource_mutations(
         desired, snapshot, updated_registry,
     )
-    mcp_changes, updated_registry = _plan_mcp_server_mutations(
+    mcp_changes, updated_registry, mcp_previously_owned = _plan_mcp_server_mutations(
         desired, previous_state, snapshot, updated_registry,
     )
 
@@ -1713,6 +1707,7 @@ def _plan_mutations(
         )),
         registry_writes=tuple(registry_writes),
         project_file_changes=project_changes,
+        mcp_previously_owned_global=mcp_previously_owned,
     )
 
 
