@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-03-28
+
+### Added
+- `config exclude add` and `config exclude remove` now show scope attribution
+  in output messages — "(global)" or "(project: path)" — so the user always
+  knows which config file was modified
+- All `config exclude` and `config log` subcommands now have full help text:
+  descriptions, positional argument explanations, and option documentation
+
+### Fixed
+- `config exclude add` exception handler narrowed from broad `except Exception`
+  to `except (DiscoveryError, OSError, UnicodeError)` — unexpected errors now
+  propagate instead of being silently swallowed
+- `config exclude add` in global scope no longer offers project-scoped entities
+  (`project/skill-name`) as valid exclusion targets — global config only
+  validates plugin and user entities
+- `config exclude` scope detection now falls back to CWD (consistent with
+  `config show` and `config check`) — previously it always targeted global
+  config when `--project` was omitted, regardless of working directory
+- Removed `--cache-dir` and `--claude-home` from `config exclude add` — these
+  discovery override flags were unique to this subcommand and unnecessary
+  (defaults cover all practical cases)
+
 ## [1.0.1] - 2026-03-27
 
 ### Fixed
