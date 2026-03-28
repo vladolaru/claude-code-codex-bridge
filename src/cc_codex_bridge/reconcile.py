@@ -1620,19 +1620,23 @@ def _apply_mcp_server_changes(
     if previous_state is not None:
         previously_owned_project = set(previous_state.managed_mcp_servers)
 
+    project_changes_summary: dict[str, list[str]] = {"added": [], "updated": [], "removed": []}
     if project_servers or previously_owned_project:
         project_config_path = desired.project_root / ".codex" / "config.toml"
         doc = read_codex_config(project_config_path)
-        apply_mcp_changes(
+        project_changes_summary = apply_mcp_changes(
             doc,
             desired={name: s.toml_table for name, s in project_servers.items()},
             owned=previously_owned_project,
         )
         write_codex_config(project_config_path, doc)
 
-    # Build managed_mcp_servers for state
-    for name, server in project_servers.items():
-        managed_mcp_servers[name] = hash_mcp_server_table(server.toml_table)
+    # Build managed_mcp_servers for state — only track entries the bridge controls.
+    # Include: previously owned entries still desired (retained) + newly added entries.
+    # Exclude: desired entries that already existed as user-authored (skipped by apply).
+    bridge_controlled = previously_owned_project | set(project_changes_summary["added"])
+    for name in sorted(bridge_controlled & set(project_servers)):
+        managed_mcp_servers[name] = hash_mcp_server_table(project_servers[name].toml_table)
 
     return managed_mcp_servers
 

@@ -459,3 +459,85 @@ class TestUninstallMcpServers:
 
         # Global config.toml should have MCP entries removed
         assert not global_config.exists()
+
+
+class TestUserAuthoredMcpPreservation:
+    """Verify that user-authored MCP entries are never adopted as managed."""
+
+    def test_user_authored_project_entry_not_tracked_as_managed(self, tmp_path):
+        """A pre-existing user-authored MCP entry with the same name as a
+        bridge-discovered server must not be recorded in managed_mcp_servers.
+        Otherwise ``clean`` would delete it even though the bridge never wrote it.
+        """
+        project = _make_project(tmp_path)
+        codex_home = tmp_path / "codex"
+        bridge_home = tmp_path / "bridge"
+
+        # Pre-create a user-authored config.toml with a figma entry
+        project_codex = project / ".codex"
+        project_codex.mkdir(parents=True)
+        project_config = project_codex / "config.toml"
+        project_config.write_text(
+            '[mcp_servers.figma]\nurl = "https://user-authored.example.com/mcp"\n'
+        )
+
+        # Bridge discovers a figma server from Claude Code config
+        servers = (
+            GeneratedMcpServer(
+                name="figma",
+                scope="project",
+                toml_table={"url": "https://mcp.figma.com/mcp"},
+                source_description="project-local",
+            ),
+        )
+
+        report = _build_and_reconcile(project, servers, codex_home, bridge_home)
+        assert report.applied
+
+        # The user-authored entry should be preserved (not overwritten)
+        content = project_config.read_text()
+        assert "user-authored.example.com" in content
+        assert "mcp.figma.com" not in content
+
+        # Verify the state does NOT track figma as managed
+        import hashlib
+        project_hash = hashlib.sha256(str(project).encode()).hexdigest()[:16]
+        state_path = bridge_home / "projects" / project_hash / "state.json"
+        from cc_codex_bridge.state import BridgeState
+        state = BridgeState.from_path(state_path)
+        assert "figma" not in state.managed_mcp_servers
+
+    def test_clean_preserves_user_authored_entry(self, tmp_path):
+        """After reconcile skips a user-authored entry, clean must not remove it."""
+        from cc_codex_bridge.reconcile import clean_project
+
+        project = _make_project(tmp_path)
+        codex_home = tmp_path / "codex"
+        bridge_home = tmp_path / "bridge"
+
+        # Pre-create a user-authored config.toml with a figma entry
+        project_codex = project / ".codex"
+        project_codex.mkdir(parents=True)
+        project_config = project_codex / "config.toml"
+        project_config.write_text(
+            '[mcp_servers.figma]\nurl = "https://user-authored.example.com/mcp"\n'
+        )
+
+        # Bridge discovers a figma server from Claude Code config
+        servers = (
+            GeneratedMcpServer(
+                name="figma",
+                scope="project",
+                toml_table={"url": "https://mcp.figma.com/mcp"},
+                source_description="project-local",
+            ),
+        )
+
+        _build_and_reconcile(project, servers, codex_home, bridge_home)
+
+        # Now clean the project
+        clean_project(project, bridge_home=bridge_home)
+
+        # The user-authored entry must survive clean
+        content = project_config.read_text()
+        assert "user-authored.example.com" in content
