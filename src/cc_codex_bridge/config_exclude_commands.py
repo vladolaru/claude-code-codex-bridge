@@ -122,12 +122,14 @@ def handle_exclude_add(
     entity_id: str,
     config_path: Path,
     discovery: DiscoveryResult,
+    scope: str = "project",
 ) -> ExcludeCommandResult:
     """Add an entity exclusion to the config file.
 
     1. Validate *kind* is one of: plugin, skill, agent, command.
     2. Normalize *entity_id* via the exclusions module.
-    3. Validate the normalized ID matches a discovered entity.
+    3. Validate the normalized ID matches a discovered entity
+       (filtered by *scope* — ``"global"`` excludes project entities).
     4. Read config, add to ``exclude.<kind_plural>``, write back.
     5. Return success/failure result.
     """
@@ -144,7 +146,7 @@ def handle_exclude_add(
         return ExcludeCommandResult(success=False, message=str(exc))
 
     # Validate against discovered entities
-    known = list_discoverable_entities(discovery)
+    known = list_discoverable_entities(discovery, scope=scope)
     if not _matches_any(normalized, known[kind], kind):
         return ExcludeCommandResult(
             success=False,

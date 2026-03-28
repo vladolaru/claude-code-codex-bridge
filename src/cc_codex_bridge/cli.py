@@ -1430,7 +1430,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
 
         # Build candidate lists, filtered by what's already excluded.
         current_excl = handle_exclude_list(config_path=scope.config_path)
-        discoverable = list_discoverable_entities(discovery)
+        discoverable = list_discoverable_entities(discovery, scope=scope.target)
         available: dict[str, list[str]] = {}
         for k, key in KIND_TO_KEY.items():
             already = set(getattr(current_excl, key))
@@ -1487,6 +1487,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
             entity_id=entity_id,
             config_path=scope.config_path,
             discovery=discovery,
+            scope=scope.target,
         )
         print(result.message)
         return 0 if result.success else 1

@@ -124,3 +124,40 @@ def test_list_discoverable_entities_global_scope_excludes_project(tmp_path):
     result_proj = list_discoverable_entities(discovery, scope="project")
     project_entries = [e for lst in result_proj.values() for e in lst if e.startswith("project/")]
     assert len(project_entries) > 0, "Project scope should include project entities"
+
+
+def test_config_exclude_add_global_does_not_offer_project_entities(
+    tmp_path, monkeypatch, capsys,
+):
+    """config exclude add --global should not accept project-scoped entity IDs."""
+    import cc_codex_bridge.discover as discover_module
+    from cc_codex_bridge.model import DiscoveryResult, ProjectContext
+    from cc_codex_bridge import cli
+
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# test\n")
+
+    proj_skills = project_root / ".claude" / "skills" / "local-skill"
+    proj_skills.mkdir(parents=True)
+    (proj_skills / "SKILL.md").write_text("---\nname: local-skill\ndescription: test\n---\n")
+
+    monkeypatch.setattr(discover_module, "discover", lambda **kw: DiscoveryResult(
+        project=ProjectContext(root=project_root, agents_md_path=project_root / "AGENTS.md"),
+        plugins=(),
+        user_skills=(),
+        user_agents=(),
+        user_commands=(),
+        project_skills=(proj_skills,),
+        project_agents=(),
+        project_commands=(),
+        user_claude_md=None,
+    ))
+
+    monkeypatch.chdir(project_root)
+    exit_code = cli.main([
+        "config", "exclude", "add", "--global", "skill", "project/local-skill",
+    ])
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "not found" in captured.out.lower() or "not found" in captured.err.lower()
