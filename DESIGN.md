@@ -42,6 +42,8 @@ These are authoritative inputs:
 - project-level Claude skills from `.claude/skills/`
 - project-level Claude agents from `.claude/agents/`
 - user-level global instructions from `~/.claude/CLAUDE.md`
+- MCP server definitions from `~/.claude.json` (user-global and per-project scopes)
+- MCP server definitions from `<project>/.mcp.json` (project-shared scope)
 
 ### Generated outputs
 
@@ -56,6 +58,8 @@ These are derived artifacts and must not become hand-maintained sources:
 - `~/.cc-codex-bridge/registry.json`
 - `~/.cc-codex-bridge/plugins/<marketplace>-<plugin>/`
 - `~/.cc-codex-bridge/logs/YYYY-MM-DD.jsonl` (daily activity logs)
+- `~/.codex/config.toml` `[mcp_servers.*]` entries (bridge-owned only)
+- `<project>/.codex/config.toml` `[mcp_servers.*]` entries (bridge-owned only)
 
 ### Authority rule
 
@@ -79,7 +83,10 @@ If a behavior is described differently in multiple docs:
 - translation of Claude agents into self-contained Codex agent `.toml` files
 - translation of Claude skills into self-contained Codex skills
 - translation of Claude commands into native Codex prompt files with plugin resource vendoring
-- safe reconcile of generated project files, generated Codex agent files, and generated Codex skill directories
+- discovery of MCP server definitions from `~/.claude.json` and `.mcp.json`
+- translation of MCP server configs (stdio and HTTP) into Codex `config.toml` format
+- surgical editing of `config.toml` files with `tomlkit` (round-trip preserving)
+- safe reconcile of generated project files, generated Codex agent files, generated Codex skill directories, and MCP server config entries
 - state tracking for generator-owned outputs
 - project-level artifact cleanup via `clean`
 - machine-level full artifact removal via `uninstall`
@@ -108,8 +115,9 @@ The runtime is a deterministic pipeline:
 4. choose the highest semantic version for each `<marketplace>/<plugin>` and filter to only enabled plugins
 5. discover user-level skills, agents, and global instructions from `~/.claude/` (or `--claude-home`)
 6. discover project-level skills and agents from `.claude/`
+6b. discover MCP server definitions from `~/.claude.json` (user-global and per-project) and `.mcp.json` (project-shared)
 7. load optional `.codex/bridge.toml` exclusions and merge any CLI exclusion flags
-8. filter discovered plugins/skills/agents by the effective exclusion set
+8. filter discovered plugins/skills/agents/MCP servers by the effective exclusion set
 9. translate plugin agents into `GeneratedAgentFile` objects
 10. translate standalone user and project agents into `GeneratedAgentFile` objects
 11. translate plugin and user skills into `GeneratedSkill` trees (global registry)
@@ -118,9 +126,11 @@ The runtime is a deterministic pipeline:
 14. translate standalone user commands into `GeneratedPrompt` objects (global prompts)
 15. translate project commands into `GeneratedPrompt` objects (global prompts) with `--<project-dirname>` filename suffix
 16. merge all agents, render project-local agent `.toml` files to `.codex/agents/`, and collect global agents for `~/.codex/agents/`
-17. decide whether `CLAUDE.md` can be created or preserved as an `@AGENTS.md` shim
-18. build a full desired state for project files, Codex skill directories, global agent files, and global instructions
-19. inspect/preview or reconcile that desired state with ownership and rollback protections
+17. translate discovered MCP servers into `GeneratedMcpServer` objects with Codex-compatible TOML tables
+18. decide whether `CLAUDE.md` can be created or preserved as an `@AGENTS.md` shim
+19. build a full desired state for project files, Codex skill directories, global agent files, global instructions, and MCP server entries
+20. inspect/preview or reconcile that desired state with ownership and rollback protections
+21. for MCP servers: surgically edit `~/.codex/config.toml` (global) and `<project>/.codex/config.toml` (project) using `tomlkit`, preserving user-authored content
 
 The reconcile pipeline is shared by `status` and `reconcile`.
 
@@ -200,13 +210,15 @@ The project state file (at `~/.cc-codex-bridge/projects/<hash>/state.json`) reco
 - bridge home path
 - managed project files as a path-to-content-hash mapping (including `CLAUDE.md`, `AGENTS.md`, and agent `.toml` files under `.codex/agents/`)
 - managed project skill directory names (tracked separately for directory-snapshot comparison)
-- state version (currently 9; v8 state files are migrated on read, empty migrated hashes are treated as preserve-only until a trusted hash is recorded, and the next reconcile backfills hashes for preserved or retained managed files from on-disk content when possible)
+- managed MCP server names as a name-to-content-hash mapping (for project-scope MCP servers in `.codex/config.toml`)
+- state version (currently 11; v8–v10 state files are migrated on read)
 
 The global registry records:
 
 - generated skill install directory names with content hashes and owning project roots
 - generated agent `.toml` filenames with content hashes and owning project roots
 - vendored plugin resource directory names with content hashes and owning project roots
+- bridge-owned global MCP server names with content hashes and owning project roots
 - a sorted list of all reconciled project roots (the `projects` list)
 
 ### Safety rules
@@ -285,6 +297,20 @@ Discovery lives in `src/cc_codex_bridge/discover.py`.
 - user-level commands are discovered from `~/.claude/commands/` as `*.md` files
 - project-level commands are discovered from `<project>/.claude/commands/` as `*.md` files
 - command discovery follows the same pattern as agent discovery (top-level `.md` files in a directory)
+
+### MCP server discovery
+
+`src/cc_codex_bridge/discover_mcp.py` reads MCP server definitions from Claude Code configuration files.
+
+Sources (in precedence order, highest first):
+
+1. **Project-local**: `~/.claude.json` → `projects.<project_root>.mcpServers` → scope `project`
+2. **Project-shared**: `<project>/.mcp.json` → `mcpServers` → scope `project`
+3. **User-global**: `~/.claude.json` → top-level `mcpServers` → scope `global`
+
+When the same server name appears at multiple scopes, highest precedence wins. SSE transport servers are skipped (unsupported in Codex). Plugin-provided MCP servers (using `${CLAUDE_PLUGIN_ROOT}`) are not discovered — standalone equivalents cover them.
+
+Transport detection: `command` field → stdio; `type: "http"` or `url` field → HTTP.
 
 ### Plugin enablement
 
@@ -569,6 +595,28 @@ Agent references (`plugin:agent-name`) are not rewritten because agent invocatio
 ### Skill routing
 
 User-level and plugin skills are installed to the global Codex skill registry at `~/.codex/skills/`. Project-level skills are installed to project-local `.codex/skills/` directories and tracked as managed project skill directory names in the bridge state. Both global and project skills use exact directory-snapshot comparison for change detection.
+
+### 8.6 MCP server translation
+
+`src/cc_codex_bridge/translate_mcp.py` converts `DiscoveredMcpServer` objects into `GeneratedMcpServer` objects.
+
+stdio mapping: `command` → `command`, `args` → `args`, `env` → `env` (omitted when empty). The CC `type` field is stripped (Codex infers transport from field presence).
+
+HTTP mapping: `url` → `url`, `headers` → `http_headers`. Special case: `Authorization: "Bearer ${VAR}"` headers are extracted into `bearer_token_env_var` and the header is removed.
+
+Diagnostics (warnings, not errors): `headersHelper` (no Codex equivalent), `oauth` (user must run `codex mcp login`).
+
+### 8.7 MCP TOML editing
+
+`src/cc_codex_bridge/toml_config.py` provides surgical editing of Codex `config.toml` files using `tomlkit` for round-trip preservation of comments and formatting.
+
+Key functions:
+- `read_codex_config(path)` → parse or return empty doc
+- `write_codex_config(path, doc)` → atomic write (temp + rename); removes empty files
+- `apply_mcp_changes(doc, desired, owned)` → add/update/remove bridge-owned `[mcp_servers.*]` entries
+- `hash_mcp_server_table(table_dict)` → deterministic `sha256:` content hash
+
+The editing is ownership-aware: only entries tracked in the bridge registry or state are modified. User-authored MCP entries are never touched.
 
 ## 9. Reconcile Architecture
 
