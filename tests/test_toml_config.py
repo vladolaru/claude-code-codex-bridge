@@ -6,6 +6,8 @@ from pathlib import Path
 
 import tomlkit
 
+import pytest
+
 from cc_codex_bridge.toml_config import (
     _dict_to_toml_table,
     apply_mcp_changes,
@@ -41,6 +43,15 @@ def test_read_existing_config(tmp_path: Path) -> None:
     doc = read_codex_config(config)
     assert doc["model"] == "o3"
     assert doc["sandbox_mode"] == "workspace-write"
+
+
+def test_read_codex_config_raises_on_corrupt_toml(tmp_path: Path) -> None:
+    """Corrupt TOML should raise a clear error, not a raw tomlkit exception."""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[broken\nthis is not valid TOML", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid TOML"):
+        read_codex_config(config_path)
 
 
 # --- write_codex_config ---

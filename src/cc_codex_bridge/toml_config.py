@@ -18,13 +18,19 @@ import tomlkit.items
 
 
 def read_codex_config(path: Path) -> tomlkit.TOMLDocument:
-    """Read and parse a Codex config.toml, or return empty doc if missing."""
+    """Read and parse a Codex config.toml, or return empty doc if missing.
+
+    Raises ``ValueError`` if the file exists but contains invalid TOML.
+    """
     if not path.exists():
         return tomlkit.document()
     text = path.read_text(encoding="utf-8")
     if not text.strip():
         return tomlkit.document()
-    return tomlkit.parse(text)
+    try:
+        return tomlkit.parse(text)
+    except tomlkit.exceptions.TOMLKitError as exc:
+        raise ValueError(f"invalid TOML in {path}: {exc}") from exc
 
 
 def write_codex_config(path: Path, doc: tomlkit.TOMLDocument) -> None:

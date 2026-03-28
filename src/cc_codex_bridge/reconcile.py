@@ -1536,14 +1536,23 @@ def _plan_mcp_server_mutations(
     Project servers are tracked in the project state.
     Returns changes, updated registry, and the set of previously owned global MCP servers.
     """
-    from cc_codex_bridge.toml_config import hash_mcp_server_table
+    from cc_codex_bridge.toml_config import hash_mcp_server_table, read_codex_config
 
     changes: list[Change] = []
+
+    # Pre-validate: ensure target config.toml files are parseable BEFORE any
+    # registry mutations.  This prevents the inconsistency where the registry
+    # claims ownership of entries that were never written to config.toml.
+    global_config_path = desired.codex_home / "config.toml"
+    if global_config_path.exists():
+        read_codex_config(global_config_path)  # raises ValueError on corrupt TOML
+    project_config_path = desired.project_root / ".codex" / "config.toml"
+    if project_config_path.exists():
+        read_codex_config(project_config_path)  # raises ValueError on corrupt TOML
 
     global_servers, project_servers = _partition_mcp_servers_by_scope(desired.mcp_servers)
 
     # --- Global scope ---
-    global_config_path = desired.codex_home / "config.toml"
 
     # Determine previously owned global MCP servers for this project
     previously_owned_global: set[str] = set()
@@ -1590,7 +1599,6 @@ def _plan_mcp_server_mutations(
                 changes.append(Change("remove", global_config_path, resource_kind="mcp_server"))
 
     # --- Project scope ---
-    project_config_path = desired.project_root / ".codex" / "config.toml"
     previously_owned_project: set[str] = set()
     if previous_state is not None:
         previously_owned_project = set(previous_state.managed_mcp_servers)

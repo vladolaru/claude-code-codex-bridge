@@ -589,6 +589,132 @@ class TestUserAuthoredMcpPreservation:
                 )
 
 
+class TestCorruptConfigTomlPlanning:
+    """Corrupt config.toml must be caught during planning, not during apply."""
+
+    def test_diff_with_corrupt_global_config_toml_raises_cleanly(self, tmp_path: Path) -> None:
+        """Corrupt global config.toml must be caught during planning (diff), not during apply."""
+        from cc_codex_bridge.claude_shim import plan_claude_shim
+        from cc_codex_bridge.model import DiscoveryResult, ProjectContext
+
+        project = _make_project(tmp_path)
+        codex_home = tmp_path / "codex-home"
+        codex_home.mkdir()
+        bridge_home = tmp_path / "bridge-home"
+
+        # Write corrupt global config.toml
+        (codex_home / "config.toml").write_text("[broken\nnot valid", encoding="utf-8")
+
+        discovery = DiscoveryResult(
+            project=ProjectContext(root=project, agents_md_path=project / "AGENTS.md"),
+            plugins=(),
+        )
+        shim = plan_claude_shim(discovery.project)
+        desired = build_desired_state(
+            discovery,
+            shim,
+            (),
+            codex_home=codex_home,
+            bridge_home=bridge_home,
+            mcp_servers=(
+                GeneratedMcpServer(
+                    name="my-server",
+                    scope="global",
+                    toml_table={"command": "my-cmd"},
+                    source_description="user-global",
+                ),
+            ),
+        )
+
+        # diff_desired_state runs the planning phase only (no apply).
+        # It should raise because planning validates config.toml parseability.
+        with pytest.raises(ValueError, match="invalid TOML"):
+            diff_desired_state(desired)
+
+    def test_diff_with_corrupt_project_config_toml_raises_cleanly(self, tmp_path: Path) -> None:
+        """Corrupt project config.toml must be caught during planning (diff), not during apply."""
+        from cc_codex_bridge.claude_shim import plan_claude_shim
+        from cc_codex_bridge.model import DiscoveryResult, ProjectContext
+
+        project = _make_project(tmp_path)
+        codex_home = tmp_path / "codex-home"
+        bridge_home = tmp_path / "bridge-home"
+
+        # Write corrupt project config.toml
+        project_codex = project / ".codex"
+        project_codex.mkdir(parents=True)
+        (project_codex / "config.toml").write_text("[broken\nnot valid", encoding="utf-8")
+
+        discovery = DiscoveryResult(
+            project=ProjectContext(root=project, agents_md_path=project / "AGENTS.md"),
+            plugins=(),
+        )
+        shim = plan_claude_shim(discovery.project)
+        desired = build_desired_state(
+            discovery,
+            shim,
+            (),
+            codex_home=codex_home,
+            bridge_home=bridge_home,
+            mcp_servers=(
+                GeneratedMcpServer(
+                    name="my-server",
+                    scope="project",
+                    toml_table={"command": "my-cmd"},
+                    source_description="project-local",
+                ),
+            ),
+        )
+
+        with pytest.raises(ValueError, match="invalid TOML"):
+            diff_desired_state(desired)
+
+    def test_reconcile_with_corrupt_global_config_toml_raises_before_registry_write(self, tmp_path: Path) -> None:
+        """Corrupt config.toml must prevent registry writes — no orphaned ownership."""
+        from cc_codex_bridge.claude_shim import plan_claude_shim
+        from cc_codex_bridge.model import DiscoveryResult, ProjectContext
+        from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
+
+        project = _make_project(tmp_path)
+        codex_home = tmp_path / "codex-home"
+        codex_home.mkdir()
+        bridge_home = tmp_path / "bridge-home"
+
+        # Write corrupt global config.toml
+        (codex_home / "config.toml").write_text("[broken\nnot valid", encoding="utf-8")
+
+        discovery = DiscoveryResult(
+            project=ProjectContext(root=project, agents_md_path=project / "AGENTS.md"),
+            plugins=(),
+        )
+        shim = plan_claude_shim(discovery.project)
+        desired = build_desired_state(
+            discovery,
+            shim,
+            (),
+            codex_home=codex_home,
+            bridge_home=bridge_home,
+            mcp_servers=(
+                GeneratedMcpServer(
+                    name="my-server",
+                    scope="global",
+                    toml_table={"command": "my-cmd"},
+                    source_description="user-global",
+                ),
+            ),
+        )
+
+        # reconcile should also fail during planning (before registry write)
+        with pytest.raises(ValueError, match="invalid TOML"):
+            reconcile_desired_state(desired)
+
+        # Registry must not exist — no orphaned ownership claims
+        registry_path = bridge_home / GLOBAL_REGISTRY_FILENAME
+        assert not registry_path.exists(), (
+            "Registry should not be written when planning fails on corrupt config.toml"
+        )
+
+
 def _build_and_reconcile_degraded(
     project: Path,
     mcp_servers: tuple[GeneratedMcpServer, ...],
