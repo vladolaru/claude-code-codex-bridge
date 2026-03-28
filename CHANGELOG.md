@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- MCP server bridging: Claude Code MCP server definitions are now discovered,
+  translated, and written to Codex's `config.toml`. Supports stdio and HTTP
+  transports. Global servers write to `~/.codex/config.toml`, project servers
+  to `.codex/config.toml`. Ownership tracked with drift detection.
+- MCP servers visible in `status` and `reconcile` output.
+- MCP server exclusion support via `bridge.toml` `mcp_servers` list,
+  `--exclude-mcp-server` CLI flag, and `config exclude add mcp_server:<name>`.
+- Clean and uninstall remove bridge-owned MCP entries from config.toml files.
+- New runtime dependency: `tomlkit` for round-trip TOML editing.
+- New reference docs: `docs/claude-code-mcp-reference.md` and
+  `docs/mcp-bridge-mapping.md`.
+
 ## [1.1.0] - 2026-03-28
 
 ### Added
