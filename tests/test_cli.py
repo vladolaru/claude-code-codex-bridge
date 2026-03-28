@@ -1679,7 +1679,9 @@ def test_status_reports_prompt_count(make_project, tmp_path: Path, capsys):
 
     assert exit_code == 0
     captured = capsys.readouterr()
-    assert "GENERATED_PROMPTS: 1" in captured.out
+    # Key is padded to KEY_WIDTH; check key and value on the same line.
+    prompt_line = [l for l in captured.out.splitlines() if "GENERATED_PROMPTS:" in l]
+    assert prompt_line and "1" in prompt_line[0]
 
 
 def test_status_json_includes_prompt_count(make_project, tmp_path: Path, capsys):
@@ -1739,7 +1741,9 @@ def test_validate_reports_prompt_count(make_project, tmp_path: Path, capsys):
 
     assert exit_code == 0
     captured = capsys.readouterr()
-    assert "GENERATED_PROMPTS: 2" in captured.out
+    # Key is padded to KEY_WIDTH; check key and value on the same line.
+    prompt_line = [l for l in captured.out.splitlines() if "GENERATED_PROMPTS:" in l]
+    assert prompt_line and "2" in prompt_line[0]
 
 
 def test_status_report_uses_generated_prompts_key(
@@ -1845,7 +1849,8 @@ def test_cli_exclude_command_flag(make_project, make_plugin_version, tmp_path: P
     captured = capsys.readouterr()
     # With one of two commands excluded, only 1 prompt should be generated
     assert "GENERATED_PROMPTS:" in captured.out and "1" in captured.out
-    assert "EXCLUDED_COMMANDS: 1" in captured.out
+    excl_line = [l for l in captured.out.splitlines() if "EXCLUDED_COMMANDS:" in l]
+    assert excl_line and "1" in excl_line[0]
 
 
 # --- log subcommand tests ---

@@ -381,6 +381,12 @@ def build_parser() -> argparse.ArgumentParser:
             default=None,
             help="Skip a command (format: name, scope/name, or marketplace/plugin/name). Repeatable.",
         )
+        exclude_parser.add_argument(
+            "--exclude-mcp-server",
+            action="append",
+            default=None,
+            help="Skip an MCP server (format: bare server name). Repeatable.",
+        )
     reconcile_parser.add_argument(
         "--json",
         action="store_true",
@@ -915,6 +921,7 @@ def main(argv: list[str] | None = None) -> int:
             exclude_skills=getattr(args, "exclude_skill", None) or (),
             exclude_agents=getattr(args, "exclude_agent", None) or (),
             exclude_commands=getattr(args, "exclude_command", None) or (),
+            exclude_mcp_servers=getattr(args, "exclude_mcp_server", None) or (),
         )
     except (DiscoveryError, TranslationError, ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -942,6 +949,7 @@ def main(argv: list[str] | None = None) -> int:
                         agent_count=build.agent_count,
                         skill_count=build.skill_count,
                         prompt_count=build.prompt_count,
+                        mcp_server_count=build.mcp_server_count,
                         diagnostics=agent_diags, skill_diagnostics=skill_diags,
                         drifted_files=drifted,
                     ))
@@ -951,6 +959,7 @@ def main(argv: list[str] | None = None) -> int:
                         agent_count=build.agent_count,
                         skill_count=build.skill_count,
                         prompt_count=build.prompt_count,
+                        mcp_server_count=build.mcp_server_count,
                         diagnostics=agent_diags, skill_diagnostics=skill_diags,
                         drifted_files=drifted,
                         discovery=build.discovery,
@@ -978,6 +987,7 @@ def main(argv: list[str] | None = None) -> int:
                     build.agent_count,
                     build.skill_count,
                     build.prompt_count,
+                    build.mcp_server_count,
                     build.exclusion_report,
                     skill_diagnostics=skill_diags,
                 ))
@@ -988,6 +998,7 @@ def main(argv: list[str] | None = None) -> int:
                     build.agent_count,
                     build.skill_count,
                     build.prompt_count,
+                    build.mcp_server_count,
                     build.exclusion_report,
                 ))
                 if args.diff:
@@ -1011,6 +1022,7 @@ def main(argv: list[str] | None = None) -> int:
                     agent_count=build.agent_count,
                     skill_count=build.skill_count,
                     prompt_count=build.prompt_count,
+                    mcp_server_count=build.mcp_server_count,
                     skill_diagnostics=skill_diags,
                     drifted_files=drifted,
                 ))
@@ -1020,6 +1032,7 @@ def main(argv: list[str] | None = None) -> int:
                     agent_count=build.agent_count,
                     skill_count=build.skill_count,
                     prompt_count=build.prompt_count,
+                    mcp_server_count=build.mcp_server_count,
                     skill_diagnostics=skill_diags,
                     drifted_files=drifted,
                     discovery=build.discovery,
@@ -1658,6 +1671,7 @@ def _handle_all_command(args: argparse.Namespace) -> int:
             exclude_skills=getattr(args, "exclude_skill", None) or (),
             exclude_agents=getattr(args, "exclude_agent", None) or (),
             exclude_commands=getattr(args, "exclude_command", None) or (),
+            exclude_mcp_servers=getattr(args, "exclude_mcp_server", None) or (),
             dry_run=dry_run,
         )
     except (ReconcileError, OSError, UnicodeError) as exc:
@@ -2042,6 +2056,7 @@ def _print_summary(
     agent_count: int,
     skill_count: int,
     prompt_count: int,
+    mcp_server_count: int,
     exclusion_report: ExclusionReport,
 ) -> str:
     """Return a human-readable discovery summary for the reconcile command."""
@@ -2075,6 +2090,7 @@ def _print_summary(
     lines.append(f"{_k('GENERATED_AGENTS')} {agent_count}")
     lines.append(f"{_k('GENERATED_SKILLS')} {skill_count}")
     lines.append(f"{_k('GENERATED_PROMPTS')} {prompt_count}")
+    lines.append(f"{_k('GENERATED_MCP_SERVERS')} {mcp_server_count}")
 
     # Group 4: exclusions (suppressed when all zero)
     excl_lines = render_exclusion_block(exclusion_report, c)
@@ -2092,6 +2108,7 @@ def _build_status_payload(
     agent_count: int = 0,
     skill_count: int = 0,
     prompt_count: int = 0,
+    mcp_server_count: int = 0,
     diagnostics=None,
     skill_diagnostics=None,
     drifted_files: list[str] | None = None,
@@ -2103,6 +2120,7 @@ def _build_status_payload(
         "skills": {"create": [], "update": [], "remove": []},
         "agents": {"create": [], "update": [], "remove": []},
         "prompts": {"create": [], "update": [], "remove": []},
+        "mcp_servers": {"create": [], "update": [], "remove": []},
         "global": {"create": [], "update": [], "remove": []},
     }
     pending_change_count = 0
@@ -2128,6 +2146,8 @@ def _build_status_payload(
                 category = "agents"
             elif change.resource_kind == "prompt":
                 category = "prompts"
+            elif change.resource_kind == "mcp_server":
+                category = "mcp_servers"
             elif change.resource_kind in ("global_instructions", "state", "plugin_resource"):
                 category = "global"
             else:
@@ -2155,6 +2175,7 @@ def _build_status_payload(
         "agent_count": agent_count,
         "skill_count": skill_count,
         "prompt_count": prompt_count,
+        "mcp_server_count": mcp_server_count,
         "version": __version__,
         "status": status,
         "pending_change_count": pending_change_count,
@@ -2174,6 +2195,7 @@ def _build_status_payload(
 def format_status_json(
     report, exclusion_report: ExclusionReport,
     *, agent_count: int = 0, skill_count: int = 0, prompt_count: int = 0,
+    mcp_server_count: int = 0,
     diagnostics=None, skill_diagnostics=None,
     drifted_files: list[str] | None = None,
 ) -> str:
@@ -2182,7 +2204,7 @@ def format_status_json(
         _build_status_payload(
             report, exclusion_report,
             agent_count=agent_count, skill_count=skill_count,
-            prompt_count=prompt_count,
+            prompt_count=prompt_count, mcp_server_count=mcp_server_count,
             diagnostics=diagnostics, skill_diagnostics=skill_diagnostics,
             drifted_files=drifted_files,
         ),
@@ -2197,6 +2219,7 @@ from cc_codex_bridge._colors import color_fns as _status_color_fns
 def format_status_report(
     report, exclusion_report: ExclusionReport,
     *, agent_count: int = 0, skill_count: int = 0, prompt_count: int = 0,
+    mcp_server_count: int = 0,
     diagnostics=None, skill_diagnostics=None,
     drifted_files: list[str] | None = None,
     discovery=None,
@@ -2206,7 +2229,7 @@ def format_status_report(
     payload = _build_status_payload(
         report, exclusion_report,
         agent_count=agent_count, skill_count=skill_count,
-        prompt_count=prompt_count,
+        prompt_count=prompt_count, mcp_server_count=mcp_server_count,
         diagnostics=diagnostics, skill_diagnostics=skill_diagnostics,
         drifted_files=drifted_files,
     )
@@ -2217,6 +2240,7 @@ def format_status_report(
     skills = categorized["skills"]
     agents = categorized["agents"]
     prompts = categorized["prompts"]
+    mcp_servers = categorized["mcp_servers"]
     global_changes = categorized["global"]
 
     def _k(key: str) -> str:
@@ -2276,6 +2300,7 @@ def format_status_report(
     lines.append(f"{_k('GENERATED_AGENTS')} {payload['agent_count']}")
     lines.append(f"{_k('GENERATED_SKILLS')} {payload['skill_count']}")
     lines.append(f"{_k('GENERATED_PROMPTS')} {payload['prompt_count']}")
+    lines.append(f"{_k('GENERATED_MCP_SERVERS')} {payload['mcp_server_count']}")
 
     # Group 4: pending changes
     lines.append("")
@@ -2288,6 +2313,8 @@ def format_status_report(
     lines.extend(_detail_lines(agents))
     lines.append(f"{_k('PROMPTS')} {_counts(prompts)}")
     lines.extend(_detail_lines(prompts))
+    lines.append(f"{_k('MCP_SERVERS')} {_counts(mcp_servers)}")
+    lines.extend(_detail_lines(mcp_servers))
     lines.append(f"{_k('GLOBAL')} {_counts(global_changes)}")
     lines.extend(_detail_lines(global_changes))
 
@@ -2324,6 +2351,7 @@ def format_reconcile_json(
     agent_count: int,
     skill_count: int,
     prompt_count: int,
+    mcp_server_count: int,
     exclusion_report: ExclusionReport,
     *,
     skill_diagnostics=None,
@@ -2350,6 +2378,7 @@ def format_reconcile_json(
         "agent_count": agent_count,
         "skill_count": skill_count,
         "prompt_count": prompt_count,
+        "mcp_server_count": mcp_server_count,
         "excluded": {
             "plugins": list(exclusion_report.plugins),
             "skills": list(exclusion_report.skills),

@@ -13,6 +13,7 @@ from cc_codex_bridge.exclusions import (
     resolve_effective_exclusions,
 )
 from cc_codex_bridge.model import (
+    DiscoveredMcpServer,
     DiscoveryResult,
     InstalledPlugin,
     ProjectContext,
@@ -477,3 +478,137 @@ def test_resolve_effective_exclusions_global_only():
     )
     assert result.plugins == ("market/yoloing-safe",)
     assert result.skills == ("some-skill",)
+
+
+# --- MCP server exclusion tests ---
+
+
+def _make_mcp_server(name: str, scope: str = "global") -> DiscoveredMcpServer:
+    """Helper to create a DiscoveredMcpServer for testing."""
+    return DiscoveredMcpServer(
+        name=name,
+        scope=scope,
+        transport="stdio",
+        source="user-global",
+        config={"command": f"/usr/bin/{name}"},
+    )
+
+
+def test_mcp_server_exclusion_filters_by_name(tmp_path: Path):
+    """mcp_server:wpcom excludes the wpcom server."""
+    discovery = DiscoveryResult(
+        project=ProjectContext(
+            root=tmp_path / "project",
+            agents_md_path=tmp_path / "project" / "AGENTS.md",
+        ),
+        plugins=(),
+        mcp_servers=(
+            _make_mcp_server("wpcom"),
+            _make_mcp_server("context7"),
+            _make_mcp_server("playwright"),
+        ),
+    )
+    exclusions = SyncExclusions(mcp_servers=("wpcom",))
+    filtered, report = apply_sync_exclusions(discovery, exclusions)
+
+    assert len(filtered.mcp_servers) == 2
+    assert tuple(s.name for s in filtered.mcp_servers) == ("context7", "playwright")
+    assert report.mcp_servers == ("wpcom",)
+
+
+def test_mcp_server_not_excluded_passes_through(tmp_path: Path):
+    """MCP servers not in exclusion list pass through unchanged."""
+    discovery = DiscoveryResult(
+        project=ProjectContext(
+            root=tmp_path / "project",
+            agents_md_path=tmp_path / "project" / "AGENTS.md",
+        ),
+        plugins=(),
+        mcp_servers=(
+            _make_mcp_server("wpcom"),
+            _make_mcp_server("context7"),
+        ),
+    )
+    exclusions = SyncExclusions(mcp_servers=("playwright",))
+    filtered, report = apply_sync_exclusions(discovery, exclusions)
+
+    assert len(filtered.mcp_servers) == 2
+    assert tuple(s.name for s in filtered.mcp_servers) == ("wpcom", "context7")
+    assert report.mcp_servers == ()
+
+
+def test_normalize_entity_id_for_mcp_server():
+    """Entity ID normalization for mcp_server kind accepts bare names."""
+    from cc_codex_bridge.exclusions import normalize_entity_id
+
+    assert normalize_entity_id("wpcom", kind="mcp_server") == "wpcom"
+    assert normalize_entity_id("  context7  ", kind="mcp_server") == "context7"
+
+
+def test_normalize_entity_id_rejects_slashed_mcp_server():
+    """mcp_server IDs must be bare names — slashes are rejected."""
+    from cc_codex_bridge.exclusions import normalize_entity_id
+
+    with pytest.raises(ReconcileError, match="bare server name"):
+        normalize_entity_id("scope/wpcom", kind="mcp_server")
+
+
+def test_load_project_exclusions_reads_mcp_servers(make_project):
+    """bridge.toml with mcp_servers list is parsed correctly."""
+    project_root, _agents_md = make_project()
+    config_path = project_root / ".codex" / "bridge.toml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        "[exclude]\n"
+        'mcp_servers = ["wpcom", "context7"]\n'
+    )
+
+    exclusions = load_project_exclusions(project_root)
+    assert "wpcom" in exclusions.mcp_servers
+    assert "context7" in exclusions.mcp_servers
+
+
+def test_resolve_effective_exclusions_merges_mcp_servers():
+    """Global and project mcp_server exclusions are unioned."""
+    global_exc = SyncExclusions(mcp_servers=("wpcom",))
+    project_exc = SyncExclusions(mcp_servers=("context7",))
+    result = resolve_effective_exclusions(
+        project_config=project_exc,
+        global_config=global_exc,
+    )
+    assert "wpcom" in result.mcp_servers
+    assert "context7" in result.mcp_servers
+
+
+def test_resolve_effective_exclusions_cli_replaces_mcp_servers():
+    """CLI mcp_server exclusions replace merged config values."""
+    global_exc = SyncExclusions(mcp_servers=("wpcom",))
+    project_exc = SyncExclusions(mcp_servers=("context7",))
+    result = resolve_effective_exclusions(
+        project_config=project_exc,
+        global_config=global_exc,
+        cli_exclude_mcp_servers=["playwright"],
+    )
+    assert result.mcp_servers == ("playwright",)
+
+
+def test_multiple_mcp_servers_excluded(tmp_path: Path):
+    """Multiple MCP servers can be excluded at once."""
+    discovery = DiscoveryResult(
+        project=ProjectContext(
+            root=tmp_path / "project",
+            agents_md_path=tmp_path / "project" / "AGENTS.md",
+        ),
+        plugins=(),
+        mcp_servers=(
+            _make_mcp_server("wpcom"),
+            _make_mcp_server("context7"),
+            _make_mcp_server("playwright"),
+        ),
+    )
+    exclusions = SyncExclusions(mcp_servers=("context7", "wpcom"))
+    filtered, report = apply_sync_exclusions(discovery, exclusions)
+
+    assert len(filtered.mcp_servers) == 1
+    assert filtered.mcp_servers[0].name == "playwright"
+    assert set(report.mcp_servers) == {"context7", "wpcom"}

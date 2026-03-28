@@ -156,7 +156,7 @@ class TestListDiscoverableEntities:
         discovery = _make_discovery(tmp_path)
         entities = list_discoverable_entities(discovery)
 
-        assert entities == {"plugin": [], "skill": [], "agent": [], "command": []}
+        assert entities == {"plugin": [], "skill": [], "agent": [], "command": [], "mcp_server": []}
 
 
 # ---------------------------------------------------------------------------

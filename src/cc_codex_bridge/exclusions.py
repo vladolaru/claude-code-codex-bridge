@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import tomllib
 
-from cc_codex_bridge.model import DiscoveryResult, InstalledPlugin, ReconcileError
+from cc_codex_bridge.model import DiscoveredMcpServer, DiscoveryResult, InstalledPlugin, ReconcileError
 from cc_codex_bridge.text import read_utf8_text
 
 
@@ -21,6 +21,7 @@ class SyncExclusions:
     skills: tuple[str, ...] = ()
     agents: tuple[str, ...] = ()
     commands: tuple[str, ...] = ()
+    mcp_servers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class ExclusionReport:
     skills: tuple[str, ...] = ()
     agents: tuple[str, ...] = ()
     commands: tuple[str, ...] = ()
+    mcp_servers: tuple[str, ...] = ()
 
 
 def load_project_exclusions(
@@ -87,6 +89,10 @@ def parse_sync_exclusions(
             _read_string_list(exclude_table, "commands", config_path),
             kind="command",
         ),
+        mcp_servers=_normalize_id_list(
+            _read_string_list(exclude_table, "mcp_servers", config_path),
+            kind="mcp_server",
+        ),
     )
 
 
@@ -98,6 +104,7 @@ def resolve_effective_exclusions(
     cli_exclude_skills: list[str] | None = None,
     cli_exclude_agents: list[str] | None = None,
     cli_exclude_commands: list[str] | None = None,
+    cli_exclude_mcp_servers: list[str] | None = None,
 ) -> SyncExclusions:
     """Resolve per-kind exclusions: union global + project, then let CLI replace.
 
@@ -127,11 +134,17 @@ def resolve_effective_exclusions(
         if cli_exclude_commands is None
         else _normalize_id_list(cli_exclude_commands, kind="command")
     )
+    mcp_server_values = (
+        merged.mcp_servers
+        if cli_exclude_mcp_servers is None
+        else _normalize_id_list(cli_exclude_mcp_servers, kind="mcp_server")
+    )
     return SyncExclusions(
         plugins=plugin_values,
         skills=skill_values,
         agents=agent_values,
         commands=command_values,
+        mcp_servers=mcp_server_values,
     )
 
 
@@ -142,6 +155,7 @@ def _merge_exclusions(a: SyncExclusions, b: SyncExclusions) -> SyncExclusions:
         skills=tuple(sorted(set(a.skills) | set(b.skills))),
         agents=tuple(sorted(set(a.agents) | set(b.agents))),
         commands=tuple(sorted(set(a.commands) | set(b.commands))),
+        mcp_servers=tuple(sorted(set(a.mcp_servers) | set(b.mcp_servers))),
     )
 
 
@@ -253,6 +267,16 @@ def apply_sync_exclusions(
         else:
             kept_project_commands.append(command_path)
 
+    # Filter MCP servers by bare name
+    excluded_mcp_server_set = set(exclusions.mcp_servers)
+    excluded_mcp_servers: list[str] = []
+    kept_mcp_servers: list[DiscoveredMcpServer] = []
+    for server in discovery.mcp_servers:
+        if server.name in excluded_mcp_server_set:
+            excluded_mcp_servers.append(server.name)
+        else:
+            kept_mcp_servers.append(server)
+
     filtered_result = DiscoveryResult(
         project=discovery.project,
         plugins=tuple(filtered_plugins),
@@ -263,12 +287,14 @@ def apply_sync_exclusions(
         project_agents=tuple(kept_project_agents),
         project_commands=tuple(kept_project_commands),
         user_claude_md=discovery.user_claude_md,
+        mcp_servers=tuple(kept_mcp_servers),
     )
     report = ExclusionReport(
         plugins=tuple(sorted(set(excluded_plugins))),
         skills=tuple(sorted(set(excluded_skills))),
         agents=tuple(sorted(set(excluded_agents))),
         commands=tuple(sorted(set(excluded_commands))),
+        mcp_servers=tuple(sorted(set(excluded_mcp_servers))),
     )
     return filtered_result, report
 
@@ -308,6 +334,15 @@ def normalize_entity_id(value: str, *, kind: str) -> str:
                 "marketplace/plugin"
             )
         return "/".join(parts)
+
+    # MCP servers: simple bare names (1 part only)
+    if kind == "mcp_server":
+        if len(parts) != 1 or not parts[0]:
+            raise ReconcileError(
+                f"Invalid exclusion id `{value}` for kind `{kind}`; expected "
+                "a bare server name (e.g. 'wpcom', 'context7')"
+            )
+        return parts[0]
 
     # skills and agents: 1, 2, or 3 parts
     if len(parts) not in (1, 2, 3) or any(not part for part in parts):
