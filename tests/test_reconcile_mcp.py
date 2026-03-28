@@ -258,3 +258,204 @@ class TestDryRun:
 
         config_path = codex_home / "config.toml"
         assert not config_path.exists()
+
+
+class TestCleanMcpServers:
+    """Tests for MCP server cleanup during clean_project."""
+
+    def test_clean_removes_project_mcp_servers(self, tmp_path):
+        """clean_project removes bridge-owned MCP entries from project config.toml."""
+        from cc_codex_bridge.reconcile import clean_project
+
+        project = _make_project(tmp_path)
+        codex_home = tmp_path / "codex"
+        bridge_home = tmp_path / "bridge"
+
+        servers = (
+            GeneratedMcpServer(
+                name="figma",
+                scope="project",
+                toml_table={"url": "https://mcp.figma.com/mcp"},
+                source_description="project-local",
+            ),
+        )
+
+        _build_and_reconcile(project, servers, codex_home, bridge_home)
+
+        # Verify project config.toml has the server entry
+        project_config = project / ".codex" / "config.toml"
+        assert project_config.exists()
+        assert "figma" in project_config.read_text()
+
+        # Clean the project
+        report = clean_project(project, bridge_home=bridge_home)
+        assert report.applied
+
+        # Project config.toml should no longer have bridge entries.
+        # write_codex_config removes the file when content is empty.
+        assert not project_config.exists()
+
+    def test_clean_removes_global_mcp_when_last_owner(self, tmp_path):
+        """clean_project removes global MCP entries when this is the last owner."""
+        from cc_codex_bridge.reconcile import clean_project
+
+        project = _make_project(tmp_path)
+        codex_home = tmp_path / "codex"
+        bridge_home = tmp_path / "bridge"
+
+        servers = (
+            GeneratedMcpServer(
+                name="wpcom",
+                scope="global",
+                toml_table={"command": "npx", "args": ["wpcom"]},
+                source_description="user-global",
+            ),
+        )
+
+        _build_and_reconcile(project, servers, codex_home, bridge_home)
+
+        # Verify global config.toml has the server entry
+        global_config = codex_home / "config.toml"
+        assert global_config.exists()
+        assert "wpcom" in global_config.read_text()
+
+        # Clean the project (last owner)
+        report = clean_project(project, bridge_home=bridge_home)
+        assert report.applied
+        assert report.ownership_released
+
+        # Global config.toml should no longer have the wpcom entry.
+        # Since it was the only entry, write_codex_config removes the file.
+        assert not global_config.exists()
+
+    def test_clean_preserves_global_mcp_with_other_owners(self, tmp_path):
+        """clean_project preserves global MCP entries when another project still owns them."""
+        from cc_codex_bridge.reconcile import clean_project
+        from cc_codex_bridge.registry import GlobalSkillRegistry, GLOBAL_REGISTRY_FILENAME
+
+        project_a = tmp_path / "project-a"
+        project_a.mkdir()
+        (project_a / "AGENTS.md").write_text("# A\n")
+
+        project_b = tmp_path / "project-b"
+        project_b.mkdir()
+        (project_b / "AGENTS.md").write_text("# B\n")
+
+        codex_home = tmp_path / "codex"
+        bridge_home = tmp_path / "bridge"
+
+        servers = (
+            GeneratedMcpServer(
+                name="wpcom",
+                scope="global",
+                toml_table={"command": "npx", "args": ["wpcom"]},
+                source_description="user-global",
+            ),
+        )
+
+        # Reconcile both projects with the same global server
+        _build_and_reconcile(project_a, servers, codex_home, bridge_home)
+        _build_and_reconcile(project_b, servers, codex_home, bridge_home)
+
+        # Verify both projects own the server
+        registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+        assert registry is not None
+        assert "wpcom" in registry.mcp_servers
+        assert len(registry.mcp_servers["wpcom"].owners) == 2
+
+        # Clean project A
+        report = clean_project(project_a, bridge_home=bridge_home)
+        assert report.applied
+        assert report.ownership_released
+
+        # Global config.toml should still have wpcom (project B still owns it)
+        global_config = codex_home / "config.toml"
+        assert global_config.exists()
+        assert "wpcom" in global_config.read_text()
+
+        # Registry should still have wpcom with project B as owner
+        registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+        assert registry is not None
+        assert "wpcom" in registry.mcp_servers
+        assert len(registry.mcp_servers["wpcom"].owners) == 1
+        assert registry.mcp_servers["wpcom"].owners[0] == project_b.resolve()
+
+    def test_clean_removes_mixed_scope_mcp_servers(self, tmp_path):
+        """clean_project handles both global and project MCP server cleanup."""
+        from cc_codex_bridge.reconcile import clean_project
+
+        project = _make_project(tmp_path)
+        codex_home = tmp_path / "codex"
+        bridge_home = tmp_path / "bridge"
+
+        servers = (
+            GeneratedMcpServer(
+                name="wpcom",
+                scope="global",
+                toml_table={"command": "npx", "args": ["wpcom"]},
+                source_description="user-global",
+            ),
+            GeneratedMcpServer(
+                name="figma",
+                scope="project",
+                toml_table={"url": "https://mcp.figma.com/mcp"},
+                source_description="project-local",
+            ),
+        )
+
+        _build_and_reconcile(project, servers, codex_home, bridge_home)
+
+        # Verify both config files exist
+        global_config = codex_home / "config.toml"
+        project_config = project / ".codex" / "config.toml"
+        assert global_config.exists()
+        assert project_config.exists()
+
+        # Clean the project
+        report = clean_project(project, bridge_home=bridge_home)
+        assert report.applied
+
+        # Both config files should have MCP entries removed
+        assert not global_config.exists()
+        assert not project_config.exists()
+
+
+class TestUninstallMcpServers:
+    """Tests for MCP server cleanup during uninstall."""
+
+    def test_uninstall_removes_global_mcp_from_config(self, tmp_path):
+        """uninstall_all removes remaining MCP entries from global config.toml."""
+        from cc_codex_bridge.reconcile import uninstall_all
+
+        project = _make_project(tmp_path)
+        codex_home = tmp_path / "codex"
+        bridge_home = tmp_path / "bridge"
+        launchagents_dir = tmp_path / "LaunchAgents"
+        launchagents_dir.mkdir()
+
+        servers = (
+            GeneratedMcpServer(
+                name="wpcom",
+                scope="global",
+                toml_table={"command": "npx", "args": ["wpcom"]},
+                source_description="user-global",
+            ),
+        )
+
+        _build_and_reconcile(project, servers, codex_home, bridge_home)
+
+        # Verify global config has the entry
+        global_config = codex_home / "config.toml"
+        assert global_config.exists()
+        assert "wpcom" in global_config.read_text()
+
+        # Run full uninstall
+        report = uninstall_all(
+            codex_home=codex_home,
+            bridge_home=bridge_home,
+            launchagents_dir=launchagents_dir,
+        )
+        assert report.applied
+
+        # Global config.toml should have MCP entries removed
+        assert not global_config.exists()

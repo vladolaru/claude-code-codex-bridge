@@ -266,6 +266,7 @@ class ProjectBuildResult:
     agent_count: int
     skill_count: int
     prompt_count: int
+    mcp_server_count: int
     exclusion_report: object  # ExclusionReport from exclusions module
     diagnostics: tuple  # AgentTranslationDiagnostic and SkillValidationDiagnostic items
 
@@ -342,6 +343,7 @@ def build_project_desired_state(
     exclude_skills: Iterable[str] = (),
     exclude_agents: Iterable[str] = (),
     exclude_commands: Iterable[str] = (),
+    exclude_mcp_servers: Iterable[str] = (),
 ) -> ProjectBuildResult:
     """Run the full discover-translate-build pipeline for one project.
 
@@ -391,6 +393,7 @@ def build_project_desired_state(
         cli_exclude_skills=tuple(exclude_skills) or None,
         cli_exclude_agents=tuple(exclude_agents) or None,
         cli_exclude_commands=tuple(exclude_commands) or None,
+        cli_exclude_mcp_servers=tuple(exclude_mcp_servers) or None,
     )
     result, exclusion_report = apply_sync_exclusions(result, exclusions)
     shim_decision = plan_claude_shim(result.project)
@@ -553,6 +556,7 @@ def build_project_desired_state(
         agent_count=len(all_global_agents) + len(project_agents),
         skill_count=total_skill_count,
         prompt_count=prompt_count,
+        mcp_server_count=len(mcp_result.servers),
         exclusion_report=exclusion_report,
         diagnostics=tuple(all_diagnostics),
     )
@@ -846,6 +850,7 @@ def clean_project(
 
     # Release MCP server ownership claims
     updated_mcp_servers = dict(registry.mcp_servers)
+    fully_removed_global_mcp: set[str] = set()
     for server_name in sorted(registry.mcp_servers):
         entry = registry.mcp_servers[server_name]
         if project_root_path not in entry.owners:
@@ -860,6 +865,7 @@ def clean_project(
             )
         else:
             del updated_mcp_servers[server_name]
+            fully_removed_global_mcp.add(server_name)
         registry_changed = True
 
     # Remove project from the projects list
@@ -935,6 +941,14 @@ def clean_project(
             container=bridge_home_path,
         )
 
+    # Remove bridge-owned MCP server entries from config.toml files
+    _clean_mcp_config_entries(
+        previous_state=previous_state,
+        project_root=project_root_path,
+        codex_home=codex_home_path,
+        fully_removed_global_mcp=fully_removed_global_mcp,
+    )
+
     # Remove the state file last, then clean up its parent if empty
     state_path.unlink(missing_ok=True)
     _cleanup_empty_parents(state_path.parent, bridge_home_path)
@@ -981,6 +995,7 @@ def reconcile_all(
     exclude_skills: Iterable[str] = (),
     exclude_agents: Iterable[str] = (),
     exclude_commands: Iterable[str] = (),
+    exclude_mcp_servers: Iterable[str] = (),
     dry_run: bool = False,
 ) -> ReconcileAllReport:
     """Reconcile all registered projects."""
@@ -1023,6 +1038,7 @@ def reconcile_all(
                 exclude_skills=exclude_skills,
                 exclude_agents=exclude_agents,
                 exclude_commands=exclude_commands,
+                exclude_mcp_servers=exclude_mcp_servers,
             )
             # Only agent diagnostics block reconciliation.
             # Skill validation warnings are informational and do not prevent sync.
@@ -1139,6 +1155,13 @@ def uninstall_all(
                         Change("remove", prompt_path, resource_kind="prompt")
                     )
 
+    # Force-remove remaining MCP server entries from global config.toml
+    remaining_global_mcp: set[str] = set()
+    if registry_path.exists():
+        mcp_snapshot = _load_registry_snapshot(registry_path)
+        if mcp_snapshot.existed:
+            remaining_global_mcp = set(mcp_snapshot.registry.mcp_servers)
+
     # Remove global AGENTS.md only if bridge-generated (sentinel present)
     global_agents_md = codex_home_path / "AGENTS.md"
     if (
@@ -1165,6 +1188,18 @@ def uninstall_all(
     )
 
     if not dry_run:
+        # Remove remaining MCP server entries from global config.toml
+        if remaining_global_mcp:
+            from cc_codex_bridge.toml_config import (
+                apply_mcp_changes,
+                read_codex_config,
+                write_codex_config,
+            )
+            global_config_path = codex_home_path / "config.toml"
+            doc = read_codex_config(global_config_path)
+            apply_mcp_changes(doc, desired={}, owned=remaining_global_mcp)
+            write_codex_config(global_config_path, doc)
+
         # Apply global removals
         for change in global_removals:
             if change.resource_kind == "skill":
@@ -1596,6 +1631,36 @@ def _apply_mcp_server_changes(
         managed_mcp_servers[name] = hash_mcp_server_table(server.toml_table)
 
     return managed_mcp_servers
+
+
+def _clean_mcp_config_entries(
+    *,
+    previous_state: BridgeState,
+    project_root: Path,
+    codex_home: Path,
+    fully_removed_global_mcp: set[str],
+) -> None:
+    """Remove bridge-owned MCP server entries from config.toml files during clean."""
+    from cc_codex_bridge.toml_config import (
+        apply_mcp_changes,
+        read_codex_config,
+        write_codex_config,
+    )
+
+    # Remove project-scope MCP servers from <project>/.codex/config.toml
+    project_mcp_names = set(previous_state.managed_mcp_servers)
+    if project_mcp_names:
+        project_config_path = project_root / ".codex" / "config.toml"
+        doc = read_codex_config(project_config_path)
+        apply_mcp_changes(doc, desired={}, owned=project_mcp_names)
+        write_codex_config(project_config_path, doc)
+
+    # Remove fully-orphaned global MCP servers from ~/.codex/config.toml
+    if fully_removed_global_mcp:
+        global_config_path = codex_home / "config.toml"
+        doc = read_codex_config(global_config_path)
+        apply_mcp_changes(doc, desired={}, owned=fully_removed_global_mcp)
+        write_codex_config(global_config_path, doc)
 
 
 def _plan_mutations(
