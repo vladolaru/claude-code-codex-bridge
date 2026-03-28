@@ -143,6 +143,7 @@ class DiscoveryResult:
     project_agents: tuple[Path, ...] = ()
     project_commands: tuple[Path, ...] = ()
     user_claude_md: str | None = None
+    mcp_servers: tuple[DiscoveredMcpServer, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -145,6 +145,15 @@ def discover(
         claude_home=claude_home,
         enabled_ids=enabled_ids,
     )
+    from .discover_mcp import discover_mcp_servers
+
+    claude_home_path = Path(claude_home or DEFAULT_CLAUDE_HOME).expanduser()
+    claude_json_path = claude_home_path.parent / ".claude.json"
+    mcp_servers = discover_mcp_servers(
+        project_root=project.root,
+        claude_json_path=claude_json_path,
+    )
+
     return DiscoveryResult(
         project=project,
         plugins=plugins,
@@ -155,6 +164,7 @@ def discover(
         project_agents=discover_project_agents(project.root),
         project_commands=discover_project_commands(project.root),
         user_claude_md=discover_user_claude_md(claude_home),
+        mcp_servers=mcp_servers,
     )
 
 

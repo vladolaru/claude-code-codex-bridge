@@ -15,6 +15,7 @@ from cc_codex_bridge.model import (
     ClaudeShimDecision,
     DiscoveryResult,
     GeneratedAgentFile,
+    GeneratedMcpServer,
     GeneratedPrompt,
     GeneratedSkill,
     ReconcileError,
@@ -23,6 +24,7 @@ from cc_codex_bridge.model import (
 from cc_codex_bridge.registry import (
     GLOBAL_REGISTRY_FILENAME,
     GlobalAgentEntry,
+    GlobalMcpServerEntry,
     GlobalPluginResourceEntry,
     GlobalPromptEntry,
     GlobalSkillEntry,
@@ -69,6 +71,7 @@ class DesiredState:
     global_agents: tuple[GeneratedAgentFile, ...] = ()
     global_prompts: tuple[GeneratedPrompt, ...] = ()
     plugin_resources: tuple[VendoredPluginResource, ...] = ()
+    mcp_servers: tuple[GeneratedMcpServer, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -173,6 +176,7 @@ def build_desired_state(
     global_prompts: Iterable[GeneratedPrompt] | None = None,
     project_agent_files: Iterable[tuple[Path, bytes]] | None = None,
     plugin_resources: Iterable[VendoredPluginResource] | None = None,
+    mcp_servers: Iterable[GeneratedMcpServer] | None = None,
 ) -> DesiredState:
     """Build the desired generated outputs for a project."""
     if shim_decision.action == "fail":
@@ -248,6 +252,7 @@ def build_desired_state(
         global_agents=tuple(global_agents or ()),
         global_prompts=tuple(global_prompts or ()),
         plugin_resources=tuple(plugin_resources or ()),
+        mcp_servers=tuple(mcp_servers or ()),
     )
 
 
@@ -524,6 +529,11 @@ def build_project_desired_state(
         all_plugin_resources.values(),
         key=lambda r: (r.marketplace, r.plugin_name, r.target_dir_name),
     ))
+    # Translate MCP servers
+    from cc_codex_bridge.translate_mcp import translate_mcp_servers
+
+    mcp_result = translate_mcp_servers(result.mcp_servers)
+
     desired_state = build_desired_state(
         result, shim_decision,
         all_global_skills, codex_home=codex_home,
@@ -533,6 +543,7 @@ def build_project_desired_state(
         global_prompts=all_prompts,
         project_agent_files=project_agent_files,
         plugin_resources=plugin_resources,
+        mcp_servers=mcp_result.servers,
     )
 
     return ProjectBuildResult(
@@ -637,7 +648,7 @@ def reconcile_desired_state(desired: DesiredState) -> ReconcileReport:
         return ReconcileReport(changes=(), applied=True)
 
     state_existed = desired.state_path.exists()
-    _apply_changes(desired, plan, prev_managed, prev_managed_files)
+    _apply_changes(desired, plan, prev_managed, prev_managed_files, previous_state)
     changes = list(plan.changes)
     if state_write_needed:
         kind = "create" if not state_existed else "update"
@@ -833,6 +844,24 @@ def clean_project(
                 changes.append(Change("remove", prompt_path, resource_kind="prompt"))
         registry_changed = True
 
+    # Release MCP server ownership claims
+    updated_mcp_servers = dict(registry.mcp_servers)
+    for server_name in sorted(registry.mcp_servers):
+        entry = registry.mcp_servers[server_name]
+        if project_root_path not in entry.owners:
+            continue
+        remaining_owners = tuple(
+            owner for owner in entry.owners if owner != project_root_path
+        )
+        if remaining_owners:
+            updated_mcp_servers[server_name] = GlobalMcpServerEntry(
+                content_hash=entry.content_hash,
+                owners=remaining_owners,
+            )
+        else:
+            del updated_mcp_servers[server_name]
+        registry_changed = True
+
     # Remove project from the projects list
     updated_projects = tuple(
         p for p in registry.projects if p != project_root_path
@@ -847,6 +876,7 @@ def clean_project(
             agents=updated_agents,
             prompts=updated_prompts,
             plugin_resources=updated_plugin_resources,
+            mcp_servers=updated_mcp_servers,
         )
     else:
         updated_registry = None
@@ -1182,9 +1212,19 @@ def _apply_changes(
     plan: _MutationPlan,
     previously_managed: frozenset[str] = frozenset(),
     previous_managed_files: "dict[str, str] | None" = None,
+    previous_state: BridgeState | None = None,
 ) -> None:
     """Write all planned changes to disk."""
     from cc_codex_bridge.render_agent_toml import render_agent_toml
+
+    # Snapshot the registry for MCP owned-set computation BEFORE any writes.
+    previously_owned_global_mcp: set[str] = set()
+    registry_path = desired.bridge_home / GLOBAL_REGISTRY_FILENAME
+    if registry_path.is_file() and not registry_path.is_symlink():
+        pre_apply_snapshot = _load_registry_snapshot(registry_path)
+        for name, entry in pre_apply_snapshot.registry.mcp_servers.items():
+            if desired.project_root in entry.owners:
+                previously_owned_global_mcp.add(name)
 
     desired_map = dict(desired.project_files)
     skills_by_name = {skill.install_dir_name: skill for skill in desired.skills}
@@ -1259,6 +1299,9 @@ def _apply_changes(
                 if change.path.exists():
                     shutil.rmtree(change.path)
             continue
+        if change.resource_kind == "mcp_server":
+            # MCP changes are applied as a batch via _apply_mcp_server_changes
+            continue
         else:
             if change.kind in ("create", "update"):
                 _atomic_write_file(change.path, desired_map[change.path], container=desired.project_root)
@@ -1275,6 +1318,19 @@ def _apply_changes(
 
     seed_config_stub(desired.bridge_home)
 
+    # Apply MCP server changes (batched TOML writes)
+    managed_mcp_servers: dict[str, str] = {}
+    if any(c.resource_kind == "mcp_server" for c in plan.changes):
+        managed_mcp_servers = _apply_mcp_server_changes(
+            desired, previous_state, previously_owned_global_mcp
+        )
+    else:
+        # No MCP changes — preserve existing managed MCP servers from state
+        from cc_codex_bridge.toml_config import hash_mcp_server_table
+        for s in desired.mcp_servers:
+            if s.scope == "project":
+                managed_mcp_servers[s.name] = hash_mcp_server_table(s.toml_table)
+
     retained_previous_project_files = _retained_stale_managed_project_files(
         desired,
         previous_managed_files,
@@ -1285,6 +1341,7 @@ def _apply_changes(
         previously_managed,
         previous_managed_files,
         retained_previous_project_files=retained_previous_project_files,
+        managed_mcp_servers=managed_mcp_servers,
     ).to_json().encode()
     desired.state_path.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write_file(desired.state_path, state_bytes, container=desired.bridge_home)
@@ -1397,6 +1454,150 @@ def format_diff_report(desired: DesiredState, report: ReconcileReport) -> str:
     return "\n".join(lines)
 
 
+def _plan_mcp_server_mutations(
+    desired: DesiredState,
+    previous_state: BridgeState | None,
+    snapshot: _RegistrySnapshot,
+    updated_registry: GlobalSkillRegistry,
+) -> tuple[tuple[Change, ...], GlobalSkillRegistry]:
+    """Plan MCP server config.toml mutations for both global and project scope.
+
+    Global servers are tracked in the global registry.
+    Project servers are tracked in the project state.
+    Returns changes and updated registry.
+    """
+    from cc_codex_bridge.toml_config import hash_mcp_server_table
+
+    changes: list[Change] = []
+
+    # --- Global scope ---
+    global_servers = {s.name: s for s in desired.mcp_servers if s.scope == "global"}
+    global_config_path = desired.codex_home / "config.toml"
+
+    # Determine previously owned global MCP servers for this project
+    previously_owned_global: set[str] = set()
+    for name, entry in snapshot.registry.mcp_servers.items():
+        if desired.project_root in entry.owners:
+            previously_owned_global.add(name)
+
+    for name in sorted(global_servers):
+        server = global_servers[name]
+        desired_hash = hash_mcp_server_table(server.toml_table)
+        existing_entry = updated_registry.mcp_servers.get(name)
+
+        existing_owners: tuple[Path, ...] = ()
+        if existing_entry is not None:
+            existing_owners = existing_entry.owners
+
+        updated_registry.mcp_servers[name] = GlobalMcpServerEntry(
+            content_hash=desired_hash,
+            owners=_sorted_owner_set((*existing_owners, desired.project_root)),
+        )
+
+        if name not in previously_owned_global:
+            changes.append(Change("create", global_config_path, resource_kind="mcp_server"))
+        elif existing_entry is not None and existing_entry.content_hash != desired_hash:
+            changes.append(Change("update", global_config_path, resource_kind="mcp_server"))
+
+    # Stale global servers
+    for name in sorted(previously_owned_global - set(global_servers)):
+        entry = updated_registry.mcp_servers.get(name)
+        if entry is None:
+            continue
+        remaining_owners = tuple(
+            owner for owner in entry.owners if owner != desired.project_root
+        )
+        if remaining_owners:
+            updated_registry.mcp_servers[name] = GlobalMcpServerEntry(
+                content_hash=entry.content_hash,
+                owners=remaining_owners,
+            )
+        else:
+            del updated_registry.mcp_servers[name]
+            changes.append(Change("remove", global_config_path, resource_kind="mcp_server"))
+
+    # --- Project scope ---
+    project_servers = {s.name: s for s in desired.mcp_servers if s.scope == "project"}
+    project_config_path = desired.project_root / ".codex" / "config.toml"
+    previously_owned_project: set[str] = set()
+    if previous_state is not None:
+        previously_owned_project = set(previous_state.managed_mcp_servers)
+
+    for name in sorted(project_servers):
+        server = project_servers[name]
+        desired_hash = hash_mcp_server_table(server.toml_table)
+        prev_hash = (previous_state.managed_mcp_servers.get(name) if previous_state else None)
+
+        if name not in previously_owned_project:
+            changes.append(Change("create", project_config_path, resource_kind="mcp_server"))
+        elif prev_hash is not None and prev_hash != desired_hash:
+            changes.append(Change("update", project_config_path, resource_kind="mcp_server"))
+
+    # Stale project servers
+    for name in sorted(previously_owned_project - set(project_servers)):
+        changes.append(Change("remove", project_config_path, resource_kind="mcp_server"))
+
+    return tuple(changes), updated_registry
+
+
+def _apply_mcp_server_changes(
+    desired: DesiredState,
+    previous_state: BridgeState | None,
+    previously_owned_global: set[str],
+) -> dict[str, str]:
+    """Apply MCP server changes to config.toml files.
+
+    Args:
+        previously_owned_global: Global MCP server names owned by this project
+            before this reconcile run (from the original registry snapshot).
+
+    Returns the managed_mcp_servers dict for the new project state.
+    """
+    from cc_codex_bridge.toml_config import (
+        apply_mcp_changes,
+        hash_mcp_server_table,
+        read_codex_config,
+        write_codex_config,
+    )
+
+    managed_mcp_servers: dict[str, str] = {}
+
+    # --- Global scope ---
+    global_servers = {s.name: s for s in desired.mcp_servers if s.scope == "global"}
+
+    if global_servers or previously_owned_global:
+        global_config_path = desired.codex_home / "config.toml"
+        doc = read_codex_config(global_config_path)
+        apply_mcp_changes(
+            doc,
+            desired={name: s.toml_table for name, s in global_servers.items()},
+            owned=previously_owned_global,
+        )
+        write_codex_config(global_config_path, doc)
+
+    # --- Project scope ---
+    project_servers = {s.name: s for s in desired.mcp_servers if s.scope == "project"}
+    previously_owned_project: set[str] = set()
+    if previous_state is not None:
+        previously_owned_project = set(previous_state.managed_mcp_servers)
+
+    if project_servers or previously_owned_project:
+        project_config_path = desired.project_root / ".codex" / "config.toml"
+        doc = read_codex_config(project_config_path)
+        apply_mcp_changes(
+            doc,
+            desired={name: s.toml_table for name, s in project_servers.items()},
+            owned=previously_owned_project,
+        )
+        write_codex_config(project_config_path, doc)
+
+    # Build managed_mcp_servers for state
+    for name, server in project_servers.items():
+        managed_mcp_servers[name] = hash_mcp_server_table(server.toml_table)
+
+    return managed_mcp_servers
+
+
 def _plan_mutations(
     desired: DesiredState,
     previous_state: BridgeState | None,
@@ -1425,6 +1626,9 @@ def _plan_mutations(
     plugin_resource_changes, updated_registry = _plan_plugin_resource_mutations(
         desired, snapshot, updated_registry,
     )
+    mcp_changes, updated_registry = _plan_mcp_server_mutations(
+        desired, previous_state, snapshot, updated_registry,
+    )
 
     # Build registry write from the final accumulated state.
     registry_writes: list[_RegistryWrite] = []
@@ -1438,6 +1642,7 @@ def _plan_mutations(
             *project_changes, *project_skill_changes,
             *skill_changes, *agent_changes, *prompt_changes,
             *global_changes, *plugin_resource_changes,
+            *mcp_changes,
         )),
         registry_writes=tuple(registry_writes),
         project_file_changes=project_changes,
@@ -1602,6 +1807,7 @@ def _plan_skill_mutations(
             agents=dict(snapshot.registry.agents),
             prompts=dict(snapshot.registry.prompts),
             plugin_resources=dict(snapshot.registry.plugin_resources),
+            mcp_servers=dict(snapshot.registry.mcp_servers),
         )
     desired_skills = {skill.install_dir_name: skill for skill in desired.skills}
     desired_hashes = {
@@ -1618,6 +1824,7 @@ def _plan_skill_mutations(
         agents=dict(snapshot.registry.agents),
         prompts=dict(snapshot.registry.prompts),
         plugin_resources=dict(snapshot.registry.plugin_resources),
+        mcp_servers=dict(snapshot.registry.mcp_servers),
     )
     for install_dir_name in sorted(desired_skills):
         skill = desired_skills[install_dir_name]
@@ -2169,6 +2376,17 @@ def _validate_mutation_targets(
                 label="Managed global target",
             )
             continue
+        if change.resource_kind == "mcp_server":
+            # MCP changes target either codex_home or project_root config.toml
+            try:
+                _assert_path_contained(
+                    change.path, desired.codex_home, label="MCP server target"
+                )
+            except ReconcileError:
+                _assert_path_contained(
+                    change.path, desired.project_root, label="MCP server target"
+                )
+            continue
         if change.resource_kind == "plugin_resource":
             _assert_path_contained(
                 change.path,
@@ -2235,6 +2453,7 @@ def _build_state_record(
     previous_managed_files: "dict[str, str] | None" = None,
     *,
     retained_previous_project_files: "dict[str, str] | None" = None,
+    managed_mcp_servers: "dict[str, str] | None" = None,
 ) -> BridgeState:
     """Build the desired stable state payload.
 
@@ -2293,6 +2512,7 @@ def _build_state_record(
         bridge_home=desired.bridge_home,
         managed_project_files=managed_project_files,
         managed_project_skill_dirs=managed_project_skill_dirs,
+        managed_mcp_servers=managed_mcp_servers or {},
     )
 
 
