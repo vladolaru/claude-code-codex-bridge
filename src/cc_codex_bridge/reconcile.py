@@ -162,6 +162,7 @@ class _MutationPlan:
     registry_writes: tuple[_RegistryWrite, ...]
     project_file_changes: tuple[Change, ...] = ()
     mcp_previously_owned_global: frozenset[str] = frozenset()
+    mcp_registry_known_global: frozenset[str] = frozenset()
 
 
 def build_desired_state(
@@ -1351,9 +1352,11 @@ def _apply_changes(
 
     # Apply MCP server changes (batched TOML writes)
     managed_mcp_servers: dict[str, str] = {}
+    skipped_global_mcp: set[str] = set()
     if any(c.resource_kind == "mcp_server" for c in plan.changes):
-        managed_mcp_servers = _apply_mcp_server_changes(
-            desired, previous_state, previously_owned_global_mcp
+        managed_mcp_servers, skipped_global_mcp = _apply_mcp_server_changes(
+            desired, previous_state, previously_owned_global_mcp,
+            registry_known_global=plan.mcp_registry_known_global,
         )
     else:
         # No MCP changes — preserve existing managed MCP servers from state
@@ -1361,6 +1364,29 @@ def _apply_changes(
         for s in desired.mcp_servers:
             if s.scope == "project":
                 managed_mcp_servers[s.name] = hash_mcp_server_table(s.toml_table)
+
+    # Roll back registry ownership claims for global MCP servers the bridge
+    # could not adopt (user-authored entries with the same name already exist).
+    if skipped_global_mcp:
+        registry_path = desired.bridge_home / GLOBAL_REGISTRY_FILENAME
+        if registry_path.is_file() and not registry_path.is_symlink():
+            snap = _load_registry_snapshot(registry_path)
+            registry = snap.registry
+            for name in skipped_global_mcp:
+                entry = registry.mcp_servers.get(name)
+                if entry is None:
+                    continue
+                remaining = tuple(o for o in entry.owners if o != desired.project_root)
+                if remaining:
+                    registry.mcp_servers[name] = GlobalMcpServerEntry(
+                        content_hash=entry.content_hash, owners=remaining,
+                    )
+                else:
+                    del registry.mcp_servers[name]
+            _atomic_write_file(
+                registry_path, registry.to_json().encode(),
+                container=desired.bridge_home,
+            )
 
     retained_previous_project_files = _retained_stale_managed_project_files(
         desired,
@@ -1499,7 +1525,7 @@ def _plan_mcp_server_mutations(
     previous_state: BridgeState | None,
     snapshot: _RegistrySnapshot,
     updated_registry: GlobalSkillRegistry,
-) -> tuple[tuple[Change, ...], GlobalSkillRegistry, frozenset[str]]:
+) -> tuple[tuple[Change, ...], GlobalSkillRegistry, frozenset[str], frozenset[str]]:
     """Plan MCP server config.toml mutations for both global and project scope.
 
     Global servers are tracked in the global registry.
@@ -1577,21 +1603,33 @@ def _plan_mcp_server_mutations(
     for name in sorted(previously_owned_project - set(project_servers)):
         changes.append(Change("remove", project_config_path, resource_kind="mcp_server"))
 
-    return tuple(changes), updated_registry, frozenset(previously_owned_global)
+    # Return the set of servers already known to the registry (any owner),
+    # so the apply phase can distinguish bridge-created (co-ownable) from
+    # user-authored (not adoptable) entries.
+    registry_known_global = frozenset(snapshot.registry.mcp_servers.keys())
+
+    return tuple(changes), updated_registry, frozenset(previously_owned_global), registry_known_global
 
 
 def _apply_mcp_server_changes(
     desired: DesiredState,
     previous_state: BridgeState | None,
     previously_owned_global: set[str],
-) -> dict[str, str]:
+    registry_known_global: frozenset[str] = frozenset(),
+) -> tuple[dict[str, str], set[str]]:
     """Apply MCP server changes to config.toml files.
 
     Args:
         previously_owned_global: Global MCP server names owned by this project
             before this reconcile run (from the original registry snapshot).
+        registry_known_global: All global MCP server names known to the registry
+            at plan time (any owner). Used to distinguish bridge-created entries
+            (safe to co-own) from user-authored entries (not adoptable).
 
-    Returns the managed_mcp_servers dict for the new project state.
+    Returns (managed_mcp_servers, skipped_global_servers) where:
+    - managed_mcp_servers: dict for the new project state (project scope only)
+    - skipped_global_servers: set of global server names the bridge couldn't
+      adopt because a user-authored entry with the same name already exists
     """
     from cc_codex_bridge.toml_config import (
         apply_mcp_changes,
@@ -1605,15 +1643,27 @@ def _apply_mcp_server_changes(
     global_servers, project_servers = _partition_mcp_servers_by_scope(desired.mcp_servers)
 
     # --- Global scope ---
+    global_changes_summary: dict[str, list[str]] = {"added": [], "updated": [], "removed": []}
     if global_servers or previously_owned_global:
         global_config_path = desired.codex_home / "config.toml"
         doc = read_codex_config(global_config_path)
-        apply_mcp_changes(
+        global_changes_summary = apply_mcp_changes(
             doc,
             desired={name: s.toml_table for name, s in global_servers.items()},
             owned=previously_owned_global,
         )
         write_codex_config(global_config_path, doc)
+
+    # Determine which global servers the bridge could NOT adopt because a
+    # user-authored entry with the same name already exists in config.toml.
+    # Bridge-created entries (known to the registry via another project) are
+    # safe to co-own, so they are NOT considered "skipped."
+    actually_adopted_global = (
+        previously_owned_global
+        | set(global_changes_summary["added"])
+        | registry_known_global
+    ) & set(global_servers)
+    skipped_global_servers = set(global_servers) - actually_adopted_global
 
     # --- Project scope ---
     previously_owned_project: set[str] = set()
@@ -1638,7 +1688,7 @@ def _apply_mcp_server_changes(
     for name in sorted(bridge_controlled & set(project_servers)):
         managed_mcp_servers[name] = hash_mcp_server_table(project_servers[name].toml_table)
 
-    return managed_mcp_servers
+    return managed_mcp_servers, skipped_global_servers
 
 
 def _clean_mcp_config_entries(
@@ -1699,7 +1749,7 @@ def _plan_mutations(
     plugin_resource_changes, updated_registry = _plan_plugin_resource_mutations(
         desired, snapshot, updated_registry,
     )
-    mcp_changes, updated_registry, mcp_previously_owned = _plan_mcp_server_mutations(
+    mcp_changes, updated_registry, mcp_previously_owned, mcp_registry_known = _plan_mcp_server_mutations(
         desired, previous_state, snapshot, updated_registry,
     )
 
@@ -1720,6 +1770,7 @@ def _plan_mutations(
         registry_writes=tuple(registry_writes),
         project_file_changes=project_changes,
         mcp_previously_owned_global=mcp_previously_owned,
+        mcp_registry_known_global=mcp_registry_known,
     )
 
 

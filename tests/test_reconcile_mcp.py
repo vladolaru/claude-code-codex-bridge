@@ -541,3 +541,49 @@ class TestUserAuthoredMcpPreservation:
         # The user-authored entry must survive clean
         content = project_config.read_text()
         assert "user-authored.example.com" in content
+
+    def test_user_authored_global_entry_not_tracked_in_registry(self, tmp_path):
+        """A pre-existing user-authored global MCP entry with the same name
+        as a bridge-discovered server must not be recorded in the registry.
+        Otherwise ``clean`` would delete it.
+        """
+        project = _make_project(tmp_path)
+        codex_home = tmp_path / "codex"
+        bridge_home = tmp_path / "bridge"
+
+        # Pre-create a user-authored global config.toml with a wpcom entry
+        codex_home.mkdir(parents=True)
+        global_config = codex_home / "config.toml"
+        global_config.write_text(
+            '[mcp_servers.wpcom]\ncommand = "user-authored-cmd"\n'
+        )
+
+        # Bridge discovers a wpcom server from Claude Code config
+        servers = (
+            GeneratedMcpServer(
+                name="wpcom",
+                scope="global",
+                toml_table={"command": "bridge-cmd"},
+                source_description="user-global",
+            ),
+        )
+
+        report = _build_and_reconcile(project, servers, codex_home, bridge_home)
+        assert report.applied
+
+        # The user-authored entry should be preserved (not overwritten)
+        content = global_config.read_text()
+        assert "user-authored-cmd" in content
+        assert "bridge-cmd" not in content
+
+        # Verify the registry does NOT track wpcom as owned by this project
+        import json as _json
+        registry_path = bridge_home / "registry.json"
+        if registry_path.exists():
+            registry_data = _json.loads(registry_path.read_text())
+            mcp_servers = registry_data.get("mcp_servers", {})
+            if "wpcom" in mcp_servers:
+                owners = mcp_servers["wpcom"].get("owners", [])
+                assert str(project) not in owners, (
+                    "Project should not be registered as owner of user-authored global MCP entry"
+                )
