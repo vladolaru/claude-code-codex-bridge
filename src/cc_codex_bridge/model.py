@@ -144,6 +144,7 @@ class DiscoveryResult:
     project_commands: tuple[Path, ...] = ()
     user_claude_md: str | None = None
     mcp_servers: tuple[DiscoveredMcpServer, ...] = ()
+    mcp_discovery_degraded: bool = False
 
 
 @dataclass(frozen=True)

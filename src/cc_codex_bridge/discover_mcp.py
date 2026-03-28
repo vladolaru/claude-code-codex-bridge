@@ -14,8 +14,13 @@ def discover_mcp_servers(
     project_root: Path,
     claude_json_path: Path | None = None,
     mcp_json_path: Path | None = None,
-) -> tuple[DiscoveredMcpServer, ...]:
+) -> tuple[tuple[DiscoveredMcpServer, ...], bool]:
     """Discover MCP servers from Claude Code configuration files.
+
+    Returns ``(servers, degraded)`` where *degraded* is ``True`` when at
+    least one source file existed but contained malformed JSON.  When
+    degraded, the caller should preserve previously-bridged MCP state
+    rather than treating missing servers as intentional removals.
 
     Reads from three sources in precedence order (highest first):
 
@@ -33,6 +38,12 @@ def discover_mcp_servers(
 
     claude_data = _load_json(claude_json_path)
     mcp_data = _load_json(mcp_json_path)
+
+    degraded = claude_data is None or mcp_data is None
+    if claude_data is None:
+        claude_data = {}
+    if mcp_data is None:
+        mcp_data = {}
 
     # Collect servers lowest-precedence first so higher-precedence
     # overwrites by name.
@@ -61,15 +72,23 @@ def discover_mcp_servers(
                 for server in _extract_servers(local_servers, "project", "project-local"):
                     by_name[server.name] = server
 
-    return tuple(sorted(by_name.values(), key=lambda s: s.name))
+    return tuple(sorted(by_name.values(), key=lambda s: s.name)), degraded
 
 
-def _load_json(path: Path) -> dict:
-    """Load a JSON file as a dict, returning ``{}`` on missing or malformed input."""
+def _load_json(path: Path) -> dict | None:
+    """Load a JSON file as a dict.
+
+    Returns ``{}`` when the file does not exist, and ``None`` when the file
+    exists but contains malformed JSON (signalling degraded discovery).
+    """
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        text = path.read_text(encoding="utf-8")
+    except OSError:
         return {}
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
     if not isinstance(data, dict):
         return {}
     return data

@@ -31,10 +31,10 @@ class TestLoadJson:
         path = tmp_path / "nonexistent.json"
         assert _load_json(path) == {}
 
-    def test_returns_empty_dict_for_malformed_json(self, tmp_path: Path):
+    def test_returns_none_for_malformed_json(self, tmp_path: Path):
         path = tmp_path / "bad.json"
         path.write_text("{not valid json")
-        assert _load_json(path) == {}
+        assert _load_json(path) is None
 
     def test_returns_empty_dict_for_non_dict_json(self, tmp_path: Path):
         path = tmp_path / "array.json"
@@ -139,7 +139,7 @@ class TestDiscoverMcpServersGlobal:
         project_root = tmp_path / "project"
         project_root.mkdir()
 
-        result = discover_mcp_servers(
+        result, _degraded = discover_mcp_servers(
             project_root=project_root,
             claude_json_path=claude_json,
         )
@@ -162,7 +162,7 @@ class TestDiscoverMcpServersGlobal:
         project_root = tmp_path / "project"
         project_root.mkdir()
 
-        result = discover_mcp_servers(
+        result, _degraded = discover_mcp_servers(
             project_root=project_root,
             claude_json_path=claude_json,
         )
@@ -194,7 +194,7 @@ class TestDiscoverMcpServersProjectLocal:
             },
         }))
 
-        result = discover_mcp_servers(
+        result, _degraded = discover_mcp_servers(
             project_root=project_root,
             claude_json_path=claude_json,
         )
@@ -221,7 +221,7 @@ class TestDiscoverMcpServersProjectShared:
             },
         }))
 
-        result = discover_mcp_servers(
+        result, _degraded = discover_mcp_servers(
             project_root=project_root,
             claude_json_path=tmp_path / "nonexistent.json",
             mcp_json_path=mcp_json,
@@ -253,7 +253,7 @@ class TestDiscoverMcpServersSkipSse:
         project_root = tmp_path / "project"
         project_root.mkdir()
 
-        result = discover_mcp_servers(
+        result, _degraded = discover_mcp_servers(
             project_root=project_root,
             claude_json_path=claude_json,
         )
@@ -289,7 +289,7 @@ class TestDiscoverMcpServersPrecedence:
             },
         }))
 
-        result = discover_mcp_servers(
+        result, _degraded = discover_mcp_servers(
             project_root=project_root,
             claude_json_path=claude_json,
         )
@@ -320,7 +320,7 @@ class TestDiscoverMcpServersPrecedence:
             },
         }))
 
-        result = discover_mcp_servers(
+        result, _degraded = discover_mcp_servers(
             project_root=project_root,
             claude_json_path=claude_json,
             mcp_json_path=mcp_json,
@@ -357,7 +357,7 @@ class TestDiscoverMcpServersPrecedence:
             },
         }))
 
-        result = discover_mcp_servers(
+        result, _degraded = discover_mcp_servers(
             project_root=project_root,
             claude_json_path=claude_json,
             mcp_json_path=mcp_json,
@@ -377,7 +377,7 @@ class TestDiscoverMcpServersEdgeCases:
         project_root = tmp_path / "project"
         project_root.mkdir()
 
-        result = discover_mcp_servers(
+        result, _degraded = discover_mcp_servers(
             project_root=project_root,
             claude_json_path=claude_json,
         )
@@ -389,7 +389,7 @@ class TestDiscoverMcpServersEdgeCases:
         project_root = tmp_path / "project"
         project_root.mkdir()
 
-        result = discover_mcp_servers(
+        result, _degraded = discover_mcp_servers(
             project_root=project_root,
             claude_json_path=claude_json,
         )
@@ -399,7 +399,7 @@ class TestDiscoverMcpServersEdgeCases:
         project_root = tmp_path / "project"
         project_root.mkdir()
 
-        result = discover_mcp_servers(
+        result, _degraded = discover_mcp_servers(
             project_root=project_root,
             claude_json_path=tmp_path / "nonexistent.json",
         )
@@ -415,7 +415,7 @@ class TestDiscoverMcpServersEdgeCases:
         project_root = tmp_path / "project"
         project_root.mkdir()
 
-        result = discover_mcp_servers(
+        result, _degraded = discover_mcp_servers(
             project_root=project_root,
             claude_json_path=claude_json,
             mcp_json_path=tmp_path / "no-such-file.json",
@@ -436,7 +436,7 @@ class TestDiscoverMcpServersEdgeCases:
         project_root = tmp_path / "project"
         project_root.mkdir()
 
-        result = discover_mcp_servers(
+        result, _degraded = discover_mcp_servers(
             project_root=project_root,
             claude_json_path=claude_json,
         )
@@ -455,7 +455,7 @@ class TestDiscoverMcpServersEdgeCases:
         project_root = tmp_path / "project"
         project_root.mkdir()
 
-        result = discover_mcp_servers(
+        result, _degraded = discover_mcp_servers(
             project_root=project_root,
             claude_json_path=claude_json,
         )
@@ -474,7 +474,7 @@ class TestDiscoverMcpServersEdgeCases:
         project_root = tmp_path / "project"
         project_root.mkdir()
 
-        result = discover_mcp_servers(
+        result, _degraded = discover_mcp_servers(
             project_root=project_root,
             claude_json_path=claude_json,
         )
@@ -513,7 +513,7 @@ class TestDiscoverMcpServersMultiSource:
             },
         }))
 
-        result = discover_mcp_servers(
+        result, _degraded = discover_mcp_servers(
             project_root=project_root,
             claude_json_path=claude_json,
             mcp_json_path=mcp_json,
@@ -547,7 +547,7 @@ class TestDiscoverMcpServersMultiSource:
         project_root = tmp_path / "project"
         project_root.mkdir()
 
-        result = discover_mcp_servers(project_root=project_root)
+        result, _degraded = discover_mcp_servers(project_root=project_root)
         assert len(result) == 1
         assert result[0].name == "home-server"
 
@@ -562,10 +562,105 @@ class TestDiscoverMcpServersMultiSource:
             },
         }))
 
-        result = discover_mcp_servers(
+        result, _degraded = discover_mcp_servers(
             project_root=project_root,
             claude_json_path=tmp_path / "nonexistent.json",
         )
         assert len(result) == 1
         assert result[0].name == "project-server"
         assert result[0].source == "project-shared"
+
+
+# -- degraded discovery --------------------------------------------------------
+
+
+class TestDegradedDiscovery:
+    """Tests for the degraded flag when config files contain malformed JSON."""
+
+    def test_corrupt_claude_json_sets_degraded(self, tmp_path: Path):
+        """Corrupt ~/.claude.json sets degraded=True; servers from .mcp.json still found."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        claude_json = tmp_path / ".claude.json"
+        claude_json.write_text("{corrupt json!!")
+
+        mcp_json = project_root / ".mcp.json"
+        mcp_json.write_text(json.dumps({
+            "mcpServers": {
+                "shared-srv": {"command": "node"},
+            },
+        }))
+
+        result, degraded = discover_mcp_servers(
+            project_root=project_root,
+            claude_json_path=claude_json,
+            mcp_json_path=mcp_json,
+        )
+        assert degraded is True
+        assert len(result) == 1
+        assert result[0].name == "shared-srv"
+
+    def test_corrupt_mcp_json_sets_degraded(self, tmp_path: Path):
+        """Corrupt .mcp.json sets degraded=True; servers from ~/.claude.json still found."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        claude_json = tmp_path / ".claude.json"
+        claude_json.write_text(json.dumps({
+            "mcpServers": {
+                "global-srv": {"command": "node"},
+            },
+        }))
+
+        mcp_json = project_root / ".mcp.json"
+        mcp_json.write_text("not json at all")
+
+        result, degraded = discover_mcp_servers(
+            project_root=project_root,
+            claude_json_path=claude_json,
+            mcp_json_path=mcp_json,
+        )
+        assert degraded is True
+        assert len(result) == 1
+        assert result[0].name == "global-srv"
+
+    def test_both_valid_not_degraded(self, tmp_path: Path):
+        """Both valid config files produce degraded=False."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        claude_json = tmp_path / ".claude.json"
+        claude_json.write_text(json.dumps({
+            "mcpServers": {
+                "global-srv": {"command": "node"},
+            },
+        }))
+
+        mcp_json = project_root / ".mcp.json"
+        mcp_json.write_text(json.dumps({
+            "mcpServers": {
+                "shared-srv": {"command": "python"},
+            },
+        }))
+
+        result, degraded = discover_mcp_servers(
+            project_root=project_root,
+            claude_json_path=claude_json,
+            mcp_json_path=mcp_json,
+        )
+        assert degraded is False
+        assert len(result) == 2
+
+    def test_missing_files_not_degraded(self, tmp_path: Path):
+        """Missing files (not corrupt) produce degraded=False."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        result, degraded = discover_mcp_servers(
+            project_root=project_root,
+            claude_json_path=tmp_path / "nonexistent.json",
+            mcp_json_path=tmp_path / "also-nonexistent.json",
+        )
+        assert degraded is False
+        assert result == ()
