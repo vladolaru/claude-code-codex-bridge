@@ -875,7 +875,9 @@ The `config` subcommand group provides CLI-native flows for viewing, validating,
 - `config exclude add/remove/list` — manage sync exclusions with discovery-backed validation
 - `config log set-retention` — set log retention period (global-only)
 
-**Validation model:** every mutation validates strictly against current state. Invalid values are refused (exit 1), not written with warnings. `config exclude add` runs the discovery pipeline to verify entity existence.
+**Validation model:** every mutation validates strictly against current state. Invalid values are refused (exit 1), not written with warnings. `config exclude add` runs the discovery pipeline to verify entity existence. Discovery validation is scope-aware: global scope only validates plugin and user entities, not project entities.
+
+**Scope feedback:** `config exclude add` and `config exclude remove` include scope attribution in their output messages — either "(global)" or "(project: path)" — so the user always knows which config file was modified.
 
 **Interactive mode:** when a required value is omitted and stdin is a TTY, commands offer numbered selection lists or text prompts. Non-TTY invocations error with "missing required argument" instead of hanging.
 
