@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 
 from cc_codex_bridge.model import (
     DiscoveredMcpServer,
@@ -49,6 +50,15 @@ def translate_mcp_servers(
     return McpTranslationResult(
         servers=tuple(generated),
         diagnostics=tuple(diagnostics),
+    )
+
+
+def format_mcp_translation_diagnostics(
+    diagnostics: Iterable[McpTranslationDiagnostic],
+) -> str:
+    """Render MCP translation diagnostics as stable human-readable lines."""
+    return "\n".join(
+        f"MCP server '{d.server_name}': {d.message}" for d in diagnostics
     )
 
 

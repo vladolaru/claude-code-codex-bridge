@@ -537,6 +537,7 @@ def build_project_desired_state(
     from cc_codex_bridge.translate_mcp import translate_mcp_servers
 
     mcp_result = translate_mcp_servers(result.mcp_servers)
+    all_diagnostics = (*all_diagnostics, *mcp_result.diagnostics)
 
     desired_state = build_desired_state(
         result, shim_decision,

@@ -10,7 +10,10 @@ from cc_codex_bridge.model import (
     McpTranslationDiagnostic,
     McpTranslationResult,
 )
-from cc_codex_bridge.translate_mcp import translate_mcp_servers
+from cc_codex_bridge.translate_mcp import (
+    format_mcp_translation_diagnostics,
+    translate_mcp_servers,
+)
 
 
 # -- stdio servers -----------------------------------------------------------
@@ -352,3 +355,40 @@ class TestScopeAndSourcePreserved:
         gen = result.servers[0]
         assert gen.source_description  # non-empty
         assert "user-global" in gen.source_description
+
+
+# -- Formatter ---------------------------------------------------------------
+
+class TestFormatMcpTranslationDiagnostics:
+    """Tests for format_mcp_translation_diagnostics."""
+
+    def test_format_mcp_translation_diagnostics(self):
+        diags = [
+            McpTranslationDiagnostic(
+                server_name="auth-server",
+                message="OAuth config detected; user must run 'codex mcp login' to authenticate",
+            ),
+            McpTranslationDiagnostic(
+                server_name="api-gw",
+                message="headersHelper has no Codex equivalent; dynamic headers will not be available",
+            ),
+        ]
+        result = format_mcp_translation_diagnostics(diags)
+        assert "MCP server 'auth-server'" in result
+        assert "MCP server 'api-gw'" in result
+        assert "OAuth config detected" in result
+        assert "headersHelper" in result
+
+    def test_empty_diagnostics(self):
+        result = format_mcp_translation_diagnostics([])
+        assert result == ""
+
+    def test_single_diagnostic(self):
+        diags = [
+            McpTranslationDiagnostic(
+                server_name="test-srv",
+                message="some warning",
+            ),
+        ]
+        result = format_mcp_translation_diagnostics(diags)
+        assert result == "MCP server 'test-srv': some warning"
