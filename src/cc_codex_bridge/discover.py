@@ -145,7 +145,7 @@ def discover(
         claude_home=claude_home,
         enabled_ids=enabled_ids,
     )
-    from .discover_mcp import discover_mcp_servers
+    from cc_codex_bridge.discover_mcp import discover_mcp_servers
 
     claude_home_path = Path(claude_home or DEFAULT_CLAUDE_HOME).expanduser()
     claude_json_path = claude_home_path.parent / ".claude.json"
