@@ -312,6 +312,8 @@ When the same server name appears at multiple scopes, highest precedence wins. S
 
 Transport detection: `command` field → stdio; `type: "http"` or `url` field → HTTP.
 
+When a source file exists but contains malformed JSON, discovery is *degraded*: servers from other valid sources are still discovered, but the `mcp_discovery_degraded` flag is set on the `DiscoveryResult`. The reconcile pipeline uses this flag to suppress stale-entry removal — previously-bridged MCP entries survive until the corrupt file is fixed and a subsequent reconcile runs normally.
+
 ### Plugin enablement
 
 - the `claude` CLI is a hard runtime dependency for the bridge

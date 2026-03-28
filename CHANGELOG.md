@@ -19,6 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - New runtime dependency: `tomlkit` for round-trip TOML editing.
 - New reference docs: `docs/claude-code-mcp-reference.md` and
   `docs/mcp-bridge-mapping.md`.
+- Degraded MCP discovery: corrupt `~/.claude.json` or `.mcp.json` files no
+  longer trigger removal of previously-bridged MCP entries. The bridge warns
+  and preserves existing state until the file is fixed.
 
 ## [1.1.0] - 2026-03-28
 
