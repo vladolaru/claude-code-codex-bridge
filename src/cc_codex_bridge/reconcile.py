@@ -1534,7 +1534,16 @@ def _plan_mcp_server_mutations(
 
     Global servers are tracked in the global registry.
     Project servers are tracked in the project state.
-    Returns changes, updated registry, and the set of previously owned global MCP servers.
+
+    Returns:
+        changes: Planned mutation operations for config.toml files.
+        updated_registry: Registry with MCP ownership claims applied.
+        previously_owned_global: Server names this project owned before this run,
+            used by the apply phase to determine stale-entry removal scope.
+        registry_known_global: All global MCP server names known to the registry
+            from any owner at plan time.  Used by the apply phase to distinguish
+            bridge-created entries (safe to co-own) from user-authored entries
+            (not adoptable).
     """
     from cc_codex_bridge.toml_config import hash_mcp_server_table, read_codex_config
 
