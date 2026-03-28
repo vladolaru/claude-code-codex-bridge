@@ -40,13 +40,19 @@ class ExcludeListResult:
     commands: tuple[str, ...]
 
 
-def list_discoverable_entities(discovery: DiscoveryResult) -> dict[str, list[str]]:
+def list_discoverable_entities(
+    discovery: DiscoveryResult,
+    scope: str = "project",
+) -> dict[str, list[str]]:
     """Build a dict of all discoverable entity IDs, keyed by kind.
 
     Keys: "plugin", "skill", "agent", "command".
     Plugin entities use ``marketplace/plugin_name`` as the ID prefix.
     Standalone user/project entities use ``user/name`` or ``project/name``.
     All lists are sorted.
+
+    When *scope* is ``"global"``, project-scoped entities (``project/...``)
+    are omitted because they are meaningless in the global config.
     """
     plugins: list[str] = []
     skills: list[str] = []
@@ -74,13 +80,14 @@ def list_discoverable_entities(discovery: DiscoveryResult) -> dict[str, list[str
     for command_path in discovery.user_commands:
         commands.append(f"user/{command_path.name}")
 
-    # Standalone project entities
-    for skill_path in discovery.project_skills:
-        skills.append(f"project/{skill_path.name}")
-    for agent_path in discovery.project_agents:
-        agents.append(f"project/{agent_path.name}")
-    for command_path in discovery.project_commands:
-        commands.append(f"project/{command_path.name}")
+    # Standalone project entities (only in project scope)
+    if scope != "global":
+        for skill_path in discovery.project_skills:
+            skills.append(f"project/{skill_path.name}")
+        for agent_path in discovery.project_agents:
+            agents.append(f"project/{agent_path.name}")
+        for command_path in discovery.project_commands:
+            commands.append(f"project/{command_path.name}")
 
     return {
         "plugin": sorted(plugins),

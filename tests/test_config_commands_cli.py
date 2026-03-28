@@ -81,3 +81,46 @@ def test_config_exclude_add_unexpected_error_propagates(tmp_path, monkeypatch):
 
     with pytest.raises(RuntimeError, match="unexpected internal error"):
         cli.main(["config", "exclude", "add", "plugin", "some/plugin", "--project", str(project_root)])
+
+
+def test_list_discoverable_entities_global_scope_excludes_project(tmp_path):
+    """Global scope should not include project-scoped entities."""
+    from cc_codex_bridge.config_exclude_commands import list_discoverable_entities
+    from cc_codex_bridge.model import DiscoveryResult, ProjectContext
+
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# test\n")
+
+    proj_skills = project_root / ".claude" / "skills" / "my-skill"
+    proj_skills.mkdir(parents=True)
+    (proj_skills / "SKILL.md").write_text("---\nname: my-skill\ndescription: test\n---\n")
+    proj_agents = project_root / ".claude" / "agents"
+    proj_agents.mkdir(parents=True)
+    (proj_agents / "my-agent.md").write_text("---\nname: my-agent\ndescription: test\n---\n")
+    proj_commands = project_root / ".claude" / "commands"
+    proj_commands.mkdir(parents=True)
+    (proj_commands / "my-cmd.md").write_text("---\ndescription: test\n---\n")
+
+    discovery = DiscoveryResult(
+        project=ProjectContext(root=project_root, agents_md_path=project_root / "AGENTS.md"),
+        plugins=(),
+        user_skills=(proj_skills,),
+        user_agents=(),
+        user_commands=(),
+        project_skills=(proj_skills,),
+        project_agents=(proj_agents / "my-agent.md",),
+        project_commands=(proj_commands / "my-cmd.md",),
+        user_claude_md=None,
+    )
+
+    # Global scope: project entities should be excluded
+    result = list_discoverable_entities(discovery, scope="global")
+    for kind_list in result.values():
+        for entry in kind_list:
+            assert not entry.startswith("project/"), f"Global scope should not include {entry}"
+
+    # Project scope (default): project entities should be included
+    result_proj = list_discoverable_entities(discovery, scope="project")
+    project_entries = [e for lst in result_proj.values() for e in lst if e.startswith("project/")]
+    assert len(project_entries) > 0, "Project scope should include project entities"
