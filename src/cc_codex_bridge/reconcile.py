@@ -72,6 +72,7 @@ class DesiredState:
     global_prompts: tuple[GeneratedPrompt, ...] = ()
     plugin_resources: tuple[VendoredPluginResource, ...] = ()
     mcp_servers: tuple[GeneratedMcpServer, ...] = ()
+    mcp_discovery_degraded: bool = False
 
 
 @dataclass(frozen=True)
@@ -179,6 +180,7 @@ def build_desired_state(
     project_agent_files: Iterable[tuple[Path, bytes]] | None = None,
     plugin_resources: Iterable[VendoredPluginResource] | None = None,
     mcp_servers: Iterable[GeneratedMcpServer] | None = None,
+    mcp_discovery_degraded: bool = False,
 ) -> DesiredState:
     """Build the desired generated outputs for a project."""
     if shim_decision.action == "fail":
@@ -255,6 +257,7 @@ def build_desired_state(
         global_prompts=tuple(global_prompts or ()),
         plugin_resources=tuple(plugin_resources or ()),
         mcp_servers=tuple(mcp_servers or ()),
+        mcp_discovery_degraded=mcp_discovery_degraded,
     )
 
 
@@ -551,6 +554,7 @@ def build_project_desired_state(
         project_agent_files=project_agent_files,
         plugin_resources=plugin_resources,
         mcp_servers=mcp_result.servers,
+        mcp_discovery_degraded=result.mcp_discovery_degraded,
     )
 
     return ProjectBuildResult(
@@ -1566,22 +1570,24 @@ def _plan_mcp_server_mutations(
         elif existing_entry is not None and existing_entry.content_hash != desired_hash:
             changes.append(Change("update", global_config_path, resource_kind="mcp_server"))
 
-    # Stale global servers
-    for name in sorted(previously_owned_global - set(global_servers)):
-        entry = updated_registry.mcp_servers.get(name)
-        if entry is None:
-            continue
-        remaining_owners = tuple(
-            owner for owner in entry.owners if owner != desired.project_root
-        )
-        if remaining_owners:
-            updated_registry.mcp_servers[name] = GlobalMcpServerEntry(
-                content_hash=entry.content_hash,
-                owners=remaining_owners,
+    # Stale global servers — skip when MCP discovery is degraded to avoid
+    # deleting previously-bridged entries due to a temporarily corrupt config.
+    if not desired.mcp_discovery_degraded:
+        for name in sorted(previously_owned_global - set(global_servers)):
+            entry = updated_registry.mcp_servers.get(name)
+            if entry is None:
+                continue
+            remaining_owners = tuple(
+                owner for owner in entry.owners if owner != desired.project_root
             )
-        else:
-            del updated_registry.mcp_servers[name]
-            changes.append(Change("remove", global_config_path, resource_kind="mcp_server"))
+            if remaining_owners:
+                updated_registry.mcp_servers[name] = GlobalMcpServerEntry(
+                    content_hash=entry.content_hash,
+                    owners=remaining_owners,
+                )
+            else:
+                del updated_registry.mcp_servers[name]
+                changes.append(Change("remove", global_config_path, resource_kind="mcp_server"))
 
     # --- Project scope ---
     project_config_path = desired.project_root / ".codex" / "config.toml"
@@ -1599,9 +1605,10 @@ def _plan_mcp_server_mutations(
         elif prev_hash is not None and prev_hash != desired_hash:
             changes.append(Change("update", project_config_path, resource_kind="mcp_server"))
 
-    # Stale project servers
-    for name in sorted(previously_owned_project - set(project_servers)):
-        changes.append(Change("remove", project_config_path, resource_kind="mcp_server"))
+    # Stale project servers — skip when MCP discovery is degraded.
+    if not desired.mcp_discovery_degraded:
+        for name in sorted(previously_owned_project - set(project_servers)):
+            changes.append(Change("remove", project_config_path, resource_kind="mcp_server"))
 
     # Return the set of servers already known to the registry (any owner),
     # so the apply phase can distinguish bridge-created (co-ownable) from

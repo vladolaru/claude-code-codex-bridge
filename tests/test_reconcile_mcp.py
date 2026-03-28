@@ -587,3 +587,75 @@ class TestUserAuthoredMcpPreservation:
                 assert str(project) not in owners, (
                     "Project should not be registered as owner of user-authored global MCP entry"
                 )
+
+
+def _build_and_reconcile_degraded(
+    project: Path,
+    mcp_servers: tuple[GeneratedMcpServer, ...],
+    codex_home: Path,
+    bridge_home: Path,
+):
+    """Build desired state with degraded MCP discovery and reconcile."""
+    from cc_codex_bridge.claude_shim import plan_claude_shim
+    from cc_codex_bridge.model import DiscoveryResult, ProjectContext
+
+    discovery = DiscoveryResult(
+        project=ProjectContext(root=project, agents_md_path=project / "AGENTS.md"),
+        plugins=(),
+        mcp_servers=mcp_servers,
+        mcp_discovery_degraded=True,
+    )
+    shim = plan_claude_shim(discovery.project)
+    desired = build_desired_state(
+        discovery,
+        shim,
+        (),
+        codex_home=codex_home,
+        bridge_home=bridge_home,
+        mcp_servers=mcp_servers,
+        mcp_discovery_degraded=True,
+    )
+    return reconcile_desired_state(desired)
+
+
+class TestDegradedDiscoveryPreservation:
+    """Verify that corrupt config files don't trigger stale-entry removal."""
+
+    def test_degraded_discovery_preserves_existing_mcp_entries(self, tmp_path):
+        """When MCP discovery is degraded, previously-bridged entries survive."""
+        project = _make_project(tmp_path)
+        codex_home = tmp_path / "codex"
+        bridge_home = tmp_path / "bridge"
+
+        # First reconcile: normal, creates MCP entries
+        servers = (
+            GeneratedMcpServer(
+                name="wpcom",
+                scope="global",
+                toml_table={"command": "npx", "args": ["wpcom"]},
+                source_description="user-global",
+            ),
+            GeneratedMcpServer(
+                name="figma",
+                scope="project",
+                toml_table={"url": "https://mcp.figma.com/mcp"},
+                source_description="project-local",
+            ),
+        )
+        _build_and_reconcile(project, servers, codex_home, bridge_home)
+
+        global_config = codex_home / "config.toml"
+        project_config = project / ".codex" / "config.toml"
+        assert global_config.exists()
+        assert project_config.exists()
+
+        # Second reconcile: degraded (no MCP servers, but degraded=True)
+        # Should preserve existing entries, not delete them
+        report = _build_and_reconcile_degraded(
+            project, (), codex_home, bridge_home
+        )
+
+        assert global_config.exists()
+        assert "wpcom" in global_config.read_text()
+        assert project_config.exists()
+        assert "figma" in project_config.read_text()
