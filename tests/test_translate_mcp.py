@@ -218,6 +218,24 @@ class TestHttpTranslation:
         assert gen.toml_table["bearer_token_env_var"] == "SECRET_TOKEN"
         assert "http_headers" not in gen.toml_table
 
+    def test_bearer_token_case_insensitive_header(self):
+        """HTTP: lowercase 'authorization' header is also recognized."""
+        server = DiscoveredMcpServer(
+            name="lowercase-auth-srv",
+            scope="project",
+            transport="http",
+            source="project-local",
+            config={
+                "url": "https://api.example.com/mcp",
+                "headers": {"authorization": "Bearer ${MY_TOKEN}"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["bearer_token_env_var"] == "MY_TOKEN"
+        assert "http_headers" not in gen.toml_table
+
     def test_type_field_stripped(self):
         """HTTP: type field in config is stripped from output."""
         server = DiscoveredMcpServer(

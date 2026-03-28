@@ -107,7 +107,7 @@ def _translate_http(
     if headers:
         remaining_headers: dict[str, str] = {}
         for key, value in headers.items():
-            if key == "Authorization":
+            if key.lower() == "authorization":
                 match = _BEARER_TOKEN_RE.match(value)
                 if match:
                     # Extract env var name from either group (braces or no braces)
