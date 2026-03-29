@@ -1576,19 +1576,31 @@ def _plan_mcp_server_mutations(
 
     global_servers, project_servers = _partition_mcp_servers_by_scope(desired.mcp_servers)
 
-    # Pre-validate: only parse config.toml files for scopes that have desired
-    # servers.  This avoids failing a project-only sync due to unrelated
-    # corruption in the global config, and vice versa.  Stale-entry cleanup
-    # re-reads config.toml in the apply phase, so we don't need planning-phase
-    # reads for scopes that only have removals.
+    # Compute previously-owned sets before reading configs — these determine
+    # which scopes need config.toml access.
+    previously_owned_global: set[str] = set()
+    for name, entry in snapshot.registry.mcp_servers.items():
+        if desired.project_root in entry.owners:
+            previously_owned_global.add(name)
+
+    previously_owned_project: set[str] = set()
+    if previous_state is not None:
+        previously_owned_project = set(previous_state.managed_mcp_servers)
+
+    # Pre-validate: only parse config.toml files for scopes that have work
+    # (desired servers OR stale entries to remove).  This avoids failing a
+    # project-only sync due to unrelated corruption in the global config,
+    # and vice versa.
     global_config_path = desired.codex_home / "config.toml"
     global_doc = (
-        read_codex_config(global_config_path) if global_servers
+        read_codex_config(global_config_path)
+        if global_servers or previously_owned_global
         else tomlkit.document()
     )
     project_config_path = desired.project_root / ".codex" / "config.toml"
     project_doc = (
-        read_codex_config(project_config_path) if project_servers
+        read_codex_config(project_config_path)
+        if project_servers or previously_owned_project
         else tomlkit.document()
     )
 
@@ -1600,12 +1612,6 @@ def _plan_mcp_server_mutations(
     user_authored_global: set[str] = existing_global_mcp - registry_known_names
 
     # --- Global scope ---
-
-    # Determine previously owned global MCP servers for this project
-    previously_owned_global: set[str] = set()
-    for name, entry in snapshot.registry.mcp_servers.items():
-        if desired.project_root in entry.owners:
-            previously_owned_global.add(name)
 
     for name in sorted(global_servers):
         # Skip user-authored entries — never claim ownership.
@@ -1650,9 +1656,6 @@ def _plan_mcp_server_mutations(
                 changes.append(Change("remove", global_config_path, resource_kind="mcp_server"))
 
     # --- Project scope ---
-    previously_owned_project: set[str] = set()
-    if previous_state is not None:
-        previously_owned_project = set(previous_state.managed_mcp_servers)
 
     # Detect user-authored project-scoped entries — entries that exist in the
     # project config.toml but are NOT tracked in bridge state.  Without this
