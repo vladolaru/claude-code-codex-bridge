@@ -1,4 +1,4 @@
-"""Tests for GlobalSkillRegistry projects list."""
+"""Tests for GlobalResourceRegistry projects list."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from cc_codex_bridge.registry import (
     GlobalPluginResourceEntry,
     GlobalPromptEntry,
     GlobalSkillEntry,
-    GlobalSkillRegistry,
+    GlobalResourceRegistry,
     hash_agent_file,
     hash_prompt_content,
 )
@@ -23,11 +23,11 @@ from cc_codex_bridge.registry import (
 
 def test_registry_round_trips_with_projects(tmp_path: Path):
     """Registry with projects list serializes and deserializes correctly."""
-    registry = GlobalSkillRegistry(skills={}, projects=(Path("/a/project-a"), Path("/b/project-b")))
+    registry = GlobalResourceRegistry(skills={}, projects=(Path("/a/project-a"), Path("/b/project-b")))
     path = tmp_path / GLOBAL_REGISTRY_FILENAME
     path.write_text(registry.to_json())
 
-    loaded = GlobalSkillRegistry.from_path(path)
+    loaded = GlobalResourceRegistry.from_path(path)
     assert loaded is not None
     assert loaded.projects == (Path("/a/project-a"), Path("/b/project-b"))
 
@@ -37,7 +37,7 @@ def test_registry_missing_projects_key_treated_as_empty(tmp_path: Path):
     path = tmp_path / GLOBAL_REGISTRY_FILENAME
     path.write_text(json.dumps({"version": 1, "skills": {}}, indent=2) + "\n")
 
-    loaded = GlobalSkillRegistry.from_path(path)
+    loaded = GlobalResourceRegistry.from_path(path)
     assert loaded is not None
     assert loaded.projects == ()
 
@@ -48,7 +48,7 @@ def test_registry_projects_sorted_on_load(tmp_path: Path):
     data = {"version": 1, "skills": {}, "projects": ["/z/last", "/a/first"]}
     path.write_text(json.dumps(data, indent=2) + "\n")
 
-    loaded = GlobalSkillRegistry.from_path(path)
+    loaded = GlobalResourceRegistry.from_path(path)
     assert loaded is not None
     assert loaded.projects == (Path("/a/first"), Path("/z/last"))
 
@@ -60,12 +60,12 @@ def test_registry_rejects_relative_project_paths(tmp_path: Path):
     path.write_text(json.dumps(data, indent=2) + "\n")
 
     with pytest.raises(ReconcileError):
-        GlobalSkillRegistry.from_path(path)
+        GlobalResourceRegistry.from_path(path)
 
 
 def test_registry_tracks_agent_files(tmp_path: Path):
     """Global registry stores agent file entries alongside skills."""
-    registry = GlobalSkillRegistry(
+    registry = GlobalResourceRegistry(
         skills={},
         agents={
             "market-plugin-reviewer.toml": GlobalAgentEntry(
@@ -80,7 +80,7 @@ def test_registry_tracks_agent_files(tmp_path: Path):
 
 def test_registry_round_trips_with_agents(tmp_path: Path):
     """Registry with agents serializes and deserializes correctly."""
-    registry = GlobalSkillRegistry(
+    registry = GlobalResourceRegistry(
         skills={},
         agents={
             "market-plugin-reviewer.toml": GlobalAgentEntry(
@@ -93,7 +93,7 @@ def test_registry_round_trips_with_agents(tmp_path: Path):
     path = tmp_path / GLOBAL_REGISTRY_FILENAME
     path.write_text(registry.to_json())
 
-    loaded = GlobalSkillRegistry.from_path(path)
+    loaded = GlobalResourceRegistry.from_path(path)
     assert loaded is not None
     assert "market-plugin-reviewer.toml" in loaded.agents
     assert loaded.agents["market-plugin-reviewer.toml"].content_hash == "sha256:abc123"
@@ -116,7 +116,7 @@ def test_hash_agent_file_is_deterministic():
 
 def test_registry_round_trips_plugin_resources(tmp_path: Path):
     """Plugin resource entries survive serialization."""
-    registry = GlobalSkillRegistry(
+    registry = GlobalResourceRegistry(
         skills={},
         plugin_resources={
             "market-tools": GlobalPluginResourceEntry(
@@ -127,7 +127,7 @@ def test_registry_round_trips_plugin_resources(tmp_path: Path):
     )
     path = tmp_path / GLOBAL_REGISTRY_FILENAME
     path.write_text(registry.to_json())
-    loaded = GlobalSkillRegistry.from_path(path)
+    loaded = GlobalResourceRegistry.from_path(path)
     assert loaded is not None
     assert "market-tools" in loaded.plugin_resources
     assert loaded.plugin_resources["market-tools"].content_hash == "sha256:abc123"
@@ -139,14 +139,14 @@ def test_registry_missing_plugin_resources_key_treated_as_empty(tmp_path: Path):
     path = tmp_path / GLOBAL_REGISTRY_FILENAME
     path.write_text(json.dumps({"version": 1, "skills": {}}, indent=2) + "\n")
 
-    loaded = GlobalSkillRegistry.from_path(path)
+    loaded = GlobalResourceRegistry.from_path(path)
     assert loaded is not None
     assert loaded.plugin_resources == {}
 
 
 def test_registry_plugin_resources_default_is_empty_dict():
     """Plugin resources defaults to empty dict when not provided."""
-    registry = GlobalSkillRegistry(skills={})
+    registry = GlobalResourceRegistry(skills={})
     assert registry.plugin_resources == {}
 
 
@@ -166,7 +166,7 @@ def test_registry_rejects_invalid_plugin_resource_dir_name(tmp_path: Path):
     path.write_text(json.dumps(data, indent=2) + "\n")
 
     with pytest.raises(ReconcileError):
-        GlobalSkillRegistry.from_path(path)
+        GlobalResourceRegistry.from_path(path)
 
 
 def test_registry_rejects_plugin_resource_dir_name_with_toml_suffix(tmp_path: Path):
@@ -185,14 +185,14 @@ def test_registry_rejects_plugin_resource_dir_name_with_toml_suffix(tmp_path: Pa
     path.write_text(json.dumps(data, indent=2) + "\n")
 
     with pytest.raises(ReconcileError):
-        GlobalSkillRegistry.from_path(path)
+        GlobalResourceRegistry.from_path(path)
 
 
 def test_registry_round_trips_prompts(tmp_path):
     """Registry serializes and deserializes prompts section."""
     content_hash = hash_prompt_content(b"---\ndescription: test\n---\n\nDo things.\n")
     owner = Path("/a/project")
-    registry = GlobalSkillRegistry(
+    registry = GlobalResourceRegistry(
         skills={},
         prompts={
             "review.md": GlobalPromptEntry(
@@ -205,7 +205,7 @@ def test_registry_round_trips_prompts(tmp_path):
     path = tmp_path / "registry.json"
     path.write_text(json_str)
 
-    loaded = GlobalSkillRegistry.from_path(path)
+    loaded = GlobalResourceRegistry.from_path(path)
     assert loaded is not None
     assert "review.md" in loaded.prompts
     assert loaded.prompts["review.md"].content_hash == content_hash
@@ -223,7 +223,7 @@ def test_registry_without_prompts_defaults_empty(tmp_path):
         "projects": [],
     }) + "\n")
 
-    loaded = GlobalSkillRegistry.from_path(path)
+    loaded = GlobalResourceRegistry.from_path(path)
     assert loaded is not None
     assert loaded.prompts == {}
 
@@ -263,7 +263,7 @@ def test_mcp_server_entry_construction():
 
 def test_registry_round_trips_with_mcp_servers(tmp_path: Path):
     """Registry with mcp_servers serializes and deserializes correctly."""
-    registry = GlobalSkillRegistry(
+    registry = GlobalResourceRegistry(
         skills={},
         mcp_servers={
             "wpcom": GlobalMcpServerEntry(
@@ -276,7 +276,7 @@ def test_registry_round_trips_with_mcp_servers(tmp_path: Path):
     path = tmp_path / GLOBAL_REGISTRY_FILENAME
     path.write_text(registry.to_json())
 
-    loaded = GlobalSkillRegistry.from_path(path)
+    loaded = GlobalResourceRegistry.from_path(path)
     assert loaded is not None
     assert "wpcom" in loaded.mcp_servers
     assert loaded.mcp_servers["wpcom"].content_hash == "sha256:def456"
@@ -288,14 +288,14 @@ def test_registry_missing_mcp_servers_key_treated_as_empty(tmp_path: Path):
     path = tmp_path / GLOBAL_REGISTRY_FILENAME
     path.write_text(json.dumps({"version": 1, "skills": {}}, indent=2) + "\n")
 
-    loaded = GlobalSkillRegistry.from_path(path)
+    loaded = GlobalResourceRegistry.from_path(path)
     assert loaded is not None
     assert loaded.mcp_servers == {}
 
 
 def test_registry_mcp_servers_default_is_empty_dict():
     """MCP servers defaults to empty dict when not provided."""
-    registry = GlobalSkillRegistry(skills={})
+    registry = GlobalResourceRegistry(skills={})
     assert registry.mcp_servers == {}
 
 
@@ -318,7 +318,7 @@ def test_registry_mcp_server_valid_key_names(tmp_path: Path, valid_name: str):
     }
     path.write_text(json.dumps(data, indent=2) + "\n")
 
-    loaded = GlobalSkillRegistry.from_path(path)
+    loaded = GlobalResourceRegistry.from_path(path)
     assert loaded is not None
     assert valid_name in loaded.mcp_servers
 
@@ -343,12 +343,12 @@ def test_registry_mcp_server_invalid_key_names_rejected(tmp_path: Path, invalid_
     path.write_text(json.dumps(data, indent=2) + "\n")
 
     with pytest.raises(ReconcileError):
-        GlobalSkillRegistry.from_path(path)
+        GlobalResourceRegistry.from_path(path)
 
 
 def test_registry_mcp_server_entry_with_multiple_owners(tmp_path: Path):
     """MCP server entry supports multiple sorted owners."""
-    registry = GlobalSkillRegistry(
+    registry = GlobalResourceRegistry(
         skills={},
         mcp_servers={
             "wpcom": GlobalMcpServerEntry(
@@ -360,7 +360,7 @@ def test_registry_mcp_server_entry_with_multiple_owners(tmp_path: Path):
     path = tmp_path / GLOBAL_REGISTRY_FILENAME
     path.write_text(registry.to_json())
 
-    loaded = GlobalSkillRegistry.from_path(path)
+    loaded = GlobalResourceRegistry.from_path(path)
     assert loaded is not None
     assert loaded.mcp_servers["wpcom"].owners == (
         Path("/a/project-a"),
@@ -370,7 +370,7 @@ def test_registry_mcp_server_entry_with_multiple_owners(tmp_path: Path):
 
 def test_registry_mcp_servers_coexist_with_skills_and_agents(tmp_path: Path):
     """Registry with mcp_servers plus skills and agents all coexist."""
-    registry = GlobalSkillRegistry(
+    registry = GlobalResourceRegistry(
         skills={"my-skill": GlobalSkillEntry(
             content_hash="sha256:skill1",
             owners=(Path("/a/project"),),
@@ -392,7 +392,7 @@ def test_registry_mcp_servers_coexist_with_skills_and_agents(tmp_path: Path):
     path = tmp_path / GLOBAL_REGISTRY_FILENAME
     path.write_text(registry.to_json())
 
-    loaded = GlobalSkillRegistry.from_path(path)
+    loaded = GlobalResourceRegistry.from_path(path)
     assert loaded is not None
     assert "my-skill" in loaded.skills
     assert "reviewer.toml" in loaded.agents

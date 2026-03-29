@@ -8,7 +8,7 @@ import json
 import pytest
 
 from cc_codex_bridge.model import ReconcileError
-from cc_codex_bridge.registry import GlobalSkillEntry, GlobalSkillRegistry
+from cc_codex_bridge.registry import GlobalSkillEntry, GlobalResourceRegistry
 from cc_codex_bridge.state import BridgeState
 
 
@@ -144,7 +144,7 @@ def test_bridge_state_v8_migration(tmp_path: Path):
 def test_global_skill_registry_round_trips(tmp_path: Path):
     """A valid global registry serializes and deserializes deterministically."""
     path = tmp_path / "registry.json"
-    registry = GlobalSkillRegistry(
+    registry = GlobalResourceRegistry(
         skills={
             "prompt-engineer-prompt-engineer": GlobalSkillEntry(
                 content_hash="sha256:abc123",
@@ -154,9 +154,9 @@ def test_global_skill_registry_round_trips(tmp_path: Path):
     )
     path.write_text(registry.to_json())
 
-    loaded = GlobalSkillRegistry.from_path(path)
+    loaded = GlobalResourceRegistry.from_path(path)
 
-    assert loaded == GlobalSkillRegistry(
+    assert loaded == GlobalResourceRegistry(
         skills={
             "prompt-engineer-prompt-engineer": GlobalSkillEntry(
                 content_hash="sha256:abc123",
@@ -170,17 +170,17 @@ def test_global_skill_registry_round_trips(tmp_path: Path):
 def test_global_skill_registry_rejects_invalid_schema(tmp_path: Path):
     """Registry loading fails clearly for malformed content."""
     missing = tmp_path / "missing.json"
-    assert GlobalSkillRegistry.from_path(missing) is None
+    assert GlobalResourceRegistry.from_path(missing) is None
 
     invalid = tmp_path / "invalid.json"
     invalid.write_text("{")
     with pytest.raises(ReconcileError, match="Invalid global skill registry file"):
-        GlobalSkillRegistry.from_path(invalid)
+        GlobalResourceRegistry.from_path(invalid)
 
     unsupported = tmp_path / "unsupported.json"
     unsupported.write_text(json.dumps({"version": 999, "skills": {}}))
     with pytest.raises(ReconcileError, match="Unsupported global skill registry version"):
-        GlobalSkillRegistry.from_path(unsupported)
+        GlobalResourceRegistry.from_path(unsupported)
 
     invalid_schema = tmp_path / "invalid-schema.json"
     invalid_schema.write_text(
@@ -197,7 +197,7 @@ def test_global_skill_registry_rejects_invalid_schema(tmp_path: Path):
         )
     )
     with pytest.raises(ReconcileError, match="Invalid global skill registry file"):
-        GlobalSkillRegistry.from_path(invalid_schema)
+        GlobalResourceRegistry.from_path(invalid_schema)
 
 
 # --- MCP server tracking tests ---

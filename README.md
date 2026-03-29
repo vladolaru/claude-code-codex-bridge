@@ -315,7 +315,7 @@ cc-codex-bridge reconcile --project . \
   --exclude-plugin marketplace/plugin \
   --exclude-skill marketplace/plugin/skill \
   --exclude-agent marketplace/plugin/agent.md \
-  --exclude-command marketplace/plugin/command.md
+  --exclude-command marketplace/plugin/command.md \
   --exclude-mcp-server server-name
 ```
 

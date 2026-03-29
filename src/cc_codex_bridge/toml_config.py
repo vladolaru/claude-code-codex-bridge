@@ -46,7 +46,7 @@ def write_codex_config(path: Path, doc: tomlkit.TOMLDocument) -> None:
         return
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.parent / f".config-{uuid4().hex}.toml.tmp"
+    tmp_path = path.parent / f".bridge-mcp-{uuid4().hex}"
     try:
         tmp_path.write_text(content, encoding="utf-8")
         os.replace(tmp_path, path)

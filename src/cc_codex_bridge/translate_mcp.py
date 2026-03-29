@@ -142,8 +142,6 @@ def _translate_http(
                     continue
                 # Literal bearer token — do NOT persist the secret into
                 # generated config.  Warn the user to use an env var ref.
-                # Only catch Bearer tokens; other schemes (Basic, etc.) are
-                # passed through as http_headers.
                 if value.lstrip().lower().startswith("bearer "):
                     diagnostics.append(McpTranslationDiagnostic(
                         server_name=server.name,
@@ -154,6 +152,17 @@ def _translate_http(
                         ),
                     ))
                     continue
+                # Other auth schemes (Basic, etc.) — warn if literal credential
+                # (not an env var reference) is being propagated to config.toml.
+                if not value.strip().startswith("$"):
+                    diagnostics.append(McpTranslationDiagnostic(
+                        server_name=server.name,
+                        message=(
+                            "Authorization header contains a literal credential; "
+                            "consider using $ENV_VAR or ${ENV_VAR} syntax instead. "
+                            "The header was included in the generated config"
+                        ),
+                    ))
             remaining_headers[key] = value
 
         if remaining_headers:

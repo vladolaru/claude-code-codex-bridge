@@ -28,7 +28,7 @@ from cc_codex_bridge.registry import (
     GlobalPluginResourceEntry,
     GlobalPromptEntry,
     GlobalSkillEntry,
-    GlobalSkillRegistry,
+    GlobalResourceRegistry,
     hash_agent_file,
     hash_file_content,
     hash_generated_skill,
@@ -142,7 +142,7 @@ class _RegistrySnapshot:
     """One loaded global-registry snapshot."""
 
     path: Path
-    registry: GlobalSkillRegistry
+    registry: GlobalResourceRegistry
     existed: bool
 
 
@@ -153,6 +153,21 @@ class _RegistryWrite:
     destination: Path
     content: bytes
     container: Path
+
+
+@dataclass(frozen=True)
+class _McpPlanResult:
+    """Result from MCP server mutation planning.
+
+    Separated into a named type because MCP planning returns apply-time
+    context (previously-owned and user-authored sets) that other planners
+    do not need.
+    """
+
+    changes: tuple[Change, ...]
+    registry: GlobalResourceRegistry
+    previously_owned_global: frozenset[str] = frozenset()
+    user_authored_global: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -765,7 +780,7 @@ def clean_project(
         raise ReconcileError(
             f"Refusing to use symlinked global skill registry file: {registry_path}"
         )
-    registry = GlobalSkillRegistry.from_path(registry_path)
+    registry = GlobalResourceRegistry.from_path(registry_path)
     if registry is None:
         raise ReconcileError(
             f"Cannot clean: global registry missing or corrupt at {registry_path}. "
@@ -910,7 +925,7 @@ def clean_project(
         registry_changed = True
 
     if registry_changed:
-        updated_registry = GlobalSkillRegistry(
+        updated_registry = GlobalResourceRegistry(
             skills=updated_skills,
             projects=updated_projects,
             agents=updated_agents,
@@ -967,21 +982,23 @@ def clean_project(
             change.path.unlink(missing_ok=True)
             _cleanup_empty_parents(change.path.parent, project_root_path / ".codex")
 
-    # Update the registry
-    if registry_changed and updated_registry is not None:
-        _atomic_write_file(
-            registry_path,
-            updated_registry.to_json().encode(),
-            container=bridge_home_path,
-        )
-
-    # Remove bridge-owned MCP server entries from config.toml files
+    # Remove bridge-owned MCP server entries from config.toml files *before*
+    # updating the registry, so a write failure here does not orphan entries
+    # whose ownership has already been released.
     _clean_mcp_config_entries(
         previous_state=previous_state,
         project_root=project_root_path,
         codex_home=codex_home_path,
         fully_removed_global_mcp=fully_removed_global_mcp,
     )
+
+    # Update the registry (after TOML cleanup succeeded)
+    if registry_changed and updated_registry is not None:
+        _atomic_write_file(
+            registry_path,
+            updated_registry.to_json().encode(),
+            container=bridge_home_path,
+        )
 
     # Remove the state file last, then clean up its parent if empty
     state_path.unlink(missing_ok=True)
@@ -1532,22 +1549,12 @@ def _plan_mcp_server_mutations(
     desired: DesiredState,
     previous_state: BridgeState | None,
     snapshot: _RegistrySnapshot,
-    updated_registry: GlobalSkillRegistry,
-) -> tuple[tuple[Change, ...], GlobalSkillRegistry, frozenset[str], frozenset[str]]:
+    updated_registry: GlobalResourceRegistry,
+) -> _McpPlanResult:
     """Plan MCP server config.toml mutations for both global and project scope.
 
     Global servers are tracked in the global registry.
     Project servers are tracked in the project state.
-
-    Returns:
-        changes: Planned mutation operations for config.toml files.
-        updated_registry: Registry with MCP ownership claims applied.
-            Only contains entries the bridge is allowed to own — user-authored
-            entries are excluded during planning, not rolled back after apply.
-        previously_owned_global: Server names this project owned before this run,
-            used by the apply phase to determine stale-entry removal scope.
-        user_authored_global: Global server names that exist in config.toml but
-            are not known to the registry — the bridge must never adopt these.
     """
     from cc_codex_bridge.toml_config import hash_mcp_server_table, read_codex_config
 
@@ -1562,7 +1569,7 @@ def _plan_mcp_server_mutations(
         for entry in snapshot.registry.mcp_servers.values()
     )
     if not desired.mcp_servers and not _has_previously_managed and not _has_global_mcp_ownership:
-        return (), updated_registry, frozenset(), frozenset()
+        return _McpPlanResult(changes=(), registry=updated_registry)
 
     changes: list[Change] = []
 
@@ -1664,7 +1671,12 @@ def _plan_mcp_server_mutations(
         for name in sorted(previously_owned_project - set(project_servers)):
             changes.append(Change("remove", project_config_path, resource_kind="mcp_server"))
 
-    return tuple(changes), updated_registry, frozenset(previously_owned_global), frozenset(user_authored_global)
+    return _McpPlanResult(
+        changes=tuple(changes),
+        registry=updated_registry,
+        previously_owned_global=frozenset(previously_owned_global),
+        user_authored_global=frozenset(user_authored_global),
+    )
 
 
 def _apply_mcp_server_changes(
@@ -1735,6 +1747,14 @@ def _apply_mcp_server_changes(
     # Build managed_mcp_servers for state — only track entries the bridge controls.
     # Include: previously owned entries still desired (retained) + newly added entries.
     # Exclude: desired entries that already existed as user-authored (skipped by apply).
+    #
+    # When discovery is degraded, some previously-owned servers may not appear
+    # in project_servers (they weren't discovered).  Carry forward their hashes
+    # from previous state so ownership tracking is preserved — otherwise the
+    # next healthy run would classify those config.toml entries as user-authored.
+    if desired.mcp_discovery_degraded and previous_state:
+        managed_mcp_servers.update(previous_state.managed_mcp_servers)
+
     bridge_controlled = previously_owned_project | set(project_changes_summary["added"])
     for name in sorted(bridge_controlled & set(project_servers)):
         managed_mcp_servers[name] = hash_mcp_server_table(project_servers[name].toml_table)
@@ -1800,9 +1820,10 @@ def _plan_mutations(
     plugin_resource_changes, updated_registry = _plan_plugin_resource_mutations(
         desired, snapshot, updated_registry,
     )
-    mcp_changes, updated_registry, mcp_previously_owned, mcp_user_authored = _plan_mcp_server_mutations(
+    mcp_result = _plan_mcp_server_mutations(
         desired, previous_state, snapshot, updated_registry,
     )
+    updated_registry = mcp_result.registry
 
     # Build registry write from the final accumulated state.
     registry_writes: list[_RegistryWrite] = []
@@ -1816,12 +1837,12 @@ def _plan_mutations(
             *project_changes, *project_skill_changes,
             *skill_changes, *agent_changes, *prompt_changes,
             *global_changes, *plugin_resource_changes,
-            *mcp_changes,
+            *mcp_result.changes,
         )),
         registry_writes=tuple(registry_writes),
         project_file_changes=project_changes,
-        mcp_previously_owned_global=mcp_previously_owned,
-        mcp_user_authored_global=mcp_user_authored,
+        mcp_previously_owned_global=mcp_result.previously_owned_global,
+        mcp_user_authored_global=mcp_result.user_authored_global,
     )
 
 
@@ -1967,7 +1988,7 @@ def _plan_skill_mutations(
     desired: DesiredState,
     previous_state: BridgeState | None,
     snapshot: _RegistrySnapshot,
-) -> tuple[tuple[Change, ...], GlobalSkillRegistry]:
+) -> tuple[tuple[Change, ...], GlobalResourceRegistry]:
     """Plan global-skill ownership and directory mutations.
 
     Returns the change list plus the updated registry for the caller
@@ -1975,7 +1996,7 @@ def _plan_skill_mutations(
     """
     global_skills_root = desired.codex_home / "skills"
     if global_skills_root.is_symlink():
-        return (), GlobalSkillRegistry(
+        return (), GlobalResourceRegistry(
             skills=dict(snapshot.registry.skills),
             projects=_ensure_project_in_list(
                 snapshot.registry.projects, desired.project_root
@@ -1992,7 +2013,7 @@ def _plan_skill_mutations(
     }
     changes: list[Change] = []
 
-    updated_registry = GlobalSkillRegistry(
+    updated_registry = GlobalResourceRegistry(
         skills=dict(snapshot.registry.skills),
         projects=_ensure_project_in_list(
             snapshot.registry.projects, desired.project_root
@@ -2105,8 +2126,8 @@ def _plan_global_instructions_changes(desired: DesiredState) -> tuple[Change, ..
 def _plan_plugin_resource_mutations(
     desired: DesiredState,
     snapshot: _RegistrySnapshot,
-    updated_registry: GlobalSkillRegistry,
-) -> tuple[tuple[Change, ...], GlobalSkillRegistry]:
+    updated_registry: GlobalResourceRegistry,
+) -> tuple[tuple[Change, ...], GlobalResourceRegistry]:
     """Plan vendored plugin resource directory mutations and registry ownership.
 
     Compares desired vendored resources against on-disk state using
@@ -2230,8 +2251,8 @@ def _plan_global_agent_mutations(
     desired: DesiredState,
     previous_state: BridgeState | None,
     snapshot: _RegistrySnapshot,
-    updated_registry: GlobalSkillRegistry,
-) -> tuple[tuple[Change, ...], GlobalSkillRegistry]:
+    updated_registry: GlobalResourceRegistry,
+) -> tuple[tuple[Change, ...], GlobalResourceRegistry]:
     """Plan global agent file and registry mutations.
 
     Receives the updated registry from the skill planner and continues
@@ -2320,7 +2341,7 @@ def _plan_global_agent_mutations(
     return tuple(changes), updated_registry
 
 
-def _owned_agent_filenames(registry: GlobalSkillRegistry, project_root: Path) -> set[str]:
+def _owned_agent_filenames(registry: GlobalResourceRegistry, project_root: Path) -> set[str]:
     """Return the agent filenames currently claimed by one project."""
     return {
         filename
@@ -2329,7 +2350,7 @@ def _owned_agent_filenames(registry: GlobalSkillRegistry, project_root: Path) ->
     }
 
 
-def _owned_plugin_resource_dirs(registry: GlobalSkillRegistry, project_root: Path) -> set[str]:
+def _owned_plugin_resource_dirs(registry: GlobalResourceRegistry, project_root: Path) -> set[str]:
     """Return the plugin resource dir names currently claimed by one project."""
     return {
         dir_name
@@ -2339,7 +2360,7 @@ def _owned_plugin_resource_dirs(registry: GlobalSkillRegistry, project_root: Pat
 
 
 def _owned_prompt_names(
-    registry: GlobalSkillRegistry,
+    registry: GlobalResourceRegistry,
     project_root: Path,
 ) -> set[str]:
     """Return prompt filenames owned by a project."""
@@ -2353,8 +2374,8 @@ def _owned_prompt_names(
 def _plan_prompt_mutations(
     desired: DesiredState,
     snapshot: _RegistrySnapshot,
-    updated_registry: GlobalSkillRegistry,
-) -> tuple[tuple[Change, ...], GlobalSkillRegistry]:
+    updated_registry: GlobalResourceRegistry,
+) -> tuple[tuple[Change, ...], GlobalResourceRegistry]:
     """Plan global-prompt ownership and file mutations.
 
     Prompts are flat files at ``codex_home / "prompts" / filename``.
@@ -2443,7 +2464,7 @@ def _plan_prompt_mutations(
 
 def _build_registry_write(
     snapshot: _RegistrySnapshot,
-    updated_registry: GlobalSkillRegistry,
+    updated_registry: GlobalResourceRegistry,
 ) -> _RegistryWrite | None:
     """Return one registry write when the desired registry differs from disk."""
     if updated_registry == snapshot.registry:
@@ -2455,7 +2476,7 @@ def _build_registry_write(
     )
 
 
-def _owned_skill_names(registry: GlobalSkillRegistry, project_root: Path) -> set[str]:
+def _owned_skill_names(registry: GlobalResourceRegistry, project_root: Path) -> set[str]:
     """Return the generated skill names currently claimed by one project."""
     return {
         install_dir_name
@@ -2587,10 +2608,10 @@ def _load_registry_snapshot(path: Path) -> _RegistrySnapshot:
     """Load one global registry only from a regular file at the expected path."""
     if path.is_symlink():
         raise ReconcileError(f"Refusing to use symlinked global skill registry file: {path}")
-    registry = GlobalSkillRegistry.from_path(path)
+    registry = GlobalResourceRegistry.from_path(path)
     return _RegistrySnapshot(
         path=path,
-        registry=registry or GlobalSkillRegistry(skills={}),
+        registry=registry or GlobalResourceRegistry(skills={}),
         existed=registry is not None,
     )
 

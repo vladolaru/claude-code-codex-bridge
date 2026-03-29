@@ -1665,7 +1665,7 @@ def _handle_uninstall_command(args: argparse.Namespace) -> int:
             launchagents_dir=args.launchagents_dir,
             dry_run=args.dry_run,
         )
-    except (ReconcileError, OSError, UnicodeError) as exc:
+    except (ReconcileError, OSError, UnicodeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 

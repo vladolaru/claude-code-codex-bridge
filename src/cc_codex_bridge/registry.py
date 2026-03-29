@@ -57,7 +57,7 @@ class GlobalMcpServerEntry:
 
 
 @dataclass(frozen=True)
-class GlobalSkillRegistry:
+class GlobalResourceRegistry:
     """Validated global generated-skill, agent, prompt, plugin resource, and MCP server ownership registry."""
 
     skills: dict[str, GlobalSkillEntry]
@@ -79,7 +79,7 @@ class GlobalSkillRegistry:
             object.__setattr__(self, "mcp_servers", {})
 
     @classmethod
-    def from_path(cls, path: Path) -> "GlobalSkillRegistry | None":
+    def from_path(cls, path: Path) -> "GlobalResourceRegistry | None":
         """Read one registry file when present."""
         if not path.exists():
             return None

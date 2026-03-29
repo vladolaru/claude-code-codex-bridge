@@ -307,7 +307,7 @@ class TestCleanMcpServers:
     def test_clean_preserves_global_mcp_with_other_owners(self, tmp_path, make_project):
         """clean_project preserves global MCP entries when another project still owns them."""
         from cc_codex_bridge.reconcile import clean_project
-        from cc_codex_bridge.registry import GlobalSkillRegistry, GLOBAL_REGISTRY_FILENAME
+        from cc_codex_bridge.registry import GlobalResourceRegistry, GLOBAL_REGISTRY_FILENAME
 
         project_a, _ = make_project("project-a")
         project_b, _ = make_project("project-b")
@@ -329,7 +329,7 @@ class TestCleanMcpServers:
         _build_and_reconcile(project_b, servers, codex_home, bridge_home)
 
         # Verify both projects own the server
-        registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+        registry = GlobalResourceRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
         assert registry is not None
         assert "wpcom" in registry.mcp_servers
         assert len(registry.mcp_servers["wpcom"].owners) == 2
@@ -345,7 +345,7 @@ class TestCleanMcpServers:
         assert "wpcom" in global_config.read_text()
 
         # Registry should still have wpcom with project B as owner
-        registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+        registry = GlobalResourceRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
         assert registry is not None
         assert "wpcom" in registry.mcp_servers
         assert len(registry.mcp_servers["wpcom"].owners) == 1
@@ -471,10 +471,9 @@ class TestUserAuthoredMcpPreservation:
         assert "mcp.figma.com" not in content
 
         # Verify the state does NOT track figma as managed
-        import hashlib
-        project_hash = hashlib.sha256(str(project).encode()).hexdigest()[:16]
-        state_path = bridge_home / "projects" / project_hash / "state.json"
+        from cc_codex_bridge.bridge_home import project_state_dir
         from cc_codex_bridge.state import BridgeState
+        state_path = project_state_dir(project, bridge_home=bridge_home) / "state.json"
         state = BridgeState.from_path(state_path)
         assert "figma" not in state.managed_mcp_servers
 
@@ -756,3 +755,49 @@ class TestDegradedDiscoveryPreservation:
         assert "wpcom" in global_config.read_text()
         assert project_config.exists()
         assert "figma" in project_config.read_text()
+
+    def test_degraded_discovery_with_new_server_preserves_ownership(self, tmp_path, make_project):
+        """When degraded + new server arrives, previously-owned entries keep ownership."""
+        import hashlib
+        from cc_codex_bridge.state import BridgeState
+
+        project, _ = make_project()
+        codex_home = tmp_path / "codex"
+        bridge_home = tmp_path / "bridge"
+
+        # First reconcile: normal, creates MCP entries
+        servers = (
+            GeneratedMcpServer(
+                name="figma",
+                scope="project",
+                toml_table={"url": "https://mcp.figma.com/mcp"},
+                source_description="project-local",
+            ),
+        )
+        _build_and_reconcile(project, servers, codex_home, bridge_home)
+
+        # Verify first run tracked figma
+        project_hash = hashlib.sha256(str(project).encode()).hexdigest()[:16]
+        state_path = bridge_home / "projects" / project_hash / "state.json"
+        state = BridgeState.from_path(state_path)
+        assert "figma" in state.managed_mcp_servers
+
+        # Second reconcile: degraded, but a new server appears (partially readable config)
+        # figma is NOT in the discovered set (lost due to corruption),
+        # but a new server "linear" is discovered.
+        new_servers = (
+            GeneratedMcpServer(
+                name="linear",
+                scope="project",
+                toml_table={"url": "https://mcp.linear.app/mcp"},
+                source_description="project-local",
+            ),
+        )
+        _build_and_reconcile_degraded(project, new_servers, codex_home, bridge_home)
+
+        # figma must still be in managed_mcp_servers (carried forward from state)
+        state = BridgeState.from_path(state_path)
+        assert "figma" in state.managed_mcp_servers, (
+            "degraded discovery with new additions must carry forward previously-owned entries"
+        )
+        assert "linear" in state.managed_mcp_servers

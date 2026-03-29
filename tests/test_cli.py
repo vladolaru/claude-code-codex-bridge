@@ -1059,7 +1059,7 @@ def test_uninstall_skips_missing_project(make_project, make_plugin_version, tmp_
 def test_uninstall_exits_nonzero_on_cleanup_error(make_project, tmp_path: Path, capsys):
     """uninstall returns exit code 1 when a project cleanup fails."""
     from cc_codex_bridge.state import BridgeState
-    from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME, GlobalSkillRegistry
+    from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME, GlobalResourceRegistry
 
     project_root, _ = make_project()
     codex_home = tmp_path / "codex-home"
@@ -1078,7 +1078,7 @@ def test_uninstall_exits_nonzero_on_cleanup_error(make_project, tmp_path: Path, 
     state_path.write_text(state.to_json())
 
     # Register the project
-    registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
+    registry = GlobalResourceRegistry(skills={}, projects=(project_root.resolve(),))
     bridge_home.mkdir(parents=True, exist_ok=True)
     (bridge_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
 

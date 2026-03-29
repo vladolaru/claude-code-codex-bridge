@@ -182,8 +182,8 @@ class TestHttpTranslation:
         # No other headers remain, so http_headers should be omitted
         assert "http_headers" not in gen.toml_table
 
-    def test_non_bearer_authorization_preserved(self):
-        """HTTP: non-Bearer Authorization header stays in http_headers."""
+    def test_non_bearer_authorization_preserved_with_warning(self):
+        """HTTP: non-Bearer literal Authorization header preserved but emits warning."""
         server = DiscoveredMcpServer(
             name="basic-auth-srv",
             scope="global",
@@ -199,6 +199,27 @@ class TestHttpTranslation:
         gen = result.servers[0]
         assert gen.toml_table["http_headers"] == {"Authorization": "Basic dXNlcjpwYXNz"}
         assert "bearer_token_env_var" not in gen.toml_table
+        # Literal credential triggers a warning diagnostic
+        assert len(result.diagnostics) == 1
+        assert "literal credential" in result.diagnostics[0].message
+
+    def test_non_bearer_env_var_authorization_no_warning(self):
+        """HTTP: non-Bearer Authorization header using env var emits no warning."""
+        server = DiscoveredMcpServer(
+            name="env-auth-srv",
+            scope="global",
+            transport="http",
+            source="user-global",
+            config={
+                "url": "https://example.com/mcp",
+                "headers": {"Authorization": "$MY_AUTH_TOKEN"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["http_headers"] == {"Authorization": "$MY_AUTH_TOKEN"}
+        assert not result.diagnostics
 
     def test_empty_headers_after_extraction_omitted(self):
         """HTTP: empty headers after Bearer extraction -> http_headers omitted."""
