@@ -1066,10 +1066,9 @@ These are current implemented simplifications, not necessarily permanent design 
 - exclusion ids are exact-match identifiers, not wildcard/glob patterns
 - commands are translated to native Codex prompt files (`~/.codex/prompts/`) rather than Codex skills, avoiding namespace collisions with the skill directory entirely
 - LaunchAgent scheduling with automatic `launchctl bootstrap/bootout` is supported; watcher mode is not
-- MCP reconcile compares stored content hashes (from registry/state) against desired state, not against actual `config.toml` content on disk — externally edited or deleted bridge-owned MCP entries are not repaired until the desired state itself changes; this matches the existing behavior for skills, agents, and prompts, where drift detection is only implemented for managed project files
-- MCP planning parses both global and project `config.toml` when any MCP work is needed, even if only one scope has servers — a corrupt `config.toml` in the unused scope blocks the entire MCP reconcile; scope-specific lazy parsing would avoid this
-- `_load_json()` in MCP discovery catches all `OSError` variants (including `PermissionError`) and treats them as "file missing" rather than degraded — an unreadable config file would not trigger degraded-mode preservation of previously-bridged entries
 - MCP planning assumes `mcp_servers` is a TOML table when the document parses successfully — a hand-crafted scalar value (`mcp_servers = "oops"`) would pass TOML validation but crash during apply, leaving the registry inconsistent
+- MCP translation does not remap Claude `${VAR}` env-var references in non-Authorization fields — Codex may treat these as literal strings rather than expanding them at runtime; the bridge copies the syntax verbatim and relies on the host shell or Codex runtime to resolve them
+- MCP server names must match `[A-Za-z0-9_-]`; servers with dots, spaces, or other characters are skipped with a diagnostic — this is stricter than TOML's quoted-key support but required for registry key safety and Codex `mcp__<server>__<tool>` naming
 
 Any change to these constraints should update this file.
 
