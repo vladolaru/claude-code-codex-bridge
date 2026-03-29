@@ -1171,7 +1171,7 @@ def uninstall_all(
                 status="cleaned",
                 changes=report.changes,
             ))
-        except (ReconcileError, OSError, UnicodeError) as exc:
+        except (ReconcileError, OSError, UnicodeError, ValueError) as exc:
             project_results.append(UninstallProjectResult(
                 root=root,
                 status="skipped",
