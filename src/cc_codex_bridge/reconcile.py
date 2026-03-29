@@ -1556,6 +1556,7 @@ def _plan_mcp_server_mutations(
     Global servers are tracked in the global registry.
     Project servers are tracked in the project state.
     """
+    import tomlkit
     from cc_codex_bridge.toml_config import hash_mcp_server_table, read_codex_config
 
     # Early exit: no MCP servers to process and none previously managed.
@@ -1573,15 +1574,23 @@ def _plan_mcp_server_mutations(
 
     changes: list[Change] = []
 
-    # Pre-validate: ensure target config.toml files are parseable BEFORE any
-    # registry mutations.  This prevents the inconsistency where the registry
-    # claims ownership of entries that were never written to config.toml.
-    global_config_path = desired.codex_home / "config.toml"
-    global_doc = read_codex_config(global_config_path)  # raises ValueError on corrupt TOML
-    project_config_path = desired.project_root / ".codex" / "config.toml"
-    project_doc = read_codex_config(project_config_path)  # raises ValueError on corrupt TOML
-
     global_servers, project_servers = _partition_mcp_servers_by_scope(desired.mcp_servers)
+
+    # Pre-validate: only parse config.toml files for scopes that have desired
+    # servers.  This avoids failing a project-only sync due to unrelated
+    # corruption in the global config, and vice versa.  Stale-entry cleanup
+    # re-reads config.toml in the apply phase, so we don't need planning-phase
+    # reads for scopes that only have removals.
+    global_config_path = desired.codex_home / "config.toml"
+    global_doc = (
+        read_codex_config(global_config_path) if global_servers
+        else tomlkit.document()
+    )
+    project_config_path = desired.project_root / ".codex" / "config.toml"
+    project_doc = (
+        read_codex_config(project_config_path) if project_servers
+        else tomlkit.document()
+    )
 
     # Detect user-authored entries in config.toml that the bridge must not
     # adopt.  An entry is user-authored if it exists in config.toml but is
@@ -1724,7 +1733,11 @@ def _apply_mcp_server_changes(
         apply_mcp_changes(
             doc,
             desired={name: s.toml_table for name, s in adoptable_global.items()},
-            owned=previously_owned_global,
+            # Include adoptable keys so first-time adoption of an existing
+            # bridge-managed server is treated as updateable rather than
+            # user-authored.  This is safe for the removal step because all
+            # adoptable keys are in desired, so they'll be skipped.
+            owned=previously_owned_global | adoptable_global.keys(),
         )
         write_codex_config(global_config_path, doc)
 

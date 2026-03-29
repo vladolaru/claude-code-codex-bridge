@@ -684,6 +684,116 @@ class TestCorruptConfigTomlPlanning:
             "Registry should not be written when planning fails on corrupt config.toml"
         )
 
+    def test_project_sync_succeeds_with_corrupt_global_config(self, tmp_path, make_project):
+        """Project-only MCP sync must not fail due to unrelated corrupt global config.toml."""
+        project, _ = make_project()
+        codex_home = tmp_path / "codex-home"
+        codex_home.mkdir()
+        bridge_home = tmp_path / "bridge-home"
+
+        # Write corrupt global config.toml — irrelevant to project scope
+        (codex_home / "config.toml").write_text("[broken\nnot valid", encoding="utf-8")
+
+        # Reconcile with project-scoped server only — should succeed
+        report = _build_and_reconcile(
+            project,
+            (
+                GeneratedMcpServer(
+                    name="my-server",
+                    scope="project",
+                    toml_table={"command": "my-cmd"},
+                    source_description="project-local",
+                ),
+            ),
+            codex_home,
+            bridge_home,
+        )
+
+        project_config = project / ".codex" / "config.toml"
+        assert project_config.exists()
+        assert "my-server" in project_config.read_text()
+
+    def test_global_sync_succeeds_with_corrupt_project_config(self, tmp_path, make_project):
+        """Global-only MCP sync must not fail due to unrelated corrupt project config.toml."""
+        project, _ = make_project()
+        codex_home = tmp_path / "codex-home"
+        bridge_home = tmp_path / "bridge-home"
+
+        # Write corrupt project config.toml — irrelevant to global scope
+        project_codex = project / ".codex"
+        project_codex.mkdir(parents=True)
+        (project_codex / "config.toml").write_text("[broken\nnot valid", encoding="utf-8")
+
+        # Reconcile with global-scoped server only — should succeed
+        report = _build_and_reconcile(
+            project,
+            (
+                GeneratedMcpServer(
+                    name="my-server",
+                    scope="global",
+                    toml_table={"command": "my-cmd"},
+                    source_description="user-global",
+                ),
+            ),
+            codex_home,
+            bridge_home,
+        )
+
+        global_config = codex_home / "config.toml"
+        assert global_config.exists()
+        assert "my-server" in global_config.read_text()
+
+
+class TestMultiProjectGlobalOwnership:
+    """Global MCP entries shared across multiple projects."""
+
+    def test_second_project_updates_config_when_definition_changed(self, tmp_path, make_project):
+        """When project B adopts a global server whose definition changed, config.toml must update."""
+        project_a, _ = make_project("project-a")
+        project_b, _ = make_project("project-b")
+        codex_home = tmp_path / "codex-home"
+        bridge_home = tmp_path / "bridge-home"
+
+        # Project A bridges wpcom v1
+        _build_and_reconcile(
+            project_a,
+            (
+                GeneratedMcpServer(
+                    name="wpcom",
+                    scope="global",
+                    toml_table={"command": "wpcom-server", "args": ["--version=1"]},
+                    source_description="user-global",
+                ),
+            ),
+            codex_home,
+            bridge_home,
+        )
+
+        global_config = codex_home / "config.toml"
+        assert "version=1" in global_config.read_text()
+
+        # Project B bridges wpcom v2 (definition changed)
+        _build_and_reconcile(
+            project_b,
+            (
+                GeneratedMcpServer(
+                    name="wpcom",
+                    scope="global",
+                    toml_table={"command": "wpcom-server", "args": ["--version=2"]},
+                    source_description="user-global",
+                ),
+            ),
+            codex_home,
+            bridge_home,
+        )
+
+        # Config must reflect v2, not stay on v1
+        config_content = global_config.read_text()
+        assert "version=2" in config_content, (
+            "First-time adoption of changed global server must update config.toml"
+        )
+        assert "version=1" not in config_content
+
 
 def _build_and_reconcile_degraded(
     project: Path,
