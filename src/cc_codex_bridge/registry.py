@@ -6,7 +6,6 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
-import re
 from typing import Iterable
 
 from cc_codex_bridge.model import GeneratedSkill, GeneratedSkillFile, ReconcileError
@@ -402,9 +401,6 @@ def _require_plugin_resource_dir_name(value: str, path: Path) -> str:
     return candidate
 
 
-_MCP_SERVER_KEY_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
-
-
 def _require_mcp_server_key_name(value: str, path: Path) -> str:
     """Validate one MCP server key name.
 
@@ -412,7 +408,7 @@ def _require_mcp_server_key_name(value: str, path: Path) -> str:
     and underscores only.  No slashes, dots, spaces, or path components.
     """
     candidate = value.strip()
-    if not candidate or not _MCP_SERVER_KEY_RE.match(candidate):
+    if not candidate or not all(c.isalnum() or c in "-_" for c in candidate):
         raise ReconcileError(f"Invalid global skill registry file: {path}")
     return candidate
 
