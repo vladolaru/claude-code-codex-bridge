@@ -1239,7 +1239,10 @@ def uninstall_all(
     )
 
     if not dry_run:
-        # Remove remaining MCP server entries from global config.toml
+        # Remove remaining MCP server entries from global config.toml.
+        # If the file is corrupt, skip MCP cleanup — the entries can't be
+        # removed from an unparseable file, but the rest of the uninstall
+        # (registry, LaunchAgents, etc.) should still proceed.
         if remaining_global_mcp:
             from cc_codex_bridge.toml_config import (
                 apply_mcp_changes,
@@ -1247,9 +1250,12 @@ def uninstall_all(
                 write_codex_config,
             )
             global_config_path = codex_home_path / "config.toml"
-            doc = read_codex_config(global_config_path)
-            apply_mcp_changes(doc, desired={}, owned=remaining_global_mcp)
-            write_codex_config(global_config_path, doc)
+            try:
+                doc = read_codex_config(global_config_path)
+                apply_mcp_changes(doc, desired={}, owned=remaining_global_mcp)
+                write_codex_config(global_config_path, doc)
+            except ValueError:
+                pass  # corrupt TOML — skip MCP cleanup, continue uninstall
 
         # Apply global removals
         for change in global_removals:
