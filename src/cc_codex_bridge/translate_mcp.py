@@ -16,7 +16,10 @@ from cc_codex_bridge.model import (
 # Matches Bearer token patterns:
 #   Bearer ${VAR_NAME}  (with braces)
 #   Bearer $VAR_NAME    (without braces)
-_BEARER_TOKEN_RE = re.compile(r"^Bearer\s+\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$")
+_BEARER_TOKEN_RE = re.compile(
+    r"^Bearer\s+\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$",
+    re.IGNORECASE,
+)
 
 
 def translate_mcp_servers(
@@ -141,7 +144,7 @@ def _translate_http(
                 # generated config.  Warn the user to use an env var ref.
                 # Only catch Bearer tokens; other schemes (Basic, etc.) are
                 # passed through as http_headers.
-                if value.lstrip().startswith("Bearer "):
+                if value.lstrip().lower().startswith("bearer "):
                     diagnostics.append(McpTranslationDiagnostic(
                         server_name=server.name,
                         message=(
