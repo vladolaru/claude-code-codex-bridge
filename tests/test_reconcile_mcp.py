@@ -7,28 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from cc_codex_bridge.model import (
-    DiscoveredMcpServer,
-    GeneratedMcpServer,
-)
+from cc_codex_bridge.model import GeneratedMcpServer
 from cc_codex_bridge.reconcile import (
     build_desired_state,
     diff_desired_state,
     reconcile_desired_state,
 )
-from cc_codex_bridge.translate_mcp import translate_mcp_servers
-
-
-def _write_claude_json(path: Path, servers: dict, project_root: Path | None = None, project_servers: dict | None = None) -> None:
-    """Write a ~/.claude.json with MCP servers."""
-    data: dict = {}
-    if servers:
-        data["mcpServers"] = servers
-    if project_root and project_servers:
-        data["projects"] = {
-            str(project_root): {"mcpServers": project_servers}
-        }
-    path.write_text(json.dumps(data))
 
 
 def _build_and_reconcile(
