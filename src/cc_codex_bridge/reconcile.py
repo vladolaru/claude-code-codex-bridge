@@ -772,6 +772,32 @@ def clean_project(
             "Global ownership claims cannot be released safely."
         )
 
+    # Pre-validate config.toml files that will need MCP cleanup BEFORE any
+    # registry writes.  If a config.toml is corrupt, aborting now keeps the
+    # registry consistent — otherwise we'd release ownership and then fail
+    # to clean the actual TOML entries, orphaning them permanently.
+    _has_mcp_to_clean = (
+        previous_state.managed_mcp_servers
+        or any(
+            project_root_path in entry.owners
+            for entry in registry.mcp_servers.values()
+        )
+    )
+    if _has_mcp_to_clean:
+        from cc_codex_bridge.toml_config import read_codex_config
+
+        if previous_state.managed_mcp_servers:
+            project_config_path = project_root_path / ".codex" / "config.toml"
+            read_codex_config(project_config_path)  # raises ValueError on corrupt TOML
+
+        _has_global_mcp = any(
+            project_root_path in entry.owners
+            for entry in registry.mcp_servers.values()
+        )
+        if _has_global_mcp:
+            global_config_path = codex_home_path / "config.toml"
+            read_codex_config(global_config_path)  # raises ValueError on corrupt TOML
+
     registry_changed = False
     updated_skills = dict(registry.skills)
     for install_dir_name in sorted(registry.skills):
@@ -1363,14 +1389,12 @@ def _apply_changes(
         )
     else:
         # No MCP changes — carry forward previously tracked project-scope
-        # servers (critical for degraded discovery) then add any currently
-        # desired project-scope servers.
-        from cc_codex_bridge.toml_config import hash_mcp_server_table
+        # servers (critical for degraded discovery).  Do not add desired
+        # servers unconditionally: if no "create" was planned, the server
+        # is either already tracked (carried forward from state) or was
+        # skipped as user-authored.
         if previous_state:
             managed_mcp_servers.update(previous_state.managed_mcp_servers)
-        for s in desired.mcp_servers:
-            if s.scope == "project":
-                managed_mcp_servers[s.name] = hash_mcp_server_table(s.toml_table)
 
     retained_previous_project_files = _retained_stale_managed_project_files(
         desired,
@@ -1535,8 +1559,7 @@ def _plan_mcp_server_mutations(
     global_config_path = desired.codex_home / "config.toml"
     global_doc = read_codex_config(global_config_path)  # raises ValueError on corrupt TOML
     project_config_path = desired.project_root / ".codex" / "config.toml"
-    if project_config_path.exists():
-        read_codex_config(project_config_path)  # raises ValueError on corrupt TOML
+    project_doc = read_codex_config(project_config_path)  # raises ValueError on corrupt TOML
 
     global_servers, project_servers = _partition_mcp_servers_by_scope(desired.mcp_servers)
 
@@ -1602,7 +1625,18 @@ def _plan_mcp_server_mutations(
     if previous_state is not None:
         previously_owned_project = set(previous_state.managed_mcp_servers)
 
+    # Detect user-authored project-scoped entries — entries that exist in the
+    # project config.toml but are NOT tracked in bridge state.  Without this
+    # check, the plan would report a "create" every run for entries the apply
+    # phase correctly skips, making reconcile non-idempotent.
+    existing_project_mcp = set(project_doc.get("mcp_servers", {}))
+    user_authored_project: set[str] = existing_project_mcp - previously_owned_project
+
     for name in sorted(project_servers):
+        # Skip user-authored entries — never claim ownership.
+        if name in user_authored_project:
+            continue
+
         server = project_servers[name]
         desired_hash = hash_mcp_server_table(server.toml_table)
         prev_hash = (previous_state.managed_mcp_servers.get(name) if previous_state else None)
