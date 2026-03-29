@@ -297,6 +297,27 @@ class TestHttpTranslation:
         assert "type" not in gen.toml_table
         assert gen.toml_table["url"] == "https://example.com/mcp"
 
+    def test_non_dict_headers_ignored(self):
+        """HTTP: non-dict headers (e.g. list) are silently ignored."""
+        server = DiscoveredMcpServer(
+            name="bad-headers-srv",
+            scope="global",
+            transport="http",
+            source="user-global",
+            config={
+                "url": "https://example.com/mcp",
+                "headers": [],
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        assert len(result.servers) == 1
+        gen = result.servers[0]
+        assert gen.toml_table["url"] == "https://example.com/mcp"
+        assert "http_headers" not in gen.toml_table
+        assert "bearer_token_env_var" not in gen.toml_table
+        assert len(result.diagnostics) == 0
+
 
 # -- Diagnostics (warnings) -------------------------------------------------
 

@@ -159,7 +159,7 @@ def _translate_http(
 
     # Process headers
     headers = config.get("headers")
-    if headers:
+    if isinstance(headers, dict):
         remaining_headers: dict[str, str] = {}
         for key, value in headers.items():
             if key.lower() == "authorization":
