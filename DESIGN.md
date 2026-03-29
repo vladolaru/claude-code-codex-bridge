@@ -967,7 +967,7 @@ Current runtime module responsibilities:
 - `config_check.py`
   - config validation: TOML well-formedness, scan path resolution, unknown key detection, global-only key rejection for project configs
 - `config_exclude_commands.py`
-  - config exclude subcommand handlers: discovery-backed add/remove/list for plugin/skill/agent/command exclusions
+  - config exclude subcommand handlers: discovery-backed add/remove/list for plugin/skill/agent/command/mcp_server exclusions
 - `config_scan_commands.py`
   - config scan subcommand handlers: glob-validated add/remove/list for scan paths
 - `config_scope.py`

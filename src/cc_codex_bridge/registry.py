@@ -1,4 +1,4 @@
-"""Global generated-skill registry models and deterministic hash helpers."""
+"""Global resource ownership registry models and deterministic hash helpers."""
 
 from __future__ import annotations
 
