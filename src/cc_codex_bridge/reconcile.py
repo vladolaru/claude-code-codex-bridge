@@ -1639,6 +1639,9 @@ def _plan_mcp_server_mutations(
 
         if name not in previously_owned_global:
             changes.append(Change("create", global_config_path, resource_kind="mcp_server"))
+        elif name not in existing_global_mcp:
+            # Previously owned but missing from config.toml (external edit).
+            changes.append(Change("update", global_config_path, resource_kind="mcp_server"))
         elif existing_entry is not None and existing_entry.content_hash != desired_hash:
             changes.append(Change("update", global_config_path, resource_kind="mcp_server"))
 
@@ -1681,6 +1684,9 @@ def _plan_mcp_server_mutations(
 
         if name not in previously_owned_project:
             changes.append(Change("create", project_config_path, resource_kind="mcp_server"))
+        elif name not in existing_project_mcp:
+            # Previously owned but missing from config.toml (external edit).
+            changes.append(Change("update", project_config_path, resource_kind="mcp_server"))
         elif prev_hash is not None and prev_hash != desired_hash:
             changes.append(Change("update", project_config_path, resource_kind="mcp_server"))
 
