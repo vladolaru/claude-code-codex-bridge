@@ -1551,6 +1551,19 @@ def _plan_mcp_server_mutations(
     """
     from cc_codex_bridge.toml_config import hash_mcp_server_table, read_codex_config
 
+    # Early exit: no MCP servers to process and none previously managed.
+    # Avoids reading config.toml files unnecessarily, which would cause
+    # non-MCP syncs to fail on unrelated TOML syntax errors.
+    _has_previously_managed = (
+        previous_state is not None and previous_state.managed_mcp_servers
+    )
+    _has_global_mcp_ownership = any(
+        desired.project_root in entry.owners
+        for entry in snapshot.registry.mcp_servers.values()
+    )
+    if not desired.mcp_servers and not _has_previously_managed and not _has_global_mcp_ownership:
+        return (), updated_registry, frozenset(), frozenset()
+
     changes: list[Change] = []
 
     # Pre-validate: ensure target config.toml files are parseable BEFORE any
