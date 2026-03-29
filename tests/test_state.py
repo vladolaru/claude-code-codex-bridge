@@ -8,7 +8,7 @@ import json
 import pytest
 
 from cc_codex_bridge.model import ReconcileError
-from cc_codex_bridge.registry import GlobalSkillEntry, GlobalSkillRegistry
+from cc_codex_bridge.registry import GlobalSkillEntry, GlobalResourceRegistry
 from cc_codex_bridge.state import BridgeState
 
 
@@ -26,7 +26,7 @@ def test_bridge_state_round_trips(tmp_path: Path):
     loaded = BridgeState.from_path(path)
 
     assert loaded == state
-    assert json.loads(state.to_json())["version"] == 10
+    assert json.loads(state.to_json())["version"] == 11
 
 
 def test_bridge_state_handles_missing_invalid_and_unsupported_files(tmp_path: Path):
@@ -138,13 +138,13 @@ def test_bridge_state_v8_migration(tmp_path: Path):
     loaded = BridgeState.from_path(state_path)
     # v8 list entries get empty hash (unknown content)
     assert loaded.managed_project_files == {"CLAUDE.md": ""}
-    assert loaded.version == 10
+    assert loaded.version == 11
 
 
 def test_global_skill_registry_round_trips(tmp_path: Path):
     """A valid global registry serializes and deserializes deterministically."""
     path = tmp_path / "registry.json"
-    registry = GlobalSkillRegistry(
+    registry = GlobalResourceRegistry(
         skills={
             "prompt-engineer-prompt-engineer": GlobalSkillEntry(
                 content_hash="sha256:abc123",
@@ -154,9 +154,9 @@ def test_global_skill_registry_round_trips(tmp_path: Path):
     )
     path.write_text(registry.to_json())
 
-    loaded = GlobalSkillRegistry.from_path(path)
+    loaded = GlobalResourceRegistry.from_path(path)
 
-    assert loaded == GlobalSkillRegistry(
+    assert loaded == GlobalResourceRegistry(
         skills={
             "prompt-engineer-prompt-engineer": GlobalSkillEntry(
                 content_hash="sha256:abc123",
@@ -170,17 +170,17 @@ def test_global_skill_registry_round_trips(tmp_path: Path):
 def test_global_skill_registry_rejects_invalid_schema(tmp_path: Path):
     """Registry loading fails clearly for malformed content."""
     missing = tmp_path / "missing.json"
-    assert GlobalSkillRegistry.from_path(missing) is None
+    assert GlobalResourceRegistry.from_path(missing) is None
 
     invalid = tmp_path / "invalid.json"
     invalid.write_text("{")
     with pytest.raises(ReconcileError, match="Invalid global skill registry file"):
-        GlobalSkillRegistry.from_path(invalid)
+        GlobalResourceRegistry.from_path(invalid)
 
     unsupported = tmp_path / "unsupported.json"
     unsupported.write_text(json.dumps({"version": 999, "skills": {}}))
     with pytest.raises(ReconcileError, match="Unsupported global skill registry version"):
-        GlobalSkillRegistry.from_path(unsupported)
+        GlobalResourceRegistry.from_path(unsupported)
 
     invalid_schema = tmp_path / "invalid-schema.json"
     invalid_schema.write_text(
@@ -197,4 +197,94 @@ def test_global_skill_registry_rejects_invalid_schema(tmp_path: Path):
         )
     )
     with pytest.raises(ReconcileError, match="Invalid global skill registry file"):
-        GlobalSkillRegistry.from_path(invalid_schema)
+        GlobalResourceRegistry.from_path(invalid_schema)
+
+
+# --- MCP server tracking tests ---
+
+
+def test_bridge_state_version_is_11():
+    """STATE_VERSION should be 11 after adding managed_mcp_servers."""
+    from cc_codex_bridge.state import STATE_VERSION
+
+    assert STATE_VERSION == 11
+
+
+def test_bridge_state_default_managed_mcp_servers(tmp_path: Path):
+    """BridgeState defaults managed_mcp_servers to an empty dict."""
+    state = BridgeState(
+        project_root=tmp_path / "project",
+        codex_home=tmp_path / "codex",
+        bridge_home=tmp_path / "bridge",
+        managed_project_files={"CLAUDE.md": "sha256:aaa"},
+    )
+    assert state.managed_mcp_servers == {}
+
+
+def test_bridge_state_construction_with_managed_mcp_servers(tmp_path: Path):
+    """BridgeState can be constructed with explicit managed_mcp_servers."""
+    servers = {
+        "context-a8c": "sha256:abc123",
+        "playwright": "sha256:def456",
+    }
+    state = BridgeState(
+        project_root=tmp_path / "project",
+        codex_home=tmp_path / "codex",
+        bridge_home=tmp_path / "bridge",
+        managed_project_files={"CLAUDE.md": "sha256:aaa"},
+        managed_mcp_servers=servers,
+    )
+    assert state.managed_mcp_servers == servers
+
+
+def test_bridge_state_mcp_servers_round_trips(tmp_path: Path):
+    """State with managed_mcp_servers round-trips correctly (write, read, verify)."""
+    servers = {
+        "context-a8c": "sha256:abc123",
+        "playwright": "sha256:def456",
+    }
+    state = BridgeState(
+        project_root=tmp_path / "project",
+        codex_home=tmp_path / "codex",
+        bridge_home=tmp_path / "bridge",
+        managed_project_files={"CLAUDE.md": "sha256:aaa"},
+        managed_mcp_servers=servers,
+    )
+    path = tmp_path / "state.json"
+    path.write_text(state.to_json())
+
+    loaded = BridgeState.from_path(path)
+
+    assert loaded == state
+    assert loaded.managed_mcp_servers == servers
+
+
+def test_bridge_state_mcp_servers_is_str_to_str_dict(tmp_path: Path):
+    """managed_mcp_servers maps server name (str) to content hash (str)."""
+    state = BridgeState(
+        project_root=tmp_path / "project",
+        codex_home=tmp_path / "codex",
+        bridge_home=tmp_path / "bridge",
+        managed_project_files={},
+        managed_mcp_servers={"my-server": "sha256:aaabbb"},
+    )
+    assert isinstance(state.managed_mcp_servers, dict)
+    for k, v in state.managed_mcp_servers.items():
+        assert isinstance(k, str)
+        assert isinstance(v, str)
+
+
+def test_bridge_state_v10_migration_adds_empty_mcp_servers(tmp_path: Path):
+    """v10 state files (missing managed_mcp_servers) migrate to v11 with empty dict."""
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps({
+        "version": 10,
+        "project_root": str(tmp_path),
+        "codex_home": str(tmp_path / "codex"),
+        "bridge_home": str(tmp_path / "bridge"),
+        "managed_project_files": {"CLAUDE.md": "sha256:aaa"},
+        "managed_project_skill_dirs": [],
+    }, indent=2))
+    loaded = BridgeState.from_path(state_path)
+    assert loaded.managed_mcp_servers == {}
+    assert loaded.version == 11

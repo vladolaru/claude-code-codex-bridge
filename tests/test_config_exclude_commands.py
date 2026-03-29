@@ -17,6 +17,7 @@ from cc_codex_bridge.config_exclude_commands import (
 )
 from cc_codex_bridge.config_writer import read_config_data, write_config_data
 from cc_codex_bridge.model import (
+    DiscoveredMcpServer,
     DiscoveryResult,
     InstalledPlugin,
     ProjectContext,
@@ -68,6 +69,7 @@ def _make_discovery(
     project_skills: tuple[str, ...] = (),
     project_agents: tuple[str, ...] = (),
     project_commands: tuple[str, ...] = (),
+    mcp_servers: tuple[DiscoveredMcpServer, ...] = (),
 ) -> DiscoveryResult:
     """Build a DiscoveryResult with fake paths for standalone entities."""
     user_base = tmp_path / "user"
@@ -84,6 +86,7 @@ def _make_discovery(
         project_skills=tuple(project_base / "skills" / n for n in project_skills),
         project_agents=tuple(project_base / "agents" / n for n in project_agents),
         project_commands=tuple(project_base / "commands" / n for n in project_commands),
+        mcp_servers=mcp_servers,
     )
 
 
@@ -156,7 +159,31 @@ class TestListDiscoverableEntities:
         discovery = _make_discovery(tmp_path)
         entities = list_discoverable_entities(discovery)
 
-        assert entities == {"plugin": [], "skill": [], "agent": [], "command": []}
+        assert entities == {"plugin": [], "skill": [], "agent": [], "command": [], "mcp_server": []}
+
+    def test_returns_mcp_server_names(self, tmp_path: Path) -> None:
+        """MCP server names are listed under the mcp_server kind."""
+        discovery = _make_discovery(
+            tmp_path,
+            mcp_servers=(
+                DiscoveredMcpServer(
+                    name="my-server",
+                    scope="global",
+                    config={"command": "my-cmd"},
+                    transport="stdio",
+                    source="~/.claude.json",
+                ),
+                DiscoveredMcpServer(
+                    name="project-server",
+                    scope="project",
+                    config={"command": "other-cmd"},
+                    transport="stdio",
+                    source=".mcp.json",
+                ),
+            ),
+        )
+        entities = list_discoverable_entities(discovery)
+        assert entities["mcp_server"] == ["my-server", "project-server"]
 
 
 # ---------------------------------------------------------------------------

@@ -201,6 +201,7 @@ def translate_standalone_skills(
         skill_content = read_utf8_text(
             skill_path / "SKILL.md", label="skill file", error_type=TranslationError
         )
+        skill_content = _replace_skill_dir_variable(skill_content, skill_path)
         rewritten, referenced_sources = _resolve_relative_references(
             skill_path, skill_content,
         )
@@ -294,6 +295,7 @@ def _build_generated_skill(
 
     skill_md_path = raw_skill.skill_path / "SKILL.md"
     skill_content = read_utf8_text(skill_md_path, label="skill file", error_type=TranslationError)
+    skill_content = _replace_skill_dir_variable(skill_content, raw_skill.skill_path)
     rewritten, referenced_sources = _resolve_relative_references(
         raw_skill.skill_path, skill_content,
     )
@@ -438,6 +440,29 @@ def _rewrite_frontmatter_name(content: str, codex_skill_name: str) -> str:
         raise TranslationError("Skill frontmatter missing required `name` field")
 
     return "".join(lines)
+
+
+_SKILL_DIR_PATH_RE = re.compile(
+    r"\$\{CLAUDE_SKILL_DIR\}(/[^\s\"`',)}\]>]+)?"
+)
+
+
+def _replace_skill_dir_variable(content: str, skill_path: Path) -> str:
+    """Replace ``${CLAUDE_SKILL_DIR}`` references with resolved absolute paths.
+
+    Claude Code resolves this variable at runtime to the skill's own directory.
+    Each occurrence is resolved as a complete path (including any ``../``
+    components) so the result contains no relative traversals.
+    """
+    resolved_root = skill_path.resolve()
+
+    def _resolve_match(m: re.Match) -> str:
+        suffix = m.group(1)
+        if suffix:
+            return str((resolved_root / suffix.lstrip("/")).resolve())
+        return str(resolved_root)
+
+    return _SKILL_DIR_PATH_RE.sub(_resolve_match, content)
 
 
 def _copy_tree(

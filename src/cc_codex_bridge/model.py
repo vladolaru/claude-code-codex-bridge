@@ -143,6 +143,8 @@ class DiscoveryResult:
     project_agents: tuple[Path, ...] = ()
     project_commands: tuple[Path, ...] = ()
     user_claude_md: str | None = None
+    mcp_servers: tuple[DiscoveredMcpServer, ...] = ()
+    mcp_discovery_degraded: bool = False
 
 
 @dataclass(frozen=True)
@@ -259,3 +261,40 @@ class VendoredPluginResource:
     source_dir: Path         # e.g., /path/to/plugin/scripts
     target_dir_name: str     # e.g., "scripts"
     files: tuple[GeneratedSkillFile, ...]  # reuse GeneratedSkillFile for file content
+
+
+@dataclass(frozen=True)
+class DiscoveredMcpServer:
+    """An MCP server definition discovered from Claude Code configuration."""
+
+    name: str           # server name (key in mcpServers)
+    scope: str          # "global" or "project"
+    transport: str      # "stdio" or "http"
+    source: str         # "user-global", "project-local", or "project-shared"
+    config: dict        # raw CC config dict
+
+
+@dataclass(frozen=True)
+class GeneratedMcpServer:
+    """A translated MCP server ready to write into Codex config.toml."""
+
+    name: str           # server name (preserved from CC)
+    scope: str          # "global" or "project"
+    toml_table: dict    # Codex-side TOML key-value pairs
+    source_description: str  # provenance for logging/diagnostics
+
+
+@dataclass(frozen=True)
+class McpTranslationDiagnostic:
+    """A warning produced during MCP server translation."""
+
+    server_name: str
+    message: str
+
+
+@dataclass(frozen=True)
+class McpTranslationResult:
+    """Result of translating discovered MCP servers."""
+
+    servers: tuple[GeneratedMcpServer, ...]
+    diagnostics: tuple[McpTranslationDiagnostic, ...]

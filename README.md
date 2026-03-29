@@ -4,7 +4,7 @@
 
 Automatically bridge your local Claude Code setup into Codex so both stay equally effective.
 
-`cc-codex-bridge` reads the Claude Code setup on your machine — plugins, skills, agents, commands, and instructions — and generates equivalent Codex artifacts. You install/set up/author once in Claude Code; the bridge keeps Codex in sync.
+`cc-codex-bridge` reads the Claude Code setup on your machine — plugins, skills, agents, commands, MCP servers, and instructions — and generates equivalent Codex artifacts. You install/set up/author once in Claude Code; the bridge keeps Codex in sync.
 
 **This is a one-way bridge: Claude Code → Codex.** Changes made directly in Codex (editing generated files, adding skills manually under `~/.codex/`) are not reflected back into Claude Code and will be overwritten on the next reconcile.
 
@@ -31,7 +31,7 @@ cd ~/path/to/your/project
 cc-codex-bridge reconcile
 ```
 
-The bridge reads your Claude Code plugins, skills, agents, and commands and writes the Codex equivalents under `.codex/` and `~/.codex/`. Run `status` any time to see what's in sync.
+The bridge reads your Claude Code plugins, skills, agents, commands, and MCP servers, and writes the Codex equivalents under `.codex/` and `~/.codex/`. Run `status` any time to see what's in sync.
 
 ### 4. Register all your projects for bulk operations
 
@@ -58,7 +58,7 @@ cc-codex-bridge autosync install
 cc-codex-bridge status --all
 ```
 
-You should see `STATUS: in_sync` for every project. Done — Claude Code and Codex now share the same plugins, skills, agents, and instructions.
+You should see `STATUS: in_sync` for every project. Done — Claude Code and Codex now share the same plugins, skills, agents, MCP servers, and instructions.
 
 ### Staying up to date
 
@@ -91,6 +91,9 @@ The bridge discovers these canonical Claude Code sources:
 | Project commands | `.claude/commands/<command-name>.md` |
 | User global instructions | `~/.claude/CLAUDE.md` |
 | Project instructions | `AGENTS.md` (created by bootstrap if absent, never overwritten once it exists) |
+| MCP servers (user-global) | `~/.claude.json` top-level `mcpServers` |
+| MCP servers (per-project) | `~/.claude.json` → `projects.<root>.mcpServers` |
+| MCP servers (project-shared) | `.mcp.json` → `mcpServers` |
 
 Plugin enablement is checked by running `claude plugins list --json`, so only plugins you have enabled in Claude Code are bridged.
 
@@ -105,6 +108,7 @@ When multiple installed versions of the same plugin exist, the highest semantic 
 | `CLAUDE.md` | Shim containing `@AGENTS.md` so Codex reads the shared project instructions |
 | `.codex/agents/*.toml` | Agent files from project-scope Claude agents |
 | `.codex/skills/<name>/` | Skill directories from project-scope Claude skills |
+| `.codex/config.toml` `[mcp_servers.*]` | MCP server entries from project-scope Claude Code servers |
 
 ### User-global outputs
 
@@ -114,12 +118,13 @@ When multiple installed versions of the same plugin exist, the highest semantic 
 | `~/.codex/agents/*.toml` | Agent files from plugin and user Claude agents |
 | `~/.codex/prompts/*.md` | Prompt files from plugin, user, and project Claude commands |
 | `~/.codex/AGENTS.md` | Global instructions bridged from `~/.claude/CLAUDE.md` |
+| `~/.codex/config.toml` `[mcp_servers.*]` | MCP server entries from user-global Claude Code servers |
 
 ### Bridge-internal state
 
 | Artifact | Description |
 |----------|-------------|
-| `~/.cc-codex-bridge/registry.json` | Global ownership registry for skills, agents, prompts, and vendored resources |
+| `~/.cc-codex-bridge/registry.json` | Global ownership registry for skills, agents, prompts, MCP servers, and vendored resources |
 | `~/.cc-codex-bridge/projects/<hash>/state.json` | Per-project managed-file tracking |
 | `~/.cc-codex-bridge/plugins/<marketplace>-<plugin>/` | Vendored plugin resource directories (scripts, references, etc.) |
 
@@ -137,6 +142,7 @@ The bridge translates between two different extensibility models. This table sho
 | **`CLAUDE.md`** (project instructions) | **`AGENTS.md`** (project instructions) | The bridge generates `CLAUDE.md` as the shim `@AGENTS.md` so both CLIs read the same shared instructions. `AGENTS.md` is the canonical source; the bridge creates it during bootstrap but never overwrites it once it exists. |
 | **`~/.claude/CLAUDE.md`** (global instructions) | **`~/.codex/AGENTS.md`** (global instructions) | Content is copied with a bridge ownership sentinel appended. |
 | **Plugin resources** (`scripts/`, `references/`, etc.) | Vendored under `~/.cc-codex-bridge/plugins/` | Resource directories referenced by skills, agents, or commands via `$PLUGIN_ROOT` or `${CLAUDE_PLUGIN_ROOT}` are copied to bridge-internal storage. All references in generated content are rewritten to absolute vendored paths. Transitive dependencies are detected and vendored automatically. |
+| **MCP servers** (`mcpServers` in config) | **MCP servers** (`[mcp_servers.*]` in `config.toml`) | Stdio servers map `command`/`args`/`env` directly. HTTP servers map `url` and rename `headers` to `http_headers`. Bearer token env var references are extracted into `bearer_token_env_var`. SSE transport is skipped (unsupported in Codex). |
 
 ### Naming conventions
 
@@ -302,14 +308,15 @@ Runs `reconcile --all` every 30 minutes. Set a different interval with `--interv
 
 ## Exclusions
 
-Skip specific plugins, skills, agents, or commands with CLI flags (repeatable):
+Skip specific plugins, skills, agents, commands, or MCP servers with CLI flags (repeatable):
 
 ```bash
 cc-codex-bridge reconcile --project . \
   --exclude-plugin marketplace/plugin \
   --exclude-skill marketplace/plugin/skill \
   --exclude-agent marketplace/plugin/agent.md \
-  --exclude-command marketplace/plugin/command.md
+  --exclude-command marketplace/plugin/command.md \
+  --exclude-mcp-server server-name
 ```
 
 Persist exclusions globally in `~/.cc-codex-bridge/config.toml` (applies to all projects):
@@ -327,6 +334,7 @@ plugins = ["market/heavy-plugin"]
 skills = ["market/prompt-engineer/internal-cc-only"]
 agents = ["market/prompt-engineer/reviewer.md"]
 commands = ["market/plugin/debug.md"]
+mcp_servers = ["heavy-mcp-server"]
 ```
 
 Global and project exclusions are **combined** (both apply). CLI `--exclude-*` flags **replace** the combined set for that entity kind in the current run.
@@ -344,6 +352,8 @@ The reconcile engine is conservative. It tracks which files it created and refus
 - `AGENTS.md` (created by bootstrap from original `CLAUDE.md`; never overwritten once it exists; removed by `clean` only during bootstrap reversal when unedited)
 - `CLAUDE.md` (only when it is the `@AGENTS.md` shim)
 - `.codex/agents/*.toml` (generated from Claude agents)
+- `.codex/config.toml` `[mcp_servers.*]` (bridge-owned MCP entries only)
+- `~/.codex/config.toml` `[mcp_servers.*]` (bridge-owned MCP entries only)
 - `~/.codex/skills/`, `~/.codex/agents/`, `~/.codex/prompts/` (generated entries)
 - `~/.codex/AGENTS.md` (bridged from `~/.claude/CLAUDE.md`)
 

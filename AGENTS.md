@@ -26,7 +26,9 @@ claude-code-codex-bridge/
 │   └── workflows/
 ├── docs/
 │   ├── agent-skills-standard.md
-│   └── codex-cli-reference.md
+│   ├── claude-code-mcp-reference.md
+│   ├── codex-cli-reference.md
+│   └── mcp-bridge-mapping.md
 ├── src/
 │   └── cc_codex_bridge/
 │       ├── __main__.py
@@ -119,8 +121,10 @@ The bridge translates between two ecosystems. Authoritative reference documents 
 
 - `docs/agent-skills-standard.md` — the open Agent Skills standard (from [agentskills.io](https://agentskills.io/)): skill directory structure, `SKILL.md` format, frontmatter fields, progressive disclosure, client implementation contract, and script conventions.
 - `docs/codex-cli-reference.md` — Codex CLI specifics (from [developers.openai.com/codex](https://developers.openai.com/codex/) and the [Codex source](https://github.com/openai/codex)): instructions discovery (`AGENTS.md`), skill discovery hierarchy, agent role configuration, agent file auto-discovery, and Claude Code vs Codex comparison.
+- `docs/claude-code-mcp-reference.md` — Claude Code MCP server configuration format: `~/.claude.json` structure, per-project scoping, `.mcp.json` project-shared format, stdio/HTTP/SSE transports, and `headersHelper`/`oauth` fields.
+- `docs/mcp-bridge-mapping.md` — MCP bridge mapping rules: how each CC MCP field maps to Codex `config.toml` format, transport-specific translation, bearer token extraction, and unsupported feature handling.
 
-Consult these before making design decisions that depend on how Codex discovers skills, loads instructions, or defines agent roles.
+Consult these before making design decisions that depend on how Codex discovers skills, loads instructions, defines agent roles, or configures MCP servers.
 
 ## Canonical Architecture
 
@@ -150,7 +154,7 @@ Also check `DESIGN.md` for the canonical description of the current implemented 
 - Review `.claude/docs/analysis/` for prior investigations and technical findings.
 - Review spec documents in `.claude/docs/plans/`, such as `*-spec.md`, for the intended contract and constraints.
 - Review implementation plans in `.claude/docs/plans/`, such as `*-implementation-plan.md`, for sequencing, scope, and expected milestones.
-- Consult `docs/agent-skills-standard.md` and `docs/codex-cli-reference.md` for the authoritative domain references that the bridge targets. These supersede earlier research notes in `.claude/docs/research/`.
+- Consult `docs/agent-skills-standard.md`, `docs/codex-cli-reference.md`, `docs/claude-code-mcp-reference.md`, and `docs/mcp-bridge-mapping.md` for the authoritative domain references that the bridge targets. These supersede earlier research notes in `.claude/docs/research/`.
 - Update `DESIGN.md` whenever the implemented architecture changes materially.
 - Update the relevant analysis, spec, or plan docs when the command surface, architecture, or implementation direction changes materially.
 

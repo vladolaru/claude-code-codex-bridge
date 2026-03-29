@@ -13,7 +13,7 @@ from cc_codex_bridge.bridge_home import project_state_dir
 from cc_codex_bridge.claude_shim import plan_claude_shim
 from cc_codex_bridge.discover import discover
 from cc_codex_bridge.model import ReconcileError, TranslationError
-from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME, GlobalSkillRegistry
+from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME, GlobalResourceRegistry
 from cc_codex_bridge.reconcile import (
     Change,
     ReconcileReport,
@@ -2016,8 +2016,8 @@ def test_clean_releases_last_owner_skill(
     assert not skill_dir.exists()
 
     # Registry should be empty or not have this skill
-    from cc_codex_bridge.registry import GlobalSkillRegistry, GLOBAL_REGISTRY_FILENAME
-    registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    from cc_codex_bridge.registry import GlobalResourceRegistry, GLOBAL_REGISTRY_FILENAME
+    registry = GlobalResourceRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
     if registry is not None:
         assert "review" not in registry.skills
 
@@ -2053,8 +2053,8 @@ def test_clean_releases_shared_skill_preserves_for_other_owner(
     # Skill directory still exists — project B still owns it
     assert skill_dir.exists()
 
-    from cc_codex_bridge.registry import GlobalSkillRegistry, GLOBAL_REGISTRY_FILENAME
-    registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    from cc_codex_bridge.registry import GlobalResourceRegistry, GLOBAL_REGISTRY_FILENAME
+    registry = GlobalResourceRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
     assert registry is not None
     entry = registry.skills.get("review")
     assert entry is not None
@@ -2458,7 +2458,7 @@ def test_clean_removes_project_from_registry_projects_list(
 def test_clean_uses_state_recorded_codex_home(make_project, tmp_path: Path):
     """clean_project uses the codex_home from bridge state, not the caller-supplied one."""
     from cc_codex_bridge.reconcile import clean_project
-    from cc_codex_bridge.registry import GlobalSkillEntry, GlobalSkillRegistry, GLOBAL_REGISTRY_FILENAME
+    from cc_codex_bridge.registry import GlobalSkillEntry, GlobalResourceRegistry, GLOBAL_REGISTRY_FILENAME
     from cc_codex_bridge.state import BridgeState
 
     project_root, _ = make_project()
@@ -2481,7 +2481,7 @@ def test_clean_uses_state_recorded_codex_home(make_project, tmp_path: Path):
     state_path.write_text(state.to_json())
 
     # Write a registry in bridge_home with this project as owner
-    registry = GlobalSkillRegistry(
+    registry = GlobalResourceRegistry(
         skills={
             "test-skill": GlobalSkillEntry(
                 content_hash="sha256:abc",
@@ -2501,7 +2501,7 @@ def test_clean_uses_state_recorded_codex_home(make_project, tmp_path: Path):
     assert report.applied is True
 
     # The bridge_home registry should have the project removed
-    updated = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    updated = GlobalResourceRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
     assert updated is not None
     assert "test-skill" not in updated.skills
     assert project_root.resolve() not in updated.projects
@@ -2523,7 +2523,7 @@ def test_clean_dry_run_reports_managed_file_removal(make_project, tmp_path: Path
 
     # Create an empty registry in bridge_home so clean_project doesn't fail on missing registry
     bridge_home.mkdir(parents=True, exist_ok=True)
-    registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
+    registry = GlobalResourceRegistry(skills={}, projects=(project_root.resolve(),))
     (bridge_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
 
     # Create a managed CLAUDE.md so there's something to report
@@ -2562,7 +2562,7 @@ def test_clean_removes_full_project_skill_directory(make_project, tmp_path: Path
 
     # Create an empty registry in bridge_home so clean_project doesn't fail on missing registry
     bridge_home.mkdir(parents=True, exist_ok=True)
-    registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
+    registry = GlobalResourceRegistry(skills={}, projects=(project_root.resolve(),))
     (bridge_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
 
     skill_dir = project_root / ".codex" / "skills" / "demo"
@@ -2723,7 +2723,7 @@ def test_clean_rejects_symlinked_projects_dir_under_bridge_home(make_project, tm
     state_path.write_text(state.to_json())
 
     # Create a registry in bridge_home so clean doesn't fail on missing registry
-    registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
+    registry = GlobalResourceRegistry(skills={}, projects=(project_root.resolve(),))
     (bridge_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
 
     # Move the real projects dir outside and replace with a symlink
@@ -2934,7 +2934,7 @@ def test_uninstall_has_errors_on_cleanup_failure(make_project, tmp_path: Path):
     """UninstallReport.has_errors is True when a project cleanup fails."""
     from cc_codex_bridge.reconcile import uninstall_all
     from cc_codex_bridge.state import BridgeState
-    from cc_codex_bridge.registry import GlobalSkillRegistry
+    from cc_codex_bridge.registry import GlobalResourceRegistry
 
     project_root, _ = make_project()
     codex_home = tmp_path / "codex-home"
@@ -2956,7 +2956,7 @@ def test_uninstall_has_errors_on_cleanup_failure(make_project, tmp_path: Path):
     # Register the project in the global registry (at bridge_home)
     from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME
     bridge_home.mkdir(parents=True, exist_ok=True)
-    registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
+    registry = GlobalResourceRegistry(skills={}, projects=(project_root.resolve(),))
     (bridge_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
 
     report = uninstall_all(codex_home=codex_home, bridge_home=bridge_home)
@@ -2969,7 +2969,7 @@ def test_uninstall_no_errors_on_vanished_project(make_project, tmp_path: Path):
     """Vanished projects (directory not found) are NOT treated as errors."""
     import shutil as shutil_mod
     from cc_codex_bridge.reconcile import uninstall_all
-    from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME, GlobalSkillRegistry
+    from cc_codex_bridge.registry import GLOBAL_REGISTRY_FILENAME, GlobalResourceRegistry
 
     project_root, _ = make_project()
     codex_home = tmp_path / "codex-home"
@@ -2978,7 +2978,7 @@ def test_uninstall_no_errors_on_vanished_project(make_project, tmp_path: Path):
     bridge_home.mkdir(parents=True, exist_ok=True)
 
     # Register the project then delete it
-    registry = GlobalSkillRegistry(skills={}, projects=(project_root.resolve(),))
+    registry = GlobalResourceRegistry(skills={}, projects=(project_root.resolve(),))
     (bridge_home / GLOBAL_REGISTRY_FILENAME).write_text(registry.to_json())
     shutil_mod.rmtree(project_root)
 
@@ -3038,7 +3038,7 @@ def test_clean_removes_plugin_resources(make_project, tmp_path: Path):
 
     # Create registry with plugin resource ownership
     bridge_home.mkdir(parents=True, exist_ok=True)
-    registry = GlobalSkillRegistry(
+    registry = GlobalResourceRegistry(
         skills={},
         projects=(project_root.resolve(),),
         plugin_resources={
@@ -3086,7 +3086,7 @@ def test_clean_dry_run_reports_plugin_resource_removal(make_project, tmp_path: P
 
     # Create registry with plugin resource ownership
     bridge_home.mkdir(parents=True, exist_ok=True)
-    registry = GlobalSkillRegistry(
+    registry = GlobalResourceRegistry(
         skills={},
         projects=(project_root.resolve(),),
         plugin_resources={
@@ -3129,7 +3129,7 @@ def test_clean_skips_nonexistent_plugin_dirs(make_project, tmp_path: Path):
 
     # Registry claims ownership of a plugin dir that does not exist on disk
     bridge_home.mkdir(parents=True, exist_ok=True)
-    registry = GlobalSkillRegistry(
+    registry = GlobalResourceRegistry(
         skills={},
         projects=(project_root.resolve(),),
         plugin_resources={
@@ -3157,7 +3157,7 @@ def test_clean_skips_nonexistent_plugin_dirs(make_project, tmp_path: Path):
     # No plugin_resource changes since the dir was already missing
     assert not any(c.resource_kind == "plugin_resource" for c in report.changes)
     # Registry should have the entry removed
-    updated_registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    updated_registry = GlobalResourceRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
     assert "market-gone-plugin" not in updated_registry.plugin_resources
 
 
@@ -3183,7 +3183,7 @@ def test_clean_preserves_shared_vendored_plugin_dirs(
 
     # Both projects own this plugin resource in the registry
     bridge_home.mkdir(parents=True, exist_ok=True)
-    registry = GlobalSkillRegistry(
+    registry = GlobalResourceRegistry(
         skills={},
         projects=(project_a.resolve(), project_b.resolve()),
         plugin_resources={
@@ -3216,7 +3216,7 @@ def test_clean_preserves_shared_vendored_plugin_dirs(
     assert not any(c.resource_kind == "plugin_resource" for c in report.changes)
 
     # Registry should still have the entry with only project B as owner
-    updated_registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    updated_registry = GlobalResourceRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
     assert "market-shared-tools" in updated_registry.plugin_resources
     entry = updated_registry.plugin_resources["market-shared-tools"]
     assert entry.owners == (project_b.resolve(),)
@@ -3240,7 +3240,7 @@ def test_uninstall_removes_plugins_dir(make_project, tmp_path: Path):
 
     # Create state and registry with plugin resource ownership
     bridge_home.mkdir(parents=True, exist_ok=True)
-    registry = GlobalSkillRegistry(
+    registry = GlobalResourceRegistry(
         skills={},
         projects=(project_root.resolve(),),
         plugin_resources={
@@ -3954,7 +3954,7 @@ def test_reconcile_tracks_vendored_plugin_resource_ownership_in_registry(
     reconcile_desired_state(build.desired_state)
 
     # Verify the registry has the plugin resource entry
-    registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    registry = GlobalResourceRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
     assert registry is not None
     assert "market-tools" in registry.plugin_resources
     entry = registry.plugin_resources["market-tools"]
@@ -4000,7 +4000,7 @@ def test_reconcile_shares_vendored_plugin_resource_ownership_across_projects(
     reconcile_desired_state(build2.desired_state)
 
     # Verify both projects are owners in the registry
-    registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    registry = GlobalResourceRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
     assert registry is not None
     assert "market-tools" in registry.plugin_resources
     entry = registry.plugin_resources["market-tools"]
@@ -4047,7 +4047,7 @@ def test_reconcile_combines_hash_for_multiple_resource_dirs(
     reconcile_desired_state(build.desired_state)
 
     # The registry should have one entry for "market-tools" with a combined hash
-    registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    registry = GlobalResourceRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
     assert registry is not None
     assert "market-tools" in registry.plugin_resources
     entry = registry.plugin_resources["market-tools"]
@@ -4086,7 +4086,7 @@ def test_reconcile_releases_stale_plugin_resources(
     # Verify the vendored dir exists and registry has the entry
     vendored_dir = bridge_home / "plugins" / "market-tools"
     assert vendored_dir.exists()
-    registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    registry = GlobalResourceRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
     assert registry is not None
     assert "market-tools" in registry.plugin_resources
 
@@ -4101,7 +4101,7 @@ def test_reconcile_releases_stale_plugin_resources(
 
     # Verify the vendored dir is removed and registry entry is gone
     assert not vendored_dir.exists()
-    registry2 = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    registry2 = GlobalResourceRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
     assert registry2 is not None
     assert "market-tools" not in registry2.plugin_resources
 
@@ -4149,7 +4149,7 @@ def test_reconcile_releases_stale_plugin_resources_preserves_shared_dirs(
     # Both projects own the resource
     vendored_dir = bridge_home / "plugins" / "market-tools"
     assert vendored_dir.exists()
-    registry = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    registry = GlobalResourceRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
     assert registry is not None
     assert len(registry.plugin_resources["market-tools"].owners) == 2
 
@@ -4164,7 +4164,7 @@ def test_reconcile_releases_stale_plugin_resources_preserves_shared_dirs(
 
     # Dir still exists because project B still owns it
     assert vendored_dir.exists()
-    registry2 = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    registry2 = GlobalResourceRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
     assert registry2 is not None
     assert "market-tools" in registry2.plugin_resources
     entry2 = registry2.plugin_resources["market-tools"]
@@ -4185,7 +4185,7 @@ def test_reconcile_releases_stale_plugin_resources_preserves_shared_dirs(
 
     # Now the dir should be removed
     assert not vendored_dir.exists()
-    registry3 = GlobalSkillRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    registry3 = GlobalResourceRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
     assert registry3 is not None
     assert "market-tools" not in registry3.plugin_resources
     remove_changes_b = [c for c in report_b2.changes if c.kind == "remove" and c.resource_kind == "plugin_resource"]

@@ -42,6 +42,8 @@ These are authoritative inputs:
 - project-level Claude skills from `.claude/skills/`
 - project-level Claude agents from `.claude/agents/`
 - user-level global instructions from `~/.claude/CLAUDE.md`
+- MCP server definitions from `~/.claude.json` (user-global and per-project scopes)
+- MCP server definitions from `<project>/.mcp.json` (project-shared scope)
 
 ### Generated outputs
 
@@ -56,6 +58,8 @@ These are derived artifacts and must not become hand-maintained sources:
 - `~/.cc-codex-bridge/registry.json`
 - `~/.cc-codex-bridge/plugins/<marketplace>-<plugin>/`
 - `~/.cc-codex-bridge/logs/YYYY-MM-DD.jsonl` (daily activity logs)
+- `~/.codex/config.toml` `[mcp_servers.*]` entries (bridge-owned only)
+- `<project>/.codex/config.toml` `[mcp_servers.*]` entries (bridge-owned only)
 
 ### Authority rule
 
@@ -79,7 +83,10 @@ If a behavior is described differently in multiple docs:
 - translation of Claude agents into self-contained Codex agent `.toml` files
 - translation of Claude skills into self-contained Codex skills
 - translation of Claude commands into native Codex prompt files with plugin resource vendoring
-- safe reconcile of generated project files, generated Codex agent files, and generated Codex skill directories
+- discovery of MCP server definitions from `~/.claude.json` and `.mcp.json`
+- translation of MCP server configs (stdio and HTTP) into Codex `config.toml` format
+- surgical editing of `config.toml` files with `tomlkit` (round-trip preserving)
+- safe reconcile of generated project files, generated Codex agent files, generated Codex skill directories, and MCP server config entries
 - state tracking for generator-owned outputs
 - project-level artifact cleanup via `clean`
 - machine-level full artifact removal via `uninstall`
@@ -108,8 +115,9 @@ The runtime is a deterministic pipeline:
 4. choose the highest semantic version for each `<marketplace>/<plugin>` and filter to only enabled plugins
 5. discover user-level skills, agents, and global instructions from `~/.claude/` (or `--claude-home`)
 6. discover project-level skills and agents from `.claude/`
+6b. discover MCP server definitions from `~/.claude.json` (user-global and per-project) and `.mcp.json` (project-shared)
 7. load optional `.codex/bridge.toml` exclusions and merge any CLI exclusion flags
-8. filter discovered plugins/skills/agents by the effective exclusion set
+8. filter discovered plugins/skills/agents/MCP servers by the effective exclusion set
 9. translate plugin agents into `GeneratedAgentFile` objects
 10. translate standalone user and project agents into `GeneratedAgentFile` objects
 11. translate plugin and user skills into `GeneratedSkill` trees (global registry)
@@ -118,9 +126,11 @@ The runtime is a deterministic pipeline:
 14. translate standalone user commands into `GeneratedPrompt` objects (global prompts)
 15. translate project commands into `GeneratedPrompt` objects (global prompts) with `--<project-dirname>` filename suffix
 16. merge all agents, render project-local agent `.toml` files to `.codex/agents/`, and collect global agents for `~/.codex/agents/`
-17. decide whether `CLAUDE.md` can be created or preserved as an `@AGENTS.md` shim
-18. build a full desired state for project files, Codex skill directories, global agent files, and global instructions
-19. inspect/preview or reconcile that desired state with ownership and rollback protections
+17. translate discovered MCP servers into `GeneratedMcpServer` objects with Codex-compatible TOML tables
+18. decide whether `CLAUDE.md` can be created or preserved as an `@AGENTS.md` shim
+19. build a full desired state for project files, Codex skill directories, global agent files, global instructions, and MCP server entries
+20. inspect/preview or reconcile that desired state with ownership and rollback protections
+21. for MCP servers: surgically edit `~/.codex/config.toml` (global) and `<project>/.codex/config.toml` (project) using `tomlkit`, preserving user-authored content
 
 The reconcile pipeline is shared by `status` and `reconcile`.
 
@@ -200,13 +210,15 @@ The project state file (at `~/.cc-codex-bridge/projects/<hash>/state.json`) reco
 - bridge home path
 - managed project files as a path-to-content-hash mapping (including `CLAUDE.md`, `AGENTS.md`, and agent `.toml` files under `.codex/agents/`)
 - managed project skill directory names (tracked separately for directory-snapshot comparison)
-- state version (currently 9; v8 state files are migrated on read, empty migrated hashes are treated as preserve-only until a trusted hash is recorded, and the next reconcile backfills hashes for preserved or retained managed files from on-disk content when possible)
+- managed MCP server names as a name-to-content-hash mapping (for project-scope MCP servers in `.codex/config.toml`)
+- state version (currently 11; v8–v10 state files are migrated on read)
 
 The global registry records:
 
 - generated skill install directory names with content hashes and owning project roots
 - generated agent `.toml` filenames with content hashes and owning project roots
 - vendored plugin resource directory names with content hashes and owning project roots
+- bridge-owned global MCP server names with content hashes and owning project roots
 - a sorted list of all reconciled project roots (the `projects` list)
 
 ### Safety rules
@@ -243,6 +255,13 @@ The global registry records:
 - stale managed outputs are removed when no longer desired
 - cleanup uses the codex_home recorded in bridge state, not the caller-supplied value, to ensure registry operations target the correct global state
 - project-local generated skill directories are removed as whole directories, not individual files, consistent with global skill directory ownership
+- MCP entries in `config.toml` are ownership-aware: only bridge-owned entries (tracked in state or registry) are modified; user-authored entries with the same name are never touched or adopted
+- user-authored MCP entries that collide with bridge-discovered servers are skipped during apply and excluded from state/registry tracking — `clean` will not remove them
+- when MCP discovery is degraded (config file exists but contains malformed JSON), stale-entry removal is suppressed — previously-bridged entries survive until the file is fixed
+
+#### Known limitation: multi-project global MCP update on first reconcile
+
+When project B first encounters a global MCP server already created by project A with different content, B adds itself as a co-owner in the registry but cannot update `config.toml` because the entry is not in B's `owned` set. The registry records B's desired hash while the disk retains A's content. This self-heals on B's second reconcile (B is then in `previously_owned_global`) or on A's next reconcile. This is accepted because MCP servers overwhelmingly come from plugins with identical configs across projects — the scenario of two projects wanting different content for the same global MCP server name is not realistic in practice. Do not attempt to fix this without a concrete real-world use case that demonstrates the need.
 
 ## 7. Discovery Architecture
 
@@ -285,6 +304,22 @@ Discovery lives in `src/cc_codex_bridge/discover.py`.
 - user-level commands are discovered from `~/.claude/commands/` as `*.md` files
 - project-level commands are discovered from `<project>/.claude/commands/` as `*.md` files
 - command discovery follows the same pattern as agent discovery (top-level `.md` files in a directory)
+
+### MCP server discovery
+
+`src/cc_codex_bridge/discover_mcp.py` reads MCP server definitions from Claude Code configuration files.
+
+Sources (in precedence order, highest first):
+
+1. **Project-local**: `~/.claude.json` → `projects.<project_root>.mcpServers` → scope `project`
+2. **Project-shared**: `<project>/.mcp.json` → `mcpServers` → scope `project`
+3. **User-global**: `~/.claude.json` → top-level `mcpServers` → scope `global`
+
+When the same server name appears at multiple scopes, highest precedence wins. SSE transport servers are skipped (unsupported in Codex). Plugin-provided MCP servers (using `${CLAUDE_PLUGIN_ROOT}`) are not discovered — standalone equivalents cover them.
+
+Transport detection: `command` field → stdio; `type: "http"` or `url` field → HTTP.
+
+When a source file exists but contains malformed JSON, discovery is *degraded*: servers from other valid sources are still discovered, but the `mcp_discovery_degraded` flag is set on the `DiscoveryResult`. The reconcile pipeline uses this flag to suppress stale-entry removal — previously-bridged MCP entries survive until the corrupt file is fixed and a subsequent reconcile runs normally.
 
 ### Plugin enablement
 
@@ -569,6 +604,28 @@ Agent references (`plugin:agent-name`) are not rewritten because agent invocatio
 ### Skill routing
 
 User-level and plugin skills are installed to the global Codex skill registry at `~/.codex/skills/`. Project-level skills are installed to project-local `.codex/skills/` directories and tracked as managed project skill directory names in the bridge state. Both global and project skills use exact directory-snapshot comparison for change detection.
+
+### 8.6 MCP server translation
+
+`src/cc_codex_bridge/translate_mcp.py` converts `DiscoveredMcpServer` objects into `GeneratedMcpServer` objects.
+
+stdio mapping: `command` → `command`, `args` → `args`, `env` → `env` (omitted when empty). The CC `type` field is stripped (Codex infers transport from field presence).
+
+HTTP mapping: `url` → `url`, `headers` → `http_headers`. Special case: `Authorization: "Bearer ${VAR}"` headers are extracted into `bearer_token_env_var` and the header is removed.
+
+Diagnostics (warnings, not errors): `headersHelper` (no Codex equivalent), `oauth` (user must run `codex mcp login`).
+
+### 8.7 MCP TOML editing
+
+`src/cc_codex_bridge/toml_config.py` provides surgical editing of Codex `config.toml` files using `tomlkit` for round-trip preservation of comments and formatting.
+
+Key functions:
+- `read_codex_config(path)` → parse or return empty doc
+- `write_codex_config(path, doc)` → atomic write (temp + rename); removes empty files
+- `apply_mcp_changes(doc, desired, owned)` → add/update/remove bridge-owned `[mcp_servers.*]` entries
+- `hash_mcp_server_table(table_dict)` → deterministic `sha256:` content hash
+
+The editing is ownership-aware: only entries tracked in the bridge registry or state are modified. User-authored MCP entries are never touched.
 
 ## 9. Reconcile Architecture
 
@@ -910,7 +967,7 @@ Current runtime module responsibilities:
 - `config_check.py`
   - config validation: TOML well-formedness, scan path resolution, unknown key detection, global-only key rejection for project configs
 - `config_exclude_commands.py`
-  - config exclude subcommand handlers: discovery-backed add/remove/list for plugin/skill/agent/command exclusions
+  - config exclude subcommand handlers: discovery-backed add/remove/list for plugin/skill/agent/command/mcp_server exclusions
 - `config_scan_commands.py`
   - config scan subcommand handlers: glob-validated add/remove/list for scan paths
 - `config_scope.py`
@@ -1009,6 +1066,9 @@ These are current implemented simplifications, not necessarily permanent design 
 - exclusion ids are exact-match identifiers, not wildcard/glob patterns
 - commands are translated to native Codex prompt files (`~/.codex/prompts/`) rather than Codex skills, avoiding namespace collisions with the skill directory entirely
 - LaunchAgent scheduling with automatic `launchctl bootstrap/bootout` is supported; watcher mode is not
+- MCP planning assumes `mcp_servers` is a TOML table when the document parses successfully — a hand-crafted scalar value (`mcp_servers = "oops"`) would pass TOML validation but crash during apply, leaving the registry inconsistent
+- MCP translation does not remap Claude `${VAR}` env-var references in non-Authorization fields — Codex may treat these as literal strings rather than expanding them at runtime; the bridge copies the syntax verbatim and relies on the host shell or Codex runtime to resolve them
+- MCP server names must match `[A-Za-z0-9_-]`; servers with dots, spaces, or other characters are skipped with a diagnostic — this is stricter than TOML's quoted-key support but required for registry key safety and Codex `mcp__<server>__<tool>` naming
 
 Any change to these constraints should update this file.
 

@@ -27,11 +27,11 @@ from typing import Iterable
 # Constants
 # ---------------------------------------------------------------------------
 
-KEY_WIDTH: int = 18
+KEY_WIDTH: int = 24
 """Standard key column width (including colon).
 
-Based on the longest keys: EXCLUDED_COMMANDS: and GENERATED_PROMPTS: are both
-18 characters.
+Based on the longest key: GENERATED_MCP_SERVERS: at 22 characters, with 2
+characters of gap.
 """
 
 CHANGE_SYMBOLS: dict[str, str] = {

@@ -52,8 +52,8 @@ class _Change:
 # ---------------------------------------------------------------------------
 
 
-def test_key_width_is_18():
-    assert KEY_WIDTH == 18
+def test_key_width_is_24():
+    assert KEY_WIDTH == 24
 
 
 def test_change_symbols_covers_all_kinds():

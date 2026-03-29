@@ -283,6 +283,187 @@ Note: core tools (file read, file write, file edit, shell execution, glob, grep)
 5. Codex agent roles use `.toml` config files with `developer_instructions`, not `.md` prompt files with `model`/`tools` arrays — agent translation now produces native `.toml` files placed in `.codex/agents/` (project-local) or `~/.codex/agents/` (global), matching Codex's auto-discovery format (see section 3.4). This eliminates the need for `config.toml` agent entries; Codex discovers these files automatically.
 6. Codex tools are controlled by sandbox policy at the session level, not per-agent tool grants — a role file can override `sandbox_mode` but doesn't list individual tools
 
+## 7. MCP Server Configuration
+
+Codex has first-class MCP (Model Context Protocol) support. MCP servers are configured in `config.toml` and managed via CLI commands.
+
+### 7.1 Config Locations
+
+MCP servers live in `config.toml` at the standard scope levels:
+
+| Scope | Path | Notes |
+|-------|------|-------|
+| **User (global)** | `~/.codex/config.toml` | Default; overridable via `CODEX_HOME` |
+| **Project** | `.codex/config.toml` | Only loaded for trusted projects |
+| **System** | `/etc/codex/config.toml` | Unix system-wide |
+
+Standard config layer precedence applies. Untrusted projects skip `.codex/` layers entirely.
+
+MCP servers can also come from **plugins** (plugin-sourced servers are lower priority than `config.toml`) and the built-in **Codex Apps** connector server.
+
+### 7.2 Config Format
+
+Each server is a `[mcp_servers.<name>]` table. Transport type is inferred from whether `command` or `url` is present (mutually exclusive).
+
+#### STDIO Transport
+
+```toml
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp"]
+cwd = "/path/to/working/dir"       # optional
+enabled = true                       # default: true
+required = false                     # default: false
+startup_timeout_sec = 10.0           # default: 10
+tool_timeout_sec = 60.0              # default: 120
+
+[mcp_servers.context7.env]
+MY_API_KEY = "value"
+
+# Alternative: forward existing env vars by name (not set them)
+# env_vars = ["EXISTING_SECRET"]
+```
+
+STDIO fields: `command` (required), `args`, `env` (map), `env_vars` (array of names to forward), `cwd`.
+
+**Important**: STDIO servers start with `env_clear()` — they do NOT inherit the parent environment. Only platform defaults (`HOME`, `PATH`, `SHELL`, `USER`, `LANG`, `TMPDIR`, `TZ` on Unix) plus configured `env_vars` and `env` are available.
+
+#### Streamable HTTP Transport
+
+```toml
+[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
+bearer_token_env_var = "FIGMA_TOKEN"  # optional
+enabled = true
+required = true
+scopes = ["repo"]                      # OAuth scopes
+oauth_resource = "https://example.com/" # RFC 8707
+
+[mcp_servers.figma.http_headers]
+"X-Region" = "us-east-1"
+
+[mcp_servers.figma.env_http_headers]
+"X-Auth" = "AUTH_ENV_VAR_NAME"         # header value from env var
+```
+
+HTTP fields: `url` (required), `bearer_token_env_var`, `http_headers` (map), `env_http_headers` (map of header→env var name), `scopes`, `oauth_resource`.
+
+#### Shared Fields (Both Transports)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | boolean | `true` | Set `false` to disable without removing |
+| `required` | boolean | `false` | `codex exec` fails if required server can't init |
+| `startup_timeout_sec` | number | `10` | Seconds to wait for init |
+| `tool_timeout_sec` | number | `120` | Per-tool call timeout |
+| `enabled_tools` | string[] | — | Allowlist of tool names |
+| `disabled_tools` | string[] | — | Denylist (applied after allowlist) |
+| `scopes` | string[] | — | OAuth scopes |
+| `oauth_resource` | string | — | RFC 8707 resource parameter |
+
+#### Per-Tool Approval
+
+```toml
+[mcp_servers.docs.tools.search]
+approval_mode = "approve"   # "auto" | "prompt" | "approve"
+```
+
+#### Global OAuth Settings
+
+```toml
+mcp_oauth_callback_port = 5555
+mcp_oauth_callback_url = "https://devbox.example.internal/callback"
+mcp_oauth_credentials_store = "auto"  # "auto" | "file" | "keyring"
+```
+
+### 7.3 Tool Namespacing
+
+MCP tools use the same `mcp__<server>__<tool>` double-underscore convention as Claude Code:
+
+```
+mcp__context7__search
+mcp__github__list_issues
+```
+
+- Names sanitized to `[a-zA-Z0-9_-]` (disallowed chars replaced with `_`)
+- Max 64 characters (truncated with SHA1 suffix if exceeded)
+- Duplicate qualified names: second tool is skipped with warning
+
+### 7.4 Server Lifecycle
+
+1. All enabled servers start **concurrently** at session start (default 10s timeout)
+2. Status events: `Starting` → `Ready` | `Failed`
+3. `required = true` servers cause `codex exec` to fail on init failure
+4. Servers can be refreshed mid-session (e.g., when skill MCP deps are auto-installed)
+5. Cancellation token shuts down all connections on session end
+
+### 7.5 MCP in Skills
+
+Skills declare MCP dependencies in `agents/openai.yaml`:
+
+```yaml
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "serverName"
+      description: "Human description"
+      transport: "streamable_http"   # or "stdio"
+      url: "https://example.com/mcp" # for streamable_http
+      # command: "npx"               # for stdio
+```
+
+Codex auto-installs missing MCP deps when a skill is invoked (controlled by `features.skill_mcp_dependency_install`, default `true`). Installs go to global `~/.codex/config.toml`.
+
+Agent role files (`.toml`) do NOT declare MCP dependencies — they inherit the session's MCP config.
+
+### 7.6 MCP Resources and Prompts
+
+| Capability | Supported | Notes |
+|------------|-----------|-------|
+| **Tools** | Yes | Full support with namespacing, filtering, approval |
+| **Resources** | Yes | List, list templates, read — with pagination and server attribution |
+| **Prompts** | No | No `prompts/list` or `prompts/get` implementation |
+| **Elicitation** | Yes | Server-to-client requests (form-based and URL-based) |
+
+### 7.7 CLI Commands
+
+```bash
+codex mcp list [--json]
+codex mcp get <name> [--json]
+codex mcp add <name> --env KEY=VALUE -- <command> [args...]  # stdio
+codex mcp add <name> --url <URL> [--bearer-token-env-var <ENV>]  # http
+codex mcp remove <name>
+codex mcp login <name> [--scopes scope1,scope2]
+codex mcp logout <name>
+/mcp                                  # in-session status/management
+```
+
+### 7.8 Rust Type Reference
+
+Core types from `codex-rs/core/src/config/types.rs`:
+
+```rust
+// Transport — inferred from field presence (command vs url)
+enum McpServerTransportConfig {
+    Stdio { command, args, env, env_vars, cwd },
+    StreamableHttp { url, bearer_token_env_var, http_headers, env_http_headers },
+}
+
+// Server config
+struct McpServerConfig {
+    transport: McpServerTransportConfig,
+    enabled: bool,          // default true
+    required: bool,         // default false
+    startup_timeout_sec: Option<Duration>,
+    tool_timeout_sec: Option<Duration>,
+    enabled_tools: Option<Vec<String>>,
+    disabled_tools: Option<Vec<String>>,
+    scopes: Option<Vec<String>>,
+    oauth_resource: Option<String>,
+    tools: HashMap<String, McpServerToolConfig>,  // per-tool approval
+}
+```
+
 ## Sources
 
 - [Custom instructions with AGENTS.md](https://developers.openai.com/codex/guides/agents-md/)
@@ -291,4 +472,6 @@ Note: core tools (file read, file write, file edit, shell execution, glob, grep)
 - [Config (basic)](https://developers.openai.com/codex/config-basic/)
 - [Config (advanced)](https://developers.openai.com/codex/config-advanced/)
 - [Prompting Codex](https://developers.openai.com/codex/prompting/)
-- [GitHub: openai/codex](https://github.com/openai/codex) — source: `codex-rs/core/src/skills/loader.rs`, `codex-rs/core/src/project_doc.rs`, `codex-rs/core/src/config/mod.rs`, `codex-rs/core/src/config/agent_roles.rs`, `codex-rs/core/src/agent/role.rs`
+- [Model Context Protocol - Codex](https://developers.openai.com/codex/mcp)
+- [Sample Configuration](https://developers.openai.com/codex/config-sample)
+- [GitHub: openai/codex](https://github.com/openai/codex) — source: `codex-rs/core/src/skills/loader.rs`, `codex-rs/core/src/project_doc.rs`, `codex-rs/core/src/config/mod.rs`, `codex-rs/core/src/config/agent_roles.rs`, `codex-rs/core/src/agent/role.rs`, `codex-rs/core/src/config/types.rs`, `codex-rs/core/src/mcp/mod.rs`, `codex-rs/core/src/mcp_connection_manager.rs`, `codex-rs/core/src/mcp/skill_dependencies.rs`, `codex-rs/rmcp-client/src/rmcp_client.rs`

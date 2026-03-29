@@ -33,6 +33,7 @@ from cc_codex_bridge.install_launchagent import (
 from cc_codex_bridge.model import (
     AgentTranslationDiagnostic,
     DiscoveryError,
+    McpTranslationDiagnostic,
     ReconcileError,
     SkillValidationDiagnostic,
     TranslationError,
@@ -49,6 +50,7 @@ from cc_codex_bridge.reconcile import (
     reconcile_desired_state,
 )
 from cc_codex_bridge.translate_agents import format_agent_translation_diagnostics
+from cc_codex_bridge.translate_mcp import format_mcp_translation_diagnostics
 from cc_codex_bridge.translate_skills import format_skill_validation_diagnostics
 
 
@@ -381,6 +383,12 @@ def build_parser() -> argparse.ArgumentParser:
             default=None,
             help="Skip a command (format: name, scope/name, or marketplace/plugin/name). Repeatable.",
         )
+        exclude_parser.add_argument(
+            "--exclude-mcp-server",
+            action="append",
+            default=None,
+            help="Skip an MCP server (format: bare server name). Repeatable.",
+        )
     reconcile_parser.add_argument(
         "--json",
         action="store_true",
@@ -533,7 +541,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     exclude_add_parser.add_argument(
-        "kind", nargs="?", choices=["plugin", "skill", "agent", "command"],
+        "kind", nargs="?", choices=["plugin", "skill", "agent", "command", "mcp_server"],
         help="Entity kind to exclude.",
     )
     exclude_add_parser.add_argument("entity_id", nargs="?", help="Entity ID to exclude.")
@@ -557,7 +565,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     exclude_remove_parser.add_argument(
-        "kind", nargs="?", choices=["plugin", "skill", "agent", "command"],
+        "kind", nargs="?", choices=["plugin", "skill", "agent", "command", "mcp_server"],
         help="Entity kind to remove from exclusions.",
     )
     exclude_remove_parser.add_argument(
@@ -915,10 +923,20 @@ def main(argv: list[str] | None = None) -> int:
             exclude_skills=getattr(args, "exclude_skill", None) or (),
             exclude_agents=getattr(args, "exclude_agent", None) or (),
             exclude_commands=getattr(args, "exclude_command", None) or (),
+            exclude_mcp_servers=getattr(args, "exclude_mcp_server", None) or (),
         )
     except (DiscoveryError, TranslationError, ReconcileError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+
+    if build.discovery.mcp_discovery_degraded:
+        print(
+            "Warning: MCP discovery degraded — one or more config files "
+            "contain malformed JSON. Previously-bridged MCP entries are "
+            "preserved. Fix the config file and re-run to restore normal "
+            "operation.",
+            file=sys.stderr,
+        )
 
     # Split diagnostics: agent diagnostics block reconciliation,
     # skill warnings are informational only.
@@ -927,6 +945,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     skill_diags = tuple(
         d for d in build.diagnostics if isinstance(d, SkillValidationDiagnostic)
+    )
+    mcp_diags = tuple(
+        d for d in build.diagnostics if isinstance(d, McpTranslationDiagnostic)
     )
 
     try:
@@ -942,7 +963,9 @@ def main(argv: list[str] | None = None) -> int:
                         agent_count=build.agent_count,
                         skill_count=build.skill_count,
                         prompt_count=build.prompt_count,
+                        mcp_server_count=build.mcp_server_count,
                         diagnostics=agent_diags, skill_diagnostics=skill_diags,
+                        mcp_diagnostics=mcp_diags,
                         drifted_files=drifted,
                     ))
                 else:
@@ -951,7 +974,9 @@ def main(argv: list[str] | None = None) -> int:
                         agent_count=build.agent_count,
                         skill_count=build.skill_count,
                         prompt_count=build.prompt_count,
+                        mcp_server_count=build.mcp_server_count,
                         diagnostics=agent_diags, skill_diagnostics=skill_diags,
+                        mcp_diagnostics=mcp_diags,
                         drifted_files=drifted,
                         discovery=build.discovery,
                         shim_action=build.shim_decision.action,
@@ -978,8 +1003,10 @@ def main(argv: list[str] | None = None) -> int:
                     build.agent_count,
                     build.skill_count,
                     build.prompt_count,
+                    build.mcp_server_count,
                     build.exclusion_report,
                     skill_diagnostics=skill_diags,
+                    mcp_diagnostics=mcp_diags,
                 ))
             else:
                 print(_print_summary(
@@ -988,6 +1015,7 @@ def main(argv: list[str] | None = None) -> int:
                     build.agent_count,
                     build.skill_count,
                     build.prompt_count,
+                    build.mcp_server_count,
                     build.exclusion_report,
                 ))
                 if args.diff:
@@ -997,6 +1025,9 @@ def main(argv: list[str] | None = None) -> int:
                 if skill_diags:
                     print("\nSkill validation warnings:", file=sys.stderr)
                     print(format_skill_validation_diagnostics(skill_diags), file=sys.stderr)
+                if mcp_diags:
+                    print("\nMCP translation warnings:", file=sys.stderr)
+                    print(format_mcp_translation_diagnostics(mcp_diags), file=sys.stderr)
             return 0
 
         if args.command == "status":
@@ -1011,7 +1042,9 @@ def main(argv: list[str] | None = None) -> int:
                     agent_count=build.agent_count,
                     skill_count=build.skill_count,
                     prompt_count=build.prompt_count,
+                    mcp_server_count=build.mcp_server_count,
                     skill_diagnostics=skill_diags,
+                    mcp_diagnostics=mcp_diags,
                     drifted_files=drifted,
                 ))
             else:
@@ -1020,13 +1053,15 @@ def main(argv: list[str] | None = None) -> int:
                     agent_count=build.agent_count,
                     skill_count=build.skill_count,
                     prompt_count=build.prompt_count,
+                    mcp_server_count=build.mcp_server_count,
                     skill_diagnostics=skill_diags,
+                    mcp_diagnostics=mcp_diags,
                     drifted_files=drifted,
                     discovery=build.discovery,
                     shim_action=build.shim_decision.action,
                 ))
             return 0
-    except (TranslationError, ReconcileError, OSError, UnicodeError) as exc:
+    except (TranslationError, ReconcileError, OSError, UnicodeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
@@ -1581,7 +1616,7 @@ def _handle_clean_command(args: argparse.Namespace) -> int:
             bridge_home=bridge_home_path,
             dry_run=args.dry_run,
         )
-    except (ReconcileError, OSError, UnicodeError) as exc:
+    except (ReconcileError, OSError, UnicodeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
@@ -1630,7 +1665,7 @@ def _handle_uninstall_command(args: argparse.Namespace) -> int:
             launchagents_dir=args.launchagents_dir,
             dry_run=args.dry_run,
         )
-    except (ReconcileError, OSError, UnicodeError) as exc:
+    except (ReconcileError, OSError, UnicodeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
@@ -1658,9 +1693,10 @@ def _handle_all_command(args: argparse.Namespace) -> int:
             exclude_skills=getattr(args, "exclude_skill", None) or (),
             exclude_agents=getattr(args, "exclude_agent", None) or (),
             exclude_commands=getattr(args, "exclude_command", None) or (),
+            exclude_mcp_servers=getattr(args, "exclude_mcp_server", None) or (),
             dry_run=dry_run,
         )
-    except (ReconcileError, OSError, UnicodeError) as exc:
+    except (ReconcileError, OSError, UnicodeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
@@ -2042,6 +2078,7 @@ def _print_summary(
     agent_count: int,
     skill_count: int,
     prompt_count: int,
+    mcp_server_count: int,
     exclusion_report: ExclusionReport,
 ) -> str:
     """Return a human-readable discovery summary for the reconcile command."""
@@ -2075,6 +2112,7 @@ def _print_summary(
     lines.append(f"{_k('GENERATED_AGENTS')} {agent_count}")
     lines.append(f"{_k('GENERATED_SKILLS')} {skill_count}")
     lines.append(f"{_k('GENERATED_PROMPTS')} {prompt_count}")
+    lines.append(f"{_k('GENERATED_MCP_SERVERS')} {mcp_server_count}")
 
     # Group 4: exclusions (suppressed when all zero)
     excl_lines = render_exclusion_block(exclusion_report, c)
@@ -2092,8 +2130,10 @@ def _build_status_payload(
     agent_count: int = 0,
     skill_count: int = 0,
     prompt_count: int = 0,
+    mcp_server_count: int = 0,
     diagnostics=None,
     skill_diagnostics=None,
+    mcp_diagnostics=None,
     drifted_files: list[str] | None = None,
 ) -> dict[str, object]:
     """Build a stable status payload from reconcile diff output."""
@@ -2103,6 +2143,7 @@ def _build_status_payload(
         "skills": {"create": [], "update": [], "remove": []},
         "agents": {"create": [], "update": [], "remove": []},
         "prompts": {"create": [], "update": [], "remove": []},
+        "mcp_servers": {"create": [], "update": [], "remove": []},
         "global": {"create": [], "update": [], "remove": []},
     }
     pending_change_count = 0
@@ -2128,6 +2169,8 @@ def _build_status_payload(
                 category = "agents"
             elif change.resource_kind == "prompt":
                 category = "prompts"
+            elif change.resource_kind == "mcp_server":
+                category = "mcp_servers"
             elif change.resource_kind in ("global_instructions", "state", "plugin_resource"):
                 category = "global"
             else:
@@ -2149,23 +2192,35 @@ def _build_status_payload(
         for d in (skill_diagnostics or ())
     ]
 
+    rendered_mcp_warnings = [
+        {
+            "kind": "mcp_translation",
+            "server_name": d.server_name,
+            "message": d.message,
+        }
+        for d in (mcp_diagnostics or ())
+    ]
+
     from cc_codex_bridge import __version__
 
     return {
         "agent_count": agent_count,
         "skill_count": skill_count,
         "prompt_count": prompt_count,
+        "mcp_server_count": mcp_server_count,
         "version": __version__,
         "status": status,
         "pending_change_count": pending_change_count,
         "categorized_changes": categorized_changes,
         "diagnostics": rendered_diagnostics,
         "skill_warnings": rendered_skill_warnings,
+        "mcp_warnings": rendered_mcp_warnings,
         "excluded": {
             "plugins": list(exclusion_report.plugins),
             "skills": list(exclusion_report.skills),
             "agents": list(exclusion_report.agents),
             "commands": list(exclusion_report.commands),
+            "mcp_servers": list(exclusion_report.mcp_servers),
         },
         "drifted_files": drifted,
     }
@@ -2174,7 +2229,8 @@ def _build_status_payload(
 def format_status_json(
     report, exclusion_report: ExclusionReport,
     *, agent_count: int = 0, skill_count: int = 0, prompt_count: int = 0,
-    diagnostics=None, skill_diagnostics=None,
+    mcp_server_count: int = 0,
+    diagnostics=None, skill_diagnostics=None, mcp_diagnostics=None,
     drifted_files: list[str] | None = None,
 ) -> str:
     """Render status output as deterministic JSON."""
@@ -2182,8 +2238,9 @@ def format_status_json(
         _build_status_payload(
             report, exclusion_report,
             agent_count=agent_count, skill_count=skill_count,
-            prompt_count=prompt_count,
+            prompt_count=prompt_count, mcp_server_count=mcp_server_count,
             diagnostics=diagnostics, skill_diagnostics=skill_diagnostics,
+            mcp_diagnostics=mcp_diagnostics,
             drifted_files=drifted_files,
         ),
         indent=2,
@@ -2197,7 +2254,8 @@ from cc_codex_bridge._colors import color_fns as _status_color_fns
 def format_status_report(
     report, exclusion_report: ExclusionReport,
     *, agent_count: int = 0, skill_count: int = 0, prompt_count: int = 0,
-    diagnostics=None, skill_diagnostics=None,
+    mcp_server_count: int = 0,
+    diagnostics=None, skill_diagnostics=None, mcp_diagnostics=None,
     drifted_files: list[str] | None = None,
     discovery=None,
     shim_action: str | None = None,
@@ -2206,8 +2264,9 @@ def format_status_report(
     payload = _build_status_payload(
         report, exclusion_report,
         agent_count=agent_count, skill_count=skill_count,
-        prompt_count=prompt_count,
+        prompt_count=prompt_count, mcp_server_count=mcp_server_count,
         diagnostics=diagnostics, skill_diagnostics=skill_diagnostics,
+        mcp_diagnostics=mcp_diagnostics,
         drifted_files=drifted_files,
     )
     from cc_codex_bridge.render import padded_key, render_change_line, render_exclusion_block
@@ -2217,6 +2276,7 @@ def format_status_report(
     skills = categorized["skills"]
     agents = categorized["agents"]
     prompts = categorized["prompts"]
+    mcp_servers = categorized["mcp_servers"]
     global_changes = categorized["global"]
 
     def _k(key: str) -> str:
@@ -2276,6 +2336,7 @@ def format_status_report(
     lines.append(f"{_k('GENERATED_AGENTS')} {payload['agent_count']}")
     lines.append(f"{_k('GENERATED_SKILLS')} {payload['skill_count']}")
     lines.append(f"{_k('GENERATED_PROMPTS')} {payload['prompt_count']}")
+    lines.append(f"{_k('GENERATED_MCP_SERVERS')} {payload['mcp_server_count']}")
 
     # Group 4: pending changes
     lines.append("")
@@ -2288,6 +2349,8 @@ def format_status_report(
     lines.extend(_detail_lines(agents))
     lines.append(f"{_k('PROMPTS')} {_counts(prompts)}")
     lines.extend(_detail_lines(prompts))
+    lines.append(f"{_k('MCP_SERVERS')} {_counts(mcp_servers)}")
+    lines.extend(_detail_lines(mcp_servers))
     lines.append(f"{_k('GLOBAL')} {_counts(global_changes)}")
     lines.extend(_detail_lines(global_changes))
 
@@ -2295,6 +2358,8 @@ def format_status_report(
         lines.append(f"{c['bad']('DIAGNOSTIC:')} {diagnostic['message']}")
     for warning in payload["skill_warnings"]:
         lines.append(f"{c['warn']('SKILL_WARNING:')} {warning['message']}")
+    for warning in payload["mcp_warnings"]:
+        lines.append(f"{c['warn']('MCP_WARNING:')} {warning['message']}")
 
     drifted = payload.get("drifted_files", [])
     if drifted:
@@ -2324,9 +2389,11 @@ def format_reconcile_json(
     agent_count: int,
     skill_count: int,
     prompt_count: int,
+    mcp_server_count: int,
     exclusion_report: ExclusionReport,
     *,
     skill_diagnostics=None,
+    mcp_diagnostics=None,
 ) -> str:
     """Render single-project reconcile output as deterministic JSON."""
     from cc_codex_bridge import __version__
@@ -2350,11 +2417,13 @@ def format_reconcile_json(
         "agent_count": agent_count,
         "skill_count": skill_count,
         "prompt_count": prompt_count,
+        "mcp_server_count": mcp_server_count,
         "excluded": {
             "plugins": list(exclusion_report.plugins),
             "skills": list(exclusion_report.skills),
             "agents": list(exclusion_report.agents),
             "commands": list(exclusion_report.commands),
+            "mcp_servers": list(exclusion_report.mcp_servers),
         },
         "skill_warnings": [
             {
@@ -2365,6 +2434,14 @@ def format_reconcile_json(
                 "message": format_skill_validation_diagnostics((d,)),
             }
             for d in (skill_diagnostics or ())
+        ],
+        "mcp_warnings": [
+            {
+                "kind": "mcp_translation",
+                "server_name": d.server_name,
+                "message": d.message,
+            }
+            for d in (mcp_diagnostics or ())
         ],
     }
     return json.dumps(payload, indent=2, sort_keys=True)

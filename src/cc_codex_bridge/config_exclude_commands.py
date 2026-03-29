@@ -19,6 +19,7 @@ KIND_TO_KEY = {
     "skill": "skills",
     "agent": "agents",
     "command": "commands",
+    "mcp_server": "mcp_servers",
 }
 
 
@@ -38,6 +39,7 @@ class ExcludeListResult:
     skills: tuple[str, ...]
     agents: tuple[str, ...]
     commands: tuple[str, ...]
+    mcp_servers: tuple[str, ...]
 
 
 def list_discoverable_entities(
@@ -46,9 +48,10 @@ def list_discoverable_entities(
 ) -> dict[str, list[str]]:
     """Build a dict of all discoverable entity IDs, keyed by kind.
 
-    Keys: "plugin", "skill", "agent", "command".
+    Keys: "plugin", "skill", "agent", "command", "mcp_server".
     Plugin entities use ``marketplace/plugin_name`` as the ID prefix.
     Standalone user/project entities use ``user/name`` or ``project/name``.
+    MCP servers use bare names (unique after precedence resolution).
     All lists are sorted.
 
     When *scope* is ``"global"``, project-scoped entities (``project/...``)
@@ -58,6 +61,7 @@ def list_discoverable_entities(
     skills: list[str] = []
     agents: list[str] = []
     commands: list[str] = []
+    mcp_servers: list[str] = []
 
     for plugin in discovery.plugins:
         prefix = f"{plugin.marketplace}/{plugin.plugin_name}"
@@ -89,11 +93,16 @@ def list_discoverable_entities(
         for command_path in discovery.project_commands:
             commands.append(f"project/{command_path.name}")
 
+    # MCP servers (bare names, scope-independent)
+    for server in discovery.mcp_servers:
+        mcp_servers.append(server.name)
+
     return {
         "plugin": sorted(plugins),
         "skill": sorted(skills),
         "agent": sorted(agents),
         "command": sorted(commands),
+        "mcp_server": sorted(mcp_servers),
     }
 
 
@@ -230,4 +239,5 @@ def handle_exclude_list(
         skills=tuple(sorted(str(v) for v in exclude_table.get("skills", []))),
         agents=tuple(sorted(str(v) for v in exclude_table.get("agents", []))),
         commands=tuple(sorted(str(v) for v in exclude_table.get("commands", []))),
+        mcp_servers=tuple(sorted(str(v) for v in exclude_table.get("mcp_servers", []))),
     )

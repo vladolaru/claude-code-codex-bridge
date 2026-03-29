@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- MCP server bridging: Claude Code MCP server definitions are now discovered,
+  translated, and written to Codex's `config.toml`. Supports stdio and HTTP
+  transports. Global servers write to `~/.codex/config.toml`, project servers
+  to `.codex/config.toml`. Ownership tracked with drift detection.
+- MCP servers visible in `status` and `reconcile` output.
+- MCP server exclusion support via `bridge.toml` `mcp_servers` list,
+  `--exclude-mcp-server` CLI flag, and `config exclude add mcp_server:<name>`.
+- Clean and uninstall remove bridge-owned MCP entries from config.toml files.
+- New runtime dependency: `tomlkit` for round-trip TOML editing.
+- New reference docs: `docs/claude-code-mcp-reference.md` and
+  `docs/mcp-bridge-mapping.md`.
+- Degraded MCP discovery: corrupt `~/.claude.json` or `.mcp.json` files no
+  longer trigger removal of previously-bridged MCP entries. The bridge warns
+  and preserves existing state until the file is fixed.
+
+### Fixed
+
+- MCP reconcile now verifies on-disk presence of bridge-owned entries in
+  `config.toml`, not just stored content hashes — externally deleted entries
+  are restored on the next run.
+- MCP planning scope-gates `config.toml` reads: a corrupt global config no
+  longer blocks project-only MCP sync, and vice versa.
+- First-time adoption of an existing bridge-managed global MCP server now
+  updates `config.toml` when the definition changed, instead of silently
+  skipping the entry.
+- Unreadable MCP config files (`PermissionError`, I/O failures) and non-dict
+  JSON roots now trigger degraded discovery instead of being treated as empty.
+- MCP type validation: `command` and `url` must be strings at discovery;
+  `args` must be a list, `env` must be a dict, and header values must be
+  strings at translation — non-conforming values are skipped instead of
+  crashing.
+- `config exclude add/remove` CLI now accepts `mcp_server` as an entity kind.
+- `uninstall_all` catches `ValueError` and `OSError` during MCP config
+  cleanup, preventing one corrupt project from aborting the entire uninstall.
+- Project `.codex/config.toml` paths are now containment-checked against the
+  project root, preventing writes through symlinked `.codex/` directories.
+
 ## [1.1.0] - 2026-03-28
 
 ### Added
