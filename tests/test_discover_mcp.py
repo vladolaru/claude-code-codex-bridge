@@ -36,6 +36,13 @@ class TestLoadJson:
         path.write_text("{not valid json")
         assert _load_json(path) is None
 
+    def test_returns_none_for_unreadable_file(self, tmp_path: Path):
+        path = tmp_path / "secret.json"
+        path.write_text('{"key": "value"}')
+        path.chmod(0o000)
+        assert _load_json(path) is None
+        path.chmod(0o644)  # restore for cleanup
+
     def test_returns_empty_dict_for_non_dict_json(self, tmp_path: Path):
         path = tmp_path / "array.json"
         path.write_text('["a", "b"]')
@@ -655,6 +662,39 @@ class TestDegradedDiscovery:
         )
         assert degraded is False
         assert len(result) == 2
+
+    def test_unreadable_claude_json_sets_degraded(self, tmp_path: Path):
+        """Unreadable ~/.claude.json (e.g. PermissionError) sets degraded=True."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        claude_json = tmp_path / ".claude.json"
+        claude_json.write_text(json.dumps({
+            "mcpServers": {
+                "global-srv": {"command": "node"},
+            },
+        }))
+        claude_json.chmod(0o000)
+
+        mcp_json = project_root / ".mcp.json"
+        mcp_json.write_text(json.dumps({
+            "mcpServers": {
+                "shared-srv": {"command": "python"},
+            },
+        }))
+
+        result, degraded = discover_mcp_servers(
+            project_root=project_root,
+            claude_json_path=claude_json,
+            mcp_json_path=mcp_json,
+        )
+        # Restore permissions for tmp_path cleanup
+        claude_json.chmod(0o644)
+
+        assert degraded is True
+        # Global servers are lost (file unreadable), but shared servers survive
+        assert len(result) == 1
+        assert result[0].name == "shared-srv"
 
     def test_missing_files_not_degraded(self, tmp_path: Path):
         """Missing files (not corrupt) produce degraded=False."""

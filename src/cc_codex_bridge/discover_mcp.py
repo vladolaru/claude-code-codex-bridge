@@ -79,12 +79,15 @@ def _load_json(path: Path) -> dict | None:
     """Load a JSON file as a dict.
 
     Returns ``{}`` when the file does not exist, and ``None`` when the file
-    exists but contains malformed JSON (signalling degraded discovery).
+    exists but cannot be read or contains malformed JSON (signalling degraded
+    discovery).
     """
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
+    except FileNotFoundError:
         return {}
+    except OSError:
+        return None
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
