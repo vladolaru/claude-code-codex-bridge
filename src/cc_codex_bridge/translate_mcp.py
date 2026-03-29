@@ -32,6 +32,20 @@ def translate_mcp_servers(
     diagnostics: list[McpTranslationDiagnostic] = []
 
     for server in servers:
+        # Validate server name — must be a valid TOML key compatible with
+        # the registry's character-set requirements (alphanumeric + hyphens
+        # + underscores).  Invalid names would reconcile once then crash on
+        # the next load when the registry rejects its own stored entry.
+        if not _is_valid_mcp_name(server.name):
+            diagnostics.append(McpTranslationDiagnostic(
+                server_name=server.name,
+                message=(
+                    "server name contains invalid characters "
+                    "(only alphanumeric, hyphens, and underscores are allowed); skipped"
+                ),
+            ))
+            continue
+
         server_diagnostics: list[McpTranslationDiagnostic] = []
 
         if server.transport == "stdio":
@@ -60,6 +74,15 @@ def format_mcp_translation_diagnostics(
     return "\n".join(
         f"MCP server '{d.server_name}': {d.message}" for d in diagnostics
     )
+
+
+def _is_valid_mcp_name(name: str) -> bool:
+    """Return True if *name* is a valid MCP server identifier.
+
+    Valid names contain only alphanumeric characters, hyphens, and underscores.
+    This matches the character-set check in ``registry._require_mcp_server_key_name``.
+    """
+    return bool(name) and all(c.isalnum() or c in "-_" for c in name)
 
 
 def _translate_stdio(server: DiscoveredMcpServer) -> dict:
@@ -113,6 +136,20 @@ def _translate_http(
                     # Extract env var name from either group (braces or no braces)
                     var_name = match.group(1) or match.group(2)
                     table["bearer_token_env_var"] = var_name
+                    continue
+                # Literal bearer token — do NOT persist the secret into
+                # generated config.  Warn the user to use an env var ref.
+                # Only catch Bearer tokens; other schemes (Basic, etc.) are
+                # passed through as http_headers.
+                if value.lstrip().startswith("Bearer "):
+                    diagnostics.append(McpTranslationDiagnostic(
+                        server_name=server.name,
+                        message=(
+                            "Authorization header contains a literal bearer token; "
+                            "use $ENV_VAR or ${ENV_VAR} syntax instead. "
+                            "The header was omitted from the generated config"
+                        ),
+                    ))
                     continue
             remaining_headers[key] = value
 
