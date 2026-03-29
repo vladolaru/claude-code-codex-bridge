@@ -549,14 +549,14 @@ class TestUserAuthoredMcpPreservation:
         # Verify the registry does NOT track wpcom as owned by this project
         import json as _json
         registry_path = bridge_home / "registry.json"
-        if registry_path.exists():
-            registry_data = _json.loads(registry_path.read_text())
-            mcp_servers = registry_data.get("mcp_servers", {})
-            if "wpcom" in mcp_servers:
-                owners = mcp_servers["wpcom"].get("owners", [])
-                assert str(project) not in owners, (
-                    "Project should not be registered as owner of user-authored global MCP entry"
-                )
+        assert registry_path.exists(), "Registry file should exist after reconcile"
+        registry_data = _json.loads(registry_path.read_text())
+        mcp_servers = registry_data.get("mcp_servers", {})
+        if "wpcom" in mcp_servers:
+            owners = mcp_servers["wpcom"].get("owners", [])
+            assert str(project) not in owners, (
+                "Project should not be registered as owner of user-authored global MCP entry"
+            )
 
 
 class TestCorruptConfigTomlPlanning:
