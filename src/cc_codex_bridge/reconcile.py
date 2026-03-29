@@ -1254,8 +1254,8 @@ def uninstall_all(
                 doc = read_codex_config(global_config_path)
                 apply_mcp_changes(doc, desired={}, owned=remaining_global_mcp)
                 write_codex_config(global_config_path, doc)
-            except ValueError:
-                pass  # corrupt TOML — skip MCP cleanup, continue uninstall
+            except (ValueError, OSError):
+                pass  # corrupt/unreadable TOML — skip MCP cleanup, continue uninstall
 
         # Apply global removals
         for change in global_removals:
