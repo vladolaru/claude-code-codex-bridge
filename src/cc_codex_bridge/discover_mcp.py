@@ -93,7 +93,7 @@ def _load_json(path: Path) -> dict | None:
     except json.JSONDecodeError:
         return None
     if not isinstance(data, dict):
-        return {}
+        return None
     return data
 
 

@@ -43,10 +43,10 @@ class TestLoadJson:
         assert _load_json(path) is None
         path.chmod(0o644)  # restore for cleanup
 
-    def test_returns_empty_dict_for_non_dict_json(self, tmp_path: Path):
+    def test_returns_none_for_non_dict_json(self, tmp_path: Path):
         path = tmp_path / "array.json"
         path.write_text('["a", "b"]')
-        assert _load_json(path) == {}
+        assert _load_json(path) is None
 
 
 # -- _detect_transport ---------------------------------------------------------
