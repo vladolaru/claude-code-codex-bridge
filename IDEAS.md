@@ -48,3 +48,13 @@ Each idea should capture:
 **Rough shape:** A `reverse` or `import` command that reads `~/.codex/config.toml` MCP entries not owned by the bridge and generates CC-compatible `.mcp.json` entries. Would need to reverse the translation (Codex TOML → CC JSON).
 
 **Open questions:** Who is the audience? Users who start with Codex and want CC interop? Is this common enough to justify the complexity? The translation is lossy in both directions (different auth models, different env-var semantics).
+
+---
+
+### File-watcher autosync mode
+
+**Spark:** Autosync currently uses a periodic LaunchAgent schedule (e.g., every 5 minutes). A file-watcher mode that triggers reconcile on CC config changes (`~/.claude.json`, `.mcp.json`, plugin cache) would make bridging near-instant without polling overhead.
+
+**Rough shape:** `cc-codex-bridge autosync --watch` using `fsevents` (macOS) or `inotify` (Linux) to monitor CC config paths. Debounce to avoid thrashing on rapid edits. Could coexist with the LaunchAgent schedule as a fallback.
+
+**Open questions:** Is near-instant sync actually needed, or is 5-minute polling sufficient for the use case? File watchers add a persistent background process. Does this conflict with the LaunchAgent model (which is fire-and-forget)? What triggers a watch restart when CC config paths change (e.g., new project with `.mcp.json`)?

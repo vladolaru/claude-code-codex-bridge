@@ -1065,7 +1065,7 @@ These are current implemented simplifications, not necessarily permanent design 
   post-parse validation of supported runtime shapes
 - exclusion ids are exact-match identifiers, not wildcard/glob patterns
 - commands are translated to native Codex prompt files (`~/.codex/prompts/`) rather than Codex skills, avoiding namespace collisions with the skill directory entirely
-- LaunchAgent scheduling with automatic `launchctl bootstrap/bootout` is supported; watcher mode is not
+- LaunchAgent scheduling with automatic `launchctl bootstrap/bootout` is supported; autosync uses a periodic schedule, not a file-watcher
 - MCP planning assumes `mcp_servers` is a TOML table when the document parses successfully — a hand-crafted scalar value (`mcp_servers = "oops"`) would pass TOML validation but crash during apply, leaving the registry inconsistent
 - MCP translation does not remap Claude `${VAR}` env-var references in non-Authorization fields — Codex may treat these as literal strings rather than expanding them at runtime; the bridge copies the syntax verbatim and relies on the host shell or Codex runtime to resolve them
 - MCP server names must match `[A-Za-z0-9_-]`; servers with dots, spaces, or other characters are skipped with a diagnostic — this is stricter than TOML's quoted-key support but required for registry key safety and Codex `mcp__<server>__<tool>` naming
