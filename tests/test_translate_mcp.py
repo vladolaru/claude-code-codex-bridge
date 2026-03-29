@@ -182,8 +182,29 @@ class TestHttpTranslation:
         # No other headers remain, so http_headers should be omitted
         assert "http_headers" not in gen.toml_table
 
-    def test_non_bearer_authorization_preserved_with_warning(self):
-        """HTTP: non-Bearer literal Authorization header preserved but emits warning."""
+    def test_literal_bearer_token_omitted_with_warning(self):
+        """HTTP: literal bearer token is omitted from config and emits warning."""
+        server = DiscoveredMcpServer(
+            name="literal-bearer-srv",
+            scope="global",
+            transport="http",
+            source="user-global",
+            config={
+                "url": "https://example.com/mcp",
+                "headers": {"Authorization": "Bearer sk-real-secret-key"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert "bearer_token_env_var" not in gen.toml_table
+        assert "http_headers" not in gen.toml_table
+        assert len(result.diagnostics) == 1
+        assert "literal bearer token" in result.diagnostics[0].message
+        assert "omitted" in result.diagnostics[0].message
+
+    def test_non_bearer_authorization_omitted_with_warning(self):
+        """HTTP: non-Bearer literal Authorization header omitted and emits warning."""
         server = DiscoveredMcpServer(
             name="basic-auth-srv",
             scope="global",
@@ -197,11 +218,12 @@ class TestHttpTranslation:
         result = translate_mcp_servers((server,))
 
         gen = result.servers[0]
-        assert gen.toml_table["http_headers"] == {"Authorization": "Basic dXNlcjpwYXNz"}
+        assert "http_headers" not in gen.toml_table
         assert "bearer_token_env_var" not in gen.toml_table
         # Literal credential triggers a warning diagnostic
         assert len(result.diagnostics) == 1
         assert "literal credential" in result.diagnostics[0].message
+        assert "omitted" in result.diagnostics[0].message
 
     def test_non_bearer_env_var_authorization_no_warning(self):
         """HTTP: non-Bearer Authorization header using env var emits no warning."""
@@ -301,6 +323,103 @@ class TestDiagnostics:
         assert diag.server_name == "helper-srv"
         assert "headersHelper" in diag.message
         assert "no Codex equivalent" in diag.message
+
+    def test_non_authorization_literal_header_warning(self):
+        """HTTP: literal value in non-Authorization header emits warning but is preserved."""
+        server = DiscoveredMcpServer(
+            name="api-key-srv",
+            scope="global",
+            transport="http",
+            source="user-global",
+            config={
+                "url": "https://example.com/mcp",
+                "headers": {"X-API-Key": "sk-real-key-123"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        # Header is preserved (not omitted — only Authorization is omitted)
+        assert gen.toml_table["http_headers"] == {"X-API-Key": "sk-real-key-123"}
+        assert len(result.diagnostics) == 1
+        assert "X-API-Key" in result.diagnostics[0].message
+        assert "literal value" in result.diagnostics[0].message
+
+    def test_non_credential_literal_header_no_warning(self):
+        """HTTP: literal value in non-credential header (Content-Type) emits no warning."""
+        server = DiscoveredMcpServer(
+            name="content-type-srv",
+            scope="global",
+            transport="http",
+            source="user-global",
+            config={
+                "url": "https://example.com/mcp",
+                "headers": {"Content-Type": "application/json"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["http_headers"] == {"Content-Type": "application/json"}
+        assert not result.diagnostics
+
+    def test_non_authorization_env_var_header_no_warning(self):
+        """HTTP: env var reference in non-Authorization header emits no warning."""
+        server = DiscoveredMcpServer(
+            name="api-key-env-srv",
+            scope="global",
+            transport="http",
+            source="user-global",
+            config={
+                "url": "https://example.com/mcp",
+                "headers": {"X-API-Key": "$MY_API_KEY"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["http_headers"] == {"X-API-Key": "$MY_API_KEY"}
+        assert not result.diagnostics
+
+    def test_stdio_literal_env_value_warning(self):
+        """Stdio: literal env value emits warning but is preserved."""
+        server = DiscoveredMcpServer(
+            name="env-literal-srv",
+            scope="global",
+            transport="stdio",
+            source="user-global",
+            config={
+                "command": "node",
+                "args": ["server.js"],
+                "env": {"API_KEY": "sk-secret-123"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["env"] == {"API_KEY": "sk-secret-123"}
+        assert len(result.diagnostics) == 1
+        assert "API_KEY" in result.diagnostics[0].message
+        assert "literal value" in result.diagnostics[0].message
+
+    def test_stdio_env_var_ref_no_warning(self):
+        """Stdio: env var reference does not emit warning."""
+        server = DiscoveredMcpServer(
+            name="env-ref-srv",
+            scope="global",
+            transport="stdio",
+            source="user-global",
+            config={
+                "command": "node",
+                "args": ["server.js"],
+                "env": {"API_KEY": "$MY_SECRET"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["env"] == {"API_KEY": "$MY_SECRET"}
+        assert not result.diagnostics
 
     def test_oauth_config_warning(self):
         """OAuth config detected produces a warning diagnostic."""

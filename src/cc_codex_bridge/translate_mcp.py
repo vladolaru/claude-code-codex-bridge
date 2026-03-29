@@ -52,7 +52,7 @@ def translate_mcp_servers(
         server_diagnostics: list[McpTranslationDiagnostic] = []
 
         if server.transport == "stdio":
-            toml_table = _translate_stdio(server)
+            toml_table = _translate_stdio(server, server_diagnostics)
         else:
             toml_table = _translate_http(server, server_diagnostics)
 
@@ -79,6 +79,19 @@ def format_mcp_translation_diagnostics(
     )
 
 
+# Key name fragments that suggest the value might be a credential.
+_CREDENTIAL_KEY_FRAGMENTS = (
+    "key", "token", "secret", "password", "pass", "credential", "auth",
+    "bearer", "cookie", "api_key", "apikey",
+)
+
+
+def _looks_like_credential_key(key: str) -> bool:
+    """Return True if *key* contains a fragment suggesting a credential."""
+    lower = key.lower()
+    return any(frag in lower for frag in _CREDENTIAL_KEY_FRAGMENTS)
+
+
 def _is_valid_mcp_name(name: str) -> bool:
     """Return True if *name* is a valid MCP server identifier.
 
@@ -88,7 +101,10 @@ def _is_valid_mcp_name(name: str) -> bool:
     return bool(name) and all(c.isalnum() or c in "-_" for c in name)
 
 
-def _translate_stdio(server: DiscoveredMcpServer) -> dict:
+def _translate_stdio(
+    server: DiscoveredMcpServer,
+    diagnostics: list[McpTranslationDiagnostic],
+) -> dict:
     """Build Codex TOML table for a stdio MCP server."""
     config = server.config
     table: dict = {}
@@ -101,6 +117,19 @@ def _translate_stdio(server: DiscoveredMcpServer) -> dict:
     env = config.get("env")
     if env:
         table["env"] = dict(env)
+        # Warn about env values that look like literal credentials
+        for env_key, env_value in env.items():
+            if (isinstance(env_value, str)
+                    and not env_value.startswith("$")
+                    and _looks_like_credential_key(env_key)):
+                diagnostics.append(McpTranslationDiagnostic(
+                    server_name=server.name,
+                    message=(
+                        f"env var '{env_key}' contains a literal value; "
+                        "if this is a credential, consider using $ENV_VAR syntax instead. "
+                        "The value was included in the generated config"
+                    ),
+                ))
 
     return table
 
@@ -152,17 +181,30 @@ def _translate_http(
                         ),
                     ))
                     continue
-                # Other auth schemes (Basic, etc.) — warn if literal credential
-                # (not an env var reference) is being propagated to config.toml.
+                # Other auth schemes (Basic, etc.) — omit literal credential
+                # (not an env var reference) from generated config.toml.
                 if not value.strip().startswith("$"):
                     diagnostics.append(McpTranslationDiagnostic(
                         server_name=server.name,
                         message=(
                             "Authorization header contains a literal credential; "
-                            "consider using $ENV_VAR or ${ENV_VAR} syntax instead. "
-                            "The header was included in the generated config"
+                            "use $ENV_VAR or ${ENV_VAR} syntax instead. "
+                            "The header was omitted from the generated config"
                         ),
                     ))
+                    continue
+            # Scan non-Authorization headers for literal credentials.
+            # Values starting with $ are env var references and are safe.
+            if (not value.strip().startswith("$")
+                    and _looks_like_credential_key(key)):
+                diagnostics.append(McpTranslationDiagnostic(
+                    server_name=server.name,
+                    message=(
+                        f"header '{key}' contains a literal value; "
+                        "if this is a credential, consider using $ENV_VAR syntax instead. "
+                        "The header was included in the generated config"
+                    ),
+                ))
             remaining_headers[key] = value
 
         if remaining_headers:
