@@ -795,6 +795,130 @@ class TestMultiProjectGlobalOwnership:
         assert "version=1" not in config_content
 
 
+class TestDiskPresenceVerification:
+    """Reconcile must restore MCP entries removed externally from config.toml."""
+
+    def test_global_entry_restored_after_external_deletion(self, tmp_path, make_project):
+        """If a bridge-owned global MCP entry is externally deleted, reconcile restores it."""
+        project, _ = make_project()
+        codex_home = tmp_path / "codex-home"
+        bridge_home = tmp_path / "bridge-home"
+
+        servers = (
+            GeneratedMcpServer(
+                name="wpcom",
+                scope="global",
+                toml_table={"command": "wpcom-server"},
+                source_description="user-global",
+            ),
+        )
+
+        # First reconcile: creates the entry
+        _build_and_reconcile(project, servers, codex_home, bridge_home)
+        global_config = codex_home / "config.toml"
+        assert "wpcom" in global_config.read_text()
+
+        # Simulate external deletion: remove the entry from config.toml
+        global_config.write_text("", encoding="utf-8")
+        assert "wpcom" not in global_config.read_text()
+
+        # Second reconcile: same desired state, unchanged hash — must restore
+        _build_and_reconcile(project, servers, codex_home, bridge_home)
+        assert "wpcom" in global_config.read_text(), (
+            "Reconcile must restore bridge-owned entries removed externally"
+        )
+
+    def test_project_entry_restored_after_external_deletion(self, tmp_path, make_project):
+        """If a bridge-owned project MCP entry is externally deleted, reconcile restores it."""
+        project, _ = make_project()
+        codex_home = tmp_path / "codex-home"
+        bridge_home = tmp_path / "bridge-home"
+
+        servers = (
+            GeneratedMcpServer(
+                name="figma",
+                scope="project",
+                toml_table={"url": "https://mcp.figma.com/mcp"},
+                source_description="project-local",
+            ),
+        )
+
+        # First reconcile
+        _build_and_reconcile(project, servers, codex_home, bridge_home)
+        project_config = project / ".codex" / "config.toml"
+        assert "figma" in project_config.read_text()
+
+        # Simulate external deletion
+        project_config.write_text("", encoding="utf-8")
+
+        # Second reconcile: must restore
+        _build_and_reconcile(project, servers, codex_home, bridge_home)
+        assert "figma" in project_config.read_text(), (
+            "Reconcile must restore bridge-owned entries removed externally"
+        )
+
+
+class TestSymlinkContainment:
+    """Project MCP config writes must not follow symlinks outside the project."""
+
+    def test_symlinked_codex_dir_rejected_on_reconcile(self, tmp_path, make_project):
+        """Reconcile must refuse to write through a symlinked .codex/ directory."""
+        from cc_codex_bridge.reconcile import ReconcileError
+
+        project, _ = make_project()
+        codex_home = tmp_path / "codex-home"
+        bridge_home = tmp_path / "bridge-home"
+
+        # Create a symlink: project/.codex -> /tmp/somewhere-else
+        external_dir = tmp_path / "external-target"
+        external_dir.mkdir()
+        codex_link = project / ".codex"
+        codex_link.symlink_to(external_dir)
+
+        servers = (
+            GeneratedMcpServer(
+                name="figma",
+                scope="project",
+                toml_table={"url": "https://mcp.figma.com/mcp"},
+                source_description="project-local",
+            ),
+        )
+
+        with pytest.raises(ReconcileError, match="resolves outside expected root"):
+            _build_and_reconcile(project, servers, codex_home, bridge_home)
+
+    def test_symlinked_codex_dir_rejected_on_clean(self, tmp_path, make_project):
+        """clean_project must refuse to read through a symlinked .codex/ directory."""
+        from cc_codex_bridge.reconcile import ReconcileError, clean_project
+
+        project, _ = make_project()
+        codex_home = tmp_path / "codex-home"
+        bridge_home = tmp_path / "bridge-home"
+
+        servers = (
+            GeneratedMcpServer(
+                name="figma",
+                scope="project",
+                toml_table={"url": "https://mcp.figma.com/mcp"},
+                source_description="project-local",
+            ),
+        )
+
+        # First reconcile creates the project state with MCP entries
+        _build_and_reconcile(project, servers, codex_home, bridge_home)
+
+        # Replace .codex with a symlink to an external directory
+        import shutil
+        codex_dir = project / ".codex"
+        shutil.rmtree(codex_dir)
+        external_dir = tmp_path / "external-target"
+        external_dir.mkdir(exist_ok=True)
+        codex_dir.symlink_to(external_dir)
+
+        with pytest.raises(ReconcileError, match="resolves outside expected root"):
+            clean_project(project, bridge_home=bridge_home)
+
+
 def _build_and_reconcile_degraded(
     project: Path,
     mcp_servers: tuple[GeneratedMcpServer, ...],

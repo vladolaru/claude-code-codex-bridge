@@ -803,6 +803,9 @@ def clean_project(
 
         if previous_state.managed_mcp_servers:
             project_config_path = project_root_path / ".codex" / "config.toml"
+            _assert_path_contained(
+                project_config_path, project_root_path, label="Project MCP config"
+            )
             read_codex_config(project_config_path)  # raises ValueError on corrupt TOML
 
         _has_global_mcp = any(
@@ -1604,6 +1607,10 @@ def _plan_mcp_server_mutations(
         else tomlkit.document()
     )
     project_config_path = desired.project_root / ".codex" / "config.toml"
+    if project_servers or previously_owned_project:
+        _assert_path_contained(
+            project_config_path, desired.project_root, label="Project MCP config"
+        )
     project_doc = (
         read_codex_config(project_config_path)
         if project_servers or previously_owned_project
@@ -1764,6 +1771,9 @@ def _apply_mcp_server_changes(
     project_changes_summary: dict[str, list[str]] = {"added": [], "updated": [], "removed": []}
     if project_servers or previously_owned_project:
         project_config_path = desired.project_root / ".codex" / "config.toml"
+        _assert_path_contained(
+            project_config_path, desired.project_root, label="Project MCP config"
+        )
         doc = read_codex_config(project_config_path)
         project_changes_summary = apply_mcp_changes(
             doc,
@@ -1808,6 +1818,9 @@ def _clean_mcp_config_entries(
     project_mcp_names = set(previous_state.managed_mcp_servers)
     if project_mcp_names:
         project_config_path = project_root / ".codex" / "config.toml"
+        _assert_path_contained(
+            project_config_path, project_root, label="Project MCP config"
+        )
         doc = read_codex_config(project_config_path)
         apply_mcp_changes(doc, desired={}, owned=project_mcp_names)
         write_codex_config(project_config_path, doc)
