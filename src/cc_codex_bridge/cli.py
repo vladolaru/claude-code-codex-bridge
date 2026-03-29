@@ -541,7 +541,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     exclude_add_parser.add_argument(
-        "kind", nargs="?", choices=["plugin", "skill", "agent", "command"],
+        "kind", nargs="?", choices=["plugin", "skill", "agent", "command", "mcp_server"],
         help="Entity kind to exclude.",
     )
     exclude_add_parser.add_argument("entity_id", nargs="?", help="Entity ID to exclude.")
@@ -565,7 +565,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     exclude_remove_parser.add_argument(
-        "kind", nargs="?", choices=["plugin", "skill", "agent", "command"],
+        "kind", nargs="?", choices=["plugin", "skill", "agent", "command", "mcp_server"],
         help="Entity kind to remove from exclusions.",
     )
     exclude_remove_parser.add_argument(
