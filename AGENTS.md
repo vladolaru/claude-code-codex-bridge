@@ -40,7 +40,10 @@ claude-code-codex-bridge/
 │       └── ...
 ├── tests/
 ├── AGENTS.md
+├── CHANGELOG.md
 ├── CLAUDE.md
+├── FOLLOW_UPS.md
+├── IDEAS.md
 ├── LICENSE
 ├── README.md
 └── pyproject.toml
@@ -131,6 +134,12 @@ Consult these before making design decisions that depend on how Codex discovers 
 `DESIGN.md` is the canonical architectural source for the current implemented state of this project.
 
 Agents must consult `DESIGN.md` before making substantial architectural or cross-module changes, and must keep it updated at all times when implementation changes affect architecture, data flow, ownership rules, constraints, command behavior, or module responsibilities.
+
+`FOLLOW_UPS.md` collects deferred items — planned improvements, intentional scope cuts, and discoveries made during development and review. **Never annotate DESIGN.md, code, or commit messages with "planned for v2", "add later", or similar.** Put it in FOLLOW_UPS.md instead. DESIGN.md describes what IS; FOLLOW_UPS.md tracks what's next.
+
+`IDEAS.md` captures rough ideas worth exploring — sparks, half-formed proposals, things that need user signal or prototyping before they can become plans. Add here when something is interesting but not yet decided. When an idea matures into concrete deferred work, move it to FOLLOW_UPS.md; when it's ready to build, move it to DESIGN.md + CHANGELOG.md.
+
+`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Add an entry under `[Unreleased]` for every user-visible change. When a version is tagged, move unreleased entries under the new version heading with the release date.
 
 ## AI Artifacts
 

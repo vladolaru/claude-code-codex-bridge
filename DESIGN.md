@@ -1086,3 +1086,5 @@ When making architectural changes, update `DESIGN.md` in the same change if you 
 - major module responsibilities
 
 If a code change would make this file inaccurate, the change is incomplete until `DESIGN.md` is updated.
+
+If you're deferring something, add it to `FOLLOW_UPS.md`, not here. This document describes what IS; FOLLOW_UPS.md tracks what's next.
