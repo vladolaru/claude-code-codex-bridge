@@ -100,6 +100,26 @@ class TestStdioTranslation:
         assert gen.toml_table["args"] == ["@my/server"]
 
 
+    def test_non_dict_env_ignored(self):
+        """stdio: non-dict env (e.g. list) is silently ignored."""
+        server = DiscoveredMcpServer(
+            name="bad-env-srv",
+            scope="project",
+            transport="stdio",
+            source="project-local",
+            config={
+                "command": "my-cmd",
+                "env": ["A=1"],
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        assert len(result.servers) == 1
+        gen = result.servers[0]
+        assert gen.toml_table["command"] == "my-cmd"
+        assert "env" not in gen.toml_table
+
+
 # -- HTTP servers ------------------------------------------------------------
 
 class TestHttpTranslation:
@@ -317,6 +337,29 @@ class TestHttpTranslation:
         assert "http_headers" not in gen.toml_table
         assert "bearer_token_env_var" not in gen.toml_table
         assert len(result.diagnostics) == 0
+
+    def test_non_string_header_values_skipped(self):
+        """HTTP: non-string header values are silently skipped."""
+        server = DiscoveredMcpServer(
+            name="bad-header-val",
+            scope="global",
+            transport="http",
+            source="user-global",
+            config={
+                "url": "https://example.com/mcp",
+                "headers": {
+                    "Authorization": 12345,
+                    "X-Custom": "valid-value",
+                },
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        assert len(result.servers) == 1
+        gen = result.servers[0]
+        # Non-string Authorization is skipped, valid header is kept
+        assert "bearer_token_env_var" not in gen.toml_table
+        assert gen.toml_table.get("http_headers", {}).get("X-Custom") == "valid-value"
 
 
 # -- Diagnostics (warnings) -------------------------------------------------

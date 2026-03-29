@@ -115,7 +115,7 @@ def _translate_stdio(
         table["args"] = list(config["args"])
 
     env = config.get("env")
-    if env:
+    if isinstance(env, dict) and env:
         table["env"] = dict(env)
         # Warn about env values that look like literal credentials
         for env_key, env_value in env.items():
@@ -162,6 +162,8 @@ def _translate_http(
     if isinstance(headers, dict):
         remaining_headers: dict[str, str] = {}
         for key, value in headers.items():
+            if not isinstance(value, str):
+                continue
             if key.lower() == "authorization":
                 match = _BEARER_TOKEN_RE.match(value)
                 if match:
