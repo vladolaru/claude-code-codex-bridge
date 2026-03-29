@@ -111,8 +111,9 @@ def _translate_stdio(
 
     table["command"] = config["command"]
 
-    if "args" in config:
-        table["args"] = list(config["args"])
+    args = config.get("args")
+    if isinstance(args, list):
+        table["args"] = list(args)
 
     env = config.get("env")
     if isinstance(env, dict) and env:

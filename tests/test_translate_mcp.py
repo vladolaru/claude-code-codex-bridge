@@ -100,6 +100,25 @@ class TestStdioTranslation:
         assert gen.toml_table["args"] == ["@my/server"]
 
 
+    def test_non_list_args_ignored(self):
+        """stdio: non-list args (e.g. string) are silently ignored."""
+        server = DiscoveredMcpServer(
+            name="bad-args-srv",
+            scope="project",
+            transport="stdio",
+            source="project-local",
+            config={
+                "command": "my-cmd",
+                "args": "--flag",
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        assert len(result.servers) == 1
+        gen = result.servers[0]
+        assert gen.toml_table["command"] == "my-cmd"
+        assert "args" not in gen.toml_table
+
     def test_non_dict_env_ignored(self):
         """stdio: non-dict env (e.g. list) is silently ignored."""
         server = DiscoveredMcpServer(
