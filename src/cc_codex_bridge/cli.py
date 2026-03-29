@@ -1061,7 +1061,7 @@ def main(argv: list[str] | None = None) -> int:
                     shim_action=build.shim_decision.action,
                 ))
             return 0
-    except (TranslationError, ReconcileError, OSError, UnicodeError) as exc:
+    except (TranslationError, ReconcileError, OSError, UnicodeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
@@ -1616,7 +1616,7 @@ def _handle_clean_command(args: argparse.Namespace) -> int:
             bridge_home=bridge_home_path,
             dry_run=args.dry_run,
         )
-    except (ReconcileError, OSError, UnicodeError) as exc:
+    except (ReconcileError, OSError, UnicodeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
@@ -1696,7 +1696,7 @@ def _handle_all_command(args: argparse.Namespace) -> int:
             exclude_mcp_servers=getattr(args, "exclude_mcp_server", None) or (),
             dry_run=dry_run,
         )
-    except (ReconcileError, OSError, UnicodeError) as exc:
+    except (ReconcileError, OSError, UnicodeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
