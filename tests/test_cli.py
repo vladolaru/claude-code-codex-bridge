@@ -2124,15 +2124,26 @@ def test_status_payload_counts_drift_without_other_changes():
     assert payload["drifted_files"] == ["CLAUDE.md"]
 
 
-def test_status_payload_mcp_servers_use_label_not_path():
-    """MCP server pending changes should display the server name (label), not the config.toml path."""
+def test_status_payload_mcp_servers_preserve_config_paths():
+    """MCP server pending changes must keep config paths for machine-readable status."""
     from cc_codex_bridge.reconcile import Change
 
-    config_toml = Path("/home/user/.codex/config.toml")
+    global_config_toml = Path("/home/user/.codex/config.toml")
+    project_config_toml = Path("/workspace/project/.codex/config.toml")
     report = ReconcileReport(
         changes=(
-            Change(kind="create", path=config_toml, resource_kind="mcp_server", label="context7"),
-            Change(kind="create", path=config_toml, resource_kind="mcp_server", label="wpcom"),
+            Change(
+                kind="create",
+                path=global_config_toml,
+                resource_kind="mcp_server",
+                label="context7",
+            ),
+            Change(
+                kind="create",
+                path=project_config_toml,
+                resource_kind="mcp_server",
+                label="wpcom",
+            ),
         ),
         applied=False,
     )
@@ -2142,9 +2153,10 @@ def test_status_payload_mcp_servers_use_label_not_path():
     )
 
     mcp_creates = payload["categorized_changes"]["mcp_servers"]["create"]
-    assert mcp_creates == ["context7", "wpcom"]
-    # Ensure the config.toml path is NOT what's shown
-    assert str(config_toml) not in mcp_creates
+    assert mcp_creates == [
+        str(global_config_toml),
+        str(project_config_toml),
+    ]
 
 
 def test_status_no_drift_when_files_unmodified(tmp_path: Path, capsys):
