@@ -2124,6 +2124,29 @@ def test_status_payload_counts_drift_without_other_changes():
     assert payload["drifted_files"] == ["CLAUDE.md"]
 
 
+def test_status_payload_mcp_servers_use_label_not_path():
+    """MCP server pending changes should display the server name (label), not the config.toml path."""
+    from cc_codex_bridge.reconcile import Change
+
+    config_toml = Path("/home/user/.codex/config.toml")
+    report = ReconcileReport(
+        changes=(
+            Change(kind="create", path=config_toml, resource_kind="mcp_server", label="context7"),
+            Change(kind="create", path=config_toml, resource_kind="mcp_server", label="wpcom"),
+        ),
+        applied=False,
+    )
+    payload = cli._build_status_payload(  # noqa: SLF001 - private helper under test
+        report,
+        ExclusionReport(),
+    )
+
+    mcp_creates = payload["categorized_changes"]["mcp_servers"]["create"]
+    assert mcp_creates == ["context7", "wpcom"]
+    # Ensure the config.toml path is NOT what's shown
+    assert str(config_toml) not in mcp_creates
+
+
 def test_status_no_drift_when_files_unmodified(tmp_path: Path, capsys):
     """Status output has empty drifted_files when no managed files were externally modified."""
     project_root = tmp_path / "project"

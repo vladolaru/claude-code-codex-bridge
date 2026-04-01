@@ -2177,7 +2177,7 @@ def _build_status_payload(
                 category = "project_files"
             kind_list = categorized_changes[category].get(change.kind)
             if kind_list is not None:
-                kind_list.append(str(change.path))
+                kind_list.append(change.label if change.label else str(change.path))
         pending_change_count = len(report.changes) + len(drifted)
         status = "in_sync" if pending_change_count == 0 else "pending_changes"
 
