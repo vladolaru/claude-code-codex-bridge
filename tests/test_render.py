@@ -259,3 +259,19 @@ def test_render_exclusion_block_all_four_categories():
     assert "EXCLUDED_SKILLS" in joined
     assert "EXCLUDED_AGENTS" in joined
     assert "EXCLUDED_COMMANDS" in joined
+
+
+def test_render_exclusion_block_includes_mcp_servers():
+    report = ExclusionReport(mcp_servers=("context-a8c", "linear-server"))
+    lines = [strip_ansi(ln) for ln in render_exclusion_block(report)]
+    joined = "\n".join(lines)
+    assert "EXCLUDED_MCP_SERVERS" in joined
+    assert "context-a8c" in joined
+    assert "linear-server" in joined
+
+
+def test_render_exclusion_block_omits_mcp_servers_when_empty():
+    report = ExclusionReport(plugins=("a/b",))
+    lines = [strip_ansi(ln) for ln in render_exclusion_block(report)]
+    joined = "\n".join(lines)
+    assert "EXCLUDED_MCP_SERVERS" not in joined

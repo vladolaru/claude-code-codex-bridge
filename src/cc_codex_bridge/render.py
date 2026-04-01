@@ -136,14 +136,14 @@ def render_exclusion_block(
 ) -> list[str]:
     """Return lines for the exclusion block, suppressed when all counts are zero.
 
-    If all four categories (plugins, skills, agents, commands) on
+    If all five categories (plugins, skills, agents, commands, mcp_servers) on
     *exclusion_report* are empty, returns an empty list so callers can
     cleanly ``extend`` onto any output list without adding blank noise.
 
     Args:
         exclusion_report: An :class:`~cc_codex_bridge.exclusions.ExclusionReport`
             (or duck-typed equivalent) with ``.plugins``, ``.skills``,
-            ``.agents``, and ``.commands`` iterables.
+            ``.agents``, ``.commands``, and ``.mcp_servers`` iterables.
         c: Color dict from :func:`~cc_codex_bridge._colors.color_fns`.
            Loaded lazily when ``None``.
 
@@ -159,6 +159,7 @@ def render_exclusion_block(
         ("EXCLUDED_SKILLS", exclusion_report.skills),
         ("EXCLUDED_AGENTS", exclusion_report.agents),
         ("EXCLUDED_COMMANDS", exclusion_report.commands),
+        ("EXCLUDED_MCP_SERVERS", exclusion_report.mcp_servers),
     ]
 
     # Suppress entirely when all counts are zero.

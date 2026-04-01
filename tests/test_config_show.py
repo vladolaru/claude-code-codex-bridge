@@ -35,6 +35,7 @@ def test_all_defaults_renders_default_and_none():
     assert "Exclude skills:" in output
     assert "Exclude agents:" in output
     assert "Exclude commands:" in output
+    assert "Exclude mcp_servers:" in output
 
 
 def test_scan_paths_show_global_attribution():
@@ -214,7 +215,7 @@ def test_none_shown_for_empty_sections():
 
     lines = output.splitlines()
     # Check that each section header is followed by "  (none)" on the next line
-    for section_key in ("Exclude plugins:", "Exclude skills:", "Exclude agents:", "Exclude commands:"):
+    for section_key in ("Exclude plugins:", "Exclude skills:", "Exclude agents:", "Exclude commands:", "Exclude mcp_servers:"):
         idx = next(i for i, l in enumerate(lines) if section_key in l)
         # Header line should not contain "(none)"
         assert "(none)" not in lines[idx], (
@@ -332,6 +333,7 @@ def test_json_empty_exclusion_categories():
     assert data["exclude"]["skills"] == []
     assert data["exclude"]["agents"] == []
     assert data["exclude"]["commands"] == []
+    assert data["exclude"]["mcp_servers"] == []
 
 
 def test_json_merged_deduplicates():
@@ -368,3 +370,50 @@ def test_json_is_valid_json_string():
     # Should not raise
     parsed = json.loads(raw)
     assert isinstance(parsed, dict)
+
+
+# ---------------------------------------------------------------------------
+# mcp_servers exclusion category
+# ---------------------------------------------------------------------------
+
+
+def test_all_defaults_includes_mcp_servers_section():
+    """Default config shows 'Exclude mcp_servers:' section with '(none)'."""
+    output = format_config_show(
+        global_config=BridgeConfig(),
+        project_exclusions=None,
+        scan_paths=(),
+        exclude_paths=(),
+        scope="global",
+    )
+    assert "Exclude mcp_servers:" in output
+
+
+def test_mcp_server_exclusion_shows_project_attribution():
+    """Project-level MCP server exclusion shows '(project)' attribution."""
+    project_exclusions = SyncExclusions(mcp_servers=("context-a8c",))
+    output = format_config_show(
+        global_config=BridgeConfig(),
+        project_exclusions=project_exclusions,
+        scan_paths=(),
+        exclude_paths=(),
+        scope="merged",
+    )
+    assert "context-a8c" in output
+    lines = output.splitlines()
+    mcp_line = [l for l in lines if "context-a8c" in l][0]
+    assert "(project)" in mcp_line
+
+
+def test_json_output_includes_mcp_servers_exclusion():
+    """JSON output includes mcp_servers in exclude object."""
+    raw = format_config_show_json(
+        global_config=BridgeConfig(),
+        project_exclusions=SyncExclusions(mcp_servers=("context-a8c",)),
+        scan_paths=(),
+        exclude_paths=(),
+        scope="merged",
+    )
+    data = json.loads(raw)
+    assert "mcp_servers" in data["exclude"]
+    assert {"value": "context-a8c", "source": "project"} in data["exclude"]["mcp_servers"]

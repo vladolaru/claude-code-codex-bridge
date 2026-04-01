@@ -363,7 +363,7 @@ def build_parser() -> argparse.ArgumentParser:
             "--exclude-plugin",
             action="append",
             default=None,
-            help="Skip a plugin (format: marketplace/plugin). Repeatable.",
+            help="Skip a plugin's skills, agents, and commands (format: marketplace/plugin). Does not exclude MCP servers — use --exclude-mcp-server separately. Repeatable.",
         )
         exclude_parser.add_argument(
             "--exclude-skill",
@@ -1531,6 +1531,11 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
             scope=scope.target,
         )
         print(f"{result.message}{scope_label}")
+        if result.success and kind == "plugin":
+            print(
+                "Note: plugin exclusions do not cover MCP servers. "
+                "Use `config exclude add mcp_server <name>` to exclude related MCP servers."
+            )
         return 0 if result.success else 1
 
     # -- remove --
@@ -1584,6 +1589,11 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
             config_path=scope.config_path,
         )
         print(f"{result.message}{scope_label}")
+        if result.success and kind == "plugin":
+            print(
+                "Note: plugin exclusions do not cover MCP servers. "
+                "Check `config exclude list` for any related MCP server exclusions to remove."
+            )
         return 0 if result.success else 1
 
     print(f"Error: unknown exclude command `{subcmd}`", file=sys.stderr)
@@ -2146,6 +2156,14 @@ def _build_status_payload(
         "mcp_servers": {"create": [], "update": [], "remove": []},
         "global": {"create": [], "update": [], "remove": []},
     }
+    display_changes: dict[str, dict[str, list[str]]] = {
+        "project_files": {"create": [], "update": [], "remove": []},
+        "skills": {"create": [], "update": [], "remove": []},
+        "agents": {"create": [], "update": [], "remove": []},
+        "prompts": {"create": [], "update": [], "remove": []},
+        "mcp_servers": {"create": [], "update": [], "remove": []},
+        "global": {"create": [], "update": [], "remove": []},
+    }
     pending_change_count = 0
     status = "invalid" if diagnostics else "in_sync"
 
@@ -2176,8 +2194,16 @@ def _build_status_payload(
             else:
                 category = "project_files"
             kind_list = categorized_changes[category].get(change.kind)
+            display_list = display_changes[category].get(change.kind)
             if kind_list is not None:
                 kind_list.append(str(change.path))
+            if display_list is not None:
+                display_target = (
+                    change.label
+                    if change.resource_kind == "mcp_server" and change.label
+                    else str(change.path)
+                )
+                display_list.append(display_target)
         pending_change_count = len(report.changes) + len(drifted)
         status = "in_sync" if pending_change_count == 0 else "pending_changes"
 
@@ -2212,6 +2238,7 @@ def _build_status_payload(
         "status": status,
         "pending_change_count": pending_change_count,
         "categorized_changes": categorized_changes,
+        "display_changes": display_changes,
         "diagnostics": rendered_diagnostics,
         "skill_warnings": rendered_skill_warnings,
         "mcp_warnings": rendered_mcp_warnings,
@@ -2272,12 +2299,19 @@ def format_status_report(
     from cc_codex_bridge.render import padded_key, render_change_line, render_exclusion_block
     c = _status_color_fns()
     categorized = payload["categorized_changes"]
+    display = payload["display_changes"]
     project_files = categorized["project_files"]
     skills = categorized["skills"]
     agents = categorized["agents"]
     prompts = categorized["prompts"]
     mcp_servers = categorized["mcp_servers"]
     global_changes = categorized["global"]
+    display_project_files = display["project_files"]
+    display_skills = display["skills"]
+    display_agents = display["agents"]
+    display_prompts = display["prompts"]
+    display_mcp_servers = display["mcp_servers"]
+    display_global_changes = display["global"]
 
     def _k(key: str) -> str:
         return padded_key(key, c)
@@ -2342,17 +2376,17 @@ def format_status_report(
     lines.append("")
     lines.append(f"{_k('PENDING_CHANGES')} {colored_pending}")
     lines.append(f"{_k('PROJECT_FILES')} {_counts(project_files)}")
-    lines.extend(_detail_lines(project_files))
+    lines.extend(_detail_lines(display_project_files))
     lines.append(f"{_k('SKILLS')} {_counts(skills)}")
-    lines.extend(_detail_lines(skills))
+    lines.extend(_detail_lines(display_skills))
     lines.append(f"{_k('AGENTS')} {_counts(agents)}")
-    lines.extend(_detail_lines(agents))
+    lines.extend(_detail_lines(display_agents))
     lines.append(f"{_k('PROMPTS')} {_counts(prompts)}")
-    lines.extend(_detail_lines(prompts))
+    lines.extend(_detail_lines(display_prompts))
     lines.append(f"{_k('MCP_SERVERS')} {_counts(mcp_servers)}")
-    lines.extend(_detail_lines(mcp_servers))
+    lines.extend(_detail_lines(display_mcp_servers))
     lines.append(f"{_k('GLOBAL')} {_counts(global_changes)}")
-    lines.extend(_detail_lines(global_changes))
+    lines.extend(_detail_lines(display_global_changes))
 
     for diagnostic in payload["diagnostics"]:
         lines.append(f"{c['bad']('DIAGNOSTIC:')} {diagnostic['message']}")
@@ -2373,6 +2407,7 @@ def format_status_report(
         skills=frozenset(payload["excluded"]["skills"]),
         agents=frozenset(payload["excluded"]["agents"]),
         commands=frozenset(payload["excluded"]["commands"]),
+        mcp_servers=frozenset(payload["excluded"]["mcp_servers"]),
     )
     excl_lines = render_exclusion_block(_excl, c)
     if excl_lines:

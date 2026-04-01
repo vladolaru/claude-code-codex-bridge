@@ -780,6 +780,8 @@ All exclusion flags are repeatable. Exclusions merge from three layers:
 
 Global and project exclusions are **unioned** (both apply). CLI `--exclude-*` flags **replace** the merged set for that entity kind in the current run.
 
+Plugin and MCP server exclusions are **independent**. Plugins are discovered from the Claude plugin cache and provide skills, agents, and commands. MCP servers are discovered from `~/.claude.json` and `.mcp.json`. Excluding a plugin filters its skills, agents, and commands but does not affect MCP servers — there is no plugin-to-MCP-server association in the Claude Code plugin format. MCP servers must be excluded separately by name.
+
 ### Log commands
 
 - `log show`

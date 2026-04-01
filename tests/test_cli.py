@@ -2124,6 +2124,76 @@ def test_status_payload_counts_drift_without_other_changes():
     assert payload["drifted_files"] == ["CLAUDE.md"]
 
 
+def test_status_payload_mcp_servers_preserve_config_paths():
+    """MCP server pending changes must keep config paths for machine-readable status."""
+    from cc_codex_bridge.reconcile import Change
+
+    global_config_toml = Path("/home/user/.codex/config.toml")
+    project_config_toml = Path("/workspace/project/.codex/config.toml")
+    report = ReconcileReport(
+        changes=(
+            Change(
+                kind="create",
+                path=global_config_toml,
+                resource_kind="mcp_server",
+                label="context7",
+            ),
+            Change(
+                kind="create",
+                path=project_config_toml,
+                resource_kind="mcp_server",
+                label="wpcom",
+            ),
+        ),
+        applied=False,
+    )
+    payload = cli._build_status_payload(  # noqa: SLF001 - private helper under test
+        report,
+        ExclusionReport(),
+    )
+
+    mcp_creates = payload["categorized_changes"]["mcp_servers"]["create"]
+    assert mcp_creates == [
+        str(global_config_toml),
+        str(project_config_toml),
+    ]
+
+
+def test_status_report_uses_mcp_server_labels_for_pending_changes():
+    """Human-readable status must show MCP server names, not config paths."""
+    import re
+
+    from cc_codex_bridge.reconcile import Change
+
+    global_config_toml = Path("/home/user/.codex/config.toml")
+    project_config_toml = Path("/workspace/project/.codex/config.toml")
+    report = ReconcileReport(
+        changes=(
+            Change(
+                kind="create",
+                path=global_config_toml,
+                resource_kind="mcp_server",
+                label="context7",
+            ),
+            Change(
+                kind="update",
+                path=project_config_toml,
+                resource_kind="mcp_server",
+                label="wpcom",
+            ),
+        ),
+        applied=False,
+    )
+
+    output = cli.format_status_report(report, ExclusionReport())
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
+
+    assert "context7" in plain
+    assert "wpcom" in plain
+    assert str(global_config_toml) not in plain
+    assert str(project_config_toml) not in plain
+
+
 def test_status_no_drift_when_files_unmodified(tmp_path: Path, capsys):
     """Status output has empty drifted_files when no managed files were externally modified."""
     project_root = tmp_path / "project"
@@ -2390,3 +2460,17 @@ def test_format_all_report_dry_run_banner_says_scan_findings_when_skips_exist():
     assert "scan found" in plain.lower()
     assert "SKIP:" in plain
     assert "NOTE:" in plain
+
+
+def test_status_report_includes_excluded_mcp_servers():
+    """format_status_report must render EXCLUDED_MCP_SERVERS when present."""
+    import re
+
+    report = ReconcileReport(changes=(), applied=False)
+    excl = ExclusionReport(mcp_servers=("context-a8c",))
+
+    output = cli.format_status_report(report, excl)
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
+
+    assert "EXCLUDED_MCP_SERVERS" in plain
+    assert "context-a8c" in plain

@@ -319,6 +319,14 @@ cc-codex-bridge reconcile --project . \
   --exclude-mcp-server server-name
 ```
 
+Manage exclusions interactively — omit arguments to browse discovered entities and pick from a list:
+
+```bash
+cc-codex-bridge config exclude add              # pick kind → pick entity
+cc-codex-bridge config exclude add mcp_server   # pick from discovered MCP servers
+cc-codex-bridge config exclude remove           # pick from current exclusions
+```
+
 Persist exclusions globally in `~/.cc-codex-bridge/config.toml` (applies to all projects):
 
 ```toml
@@ -338,6 +346,8 @@ mcp_servers = ["heavy-mcp-server"]
 ```
 
 Global and project exclusions are **combined** (both apply). CLI `--exclude-*` flags **replace** the combined set for that entity kind in the current run.
+
+> **Note:** Plugin and MCP server exclusions are independent. Excluding a plugin removes its skills, agents, and commands from bridging, but does not affect MCP servers. If a plugin relies on an MCP server, exclude that server separately with `--exclude-mcp-server <name>` or `config exclude add mcp_server <name>`.
 
 ## Ownership and safety
 
