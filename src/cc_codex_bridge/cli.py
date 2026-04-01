@@ -1403,6 +1403,37 @@ def _handle_config_log(args: argparse.Namespace) -> int:
     return 0
 
 
+def _remove_redundant_project_exclusions(
+    kind: str, entity_id: str,
+) -> None:
+    """Remove project-level exclusions that are now redundant with a global one.
+
+    Called after a successful global ``config exclude add``.  Iterates all
+    registered projects and removes the same exclusion from each project's
+    ``.codex/bridge.toml`` if present.
+    """
+    from cc_codex_bridge.config_exclude_commands import handle_exclude_remove
+    from cc_codex_bridge.reconcile import GLOBAL_REGISTRY_FILENAME
+    from cc_codex_bridge.registry import GlobalResourceRegistry
+
+    bridge_home = resolve_bridge_home()
+    registry = GlobalResourceRegistry.from_path(bridge_home / GLOBAL_REGISTRY_FILENAME)
+    if registry is None:
+        return
+
+    for project_root in registry.projects:
+        config_path = project_root / ".codex" / "bridge.toml"
+        if not config_path.exists():
+            continue
+        result = handle_exclude_remove(
+            kind=kind,
+            entity_id=entity_id,
+            config_path=config_path,
+        )
+        if result.success:
+            print(f"Removed redundant project exclusion: {entity_id} ({config_path})")
+
+
 def _handle_config_exclude(args: argparse.Namespace) -> int:
     """Handle config exclude add/remove/list subcommands."""
     from cc_codex_bridge import interactive
@@ -1536,6 +1567,8 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
                 "Note: plugin exclusions do not cover MCP servers. "
                 "Use `config exclude add mcp_server <name>` to exclude related MCP servers."
             )
+        if result.success and scope.target == "global":
+            _remove_redundant_project_exclusions(kind, entity_id)
         return 0 if result.success else 1
 
     # -- remove --

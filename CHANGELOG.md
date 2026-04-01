@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `config exclude add --global` now removes redundant project-level
+  exclusions for the same entity across all registered projects.
+
 ## [1.2.1] - 2026-04-01
 
 ### Changed

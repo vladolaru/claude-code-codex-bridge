@@ -782,6 +782,8 @@ Global and project exclusions are **unioned** (both apply). CLI `--exclude-*` fl
 
 Plugin and MCP server exclusions are **independent**. Plugins are discovered from the Claude plugin cache and provide skills, agents, and commands. MCP servers are discovered from `~/.claude.json` and `.mcp.json`. Excluding a plugin filters its skills, agents, and commands but does not affect MCP servers — there is no plugin-to-MCP-server association in the Claude Code plugin format. MCP servers must be excluded separately by name.
 
+When a global exclusion is added via `config exclude add --global`, the bridge automatically removes redundant project-level exclusions for the same entity from all registered projects' `.codex/bridge.toml` files.
+
 ### Log commands
 
 - `log show`

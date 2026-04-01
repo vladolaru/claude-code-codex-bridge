@@ -2474,3 +2474,58 @@ def test_status_report_includes_excluded_mcp_servers():
 
     assert "EXCLUDED_MCP_SERVERS" in plain
     assert "context-a8c" in plain
+
+
+def test_remove_redundant_project_exclusions(tmp_path: Path):
+    """Global exclude add removes the same exclusion from registered projects."""
+    import json
+
+    from cc_codex_bridge.cli import _remove_redundant_project_exclusions
+    from cc_codex_bridge.config_writer import write_config_data
+
+    # Set up a fake bridge home with a registry listing two projects.
+    bridge_home = tmp_path / "bridge-home"
+    bridge_home.mkdir()
+
+    proj_a = tmp_path / "proj-a"
+    proj_b = tmp_path / "proj-b"
+    proj_a.mkdir()
+    proj_b.mkdir()
+
+    registry_path = bridge_home / "registry.json"
+    registry_path.write_text(json.dumps({
+        "version": 1,
+        "skills": {},
+        "agents": {},
+        "prompts": {},
+        "plugin_resources": {},
+        "mcp_servers": {},
+        "projects": [str(proj_a), str(proj_b)],
+    }))
+
+    # proj_a has a matching exclusion; proj_b does not.
+    config_a = proj_a / ".codex" / "bridge.toml"
+    config_a.parent.mkdir(parents=True)
+    write_config_data(config_a, {"exclude": {"mcp_servers": ["context-a8c"]}})
+
+    config_b = proj_b / ".codex" / "bridge.toml"
+    config_b.parent.mkdir(parents=True)
+    write_config_data(config_b, {"exclude": {"plugins": ["some/plugin"]}})
+
+    # Patch resolve_bridge_home to return our tmp bridge home.
+    import cc_codex_bridge.cli as cli_module
+    original = cli_module.resolve_bridge_home
+    cli_module.resolve_bridge_home = lambda: bridge_home
+    try:
+        _remove_redundant_project_exclusions("mcp_server", "context-a8c")
+    finally:
+        cli_module.resolve_bridge_home = original
+
+    # proj_a: exclusion removed.
+    from cc_codex_bridge.config_writer import read_config_data
+    data_a = read_config_data(config_a)
+    assert "context-a8c" not in data_a.get("exclude", {}).get("mcp_servers", [])
+
+    # proj_b: unchanged.
+    data_b = read_config_data(config_b)
+    assert "some/plugin" in data_b.get("exclude", {}).get("plugins", [])
