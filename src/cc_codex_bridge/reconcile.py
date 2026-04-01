@@ -82,6 +82,7 @@ class Change:
     kind: str
     path: Path
     resource_kind: str = ""
+    label: str = ""
 
 
 @dataclass(frozen=True)
@@ -1645,12 +1646,12 @@ def _plan_mcp_server_mutations(
         )
 
         if name not in previously_owned_global:
-            changes.append(Change("create", global_config_path, resource_kind="mcp_server"))
+            changes.append(Change("create", global_config_path, resource_kind="mcp_server", label=name))
         elif name not in existing_global_mcp:
             # Previously owned but missing from config.toml (external edit).
-            changes.append(Change("update", global_config_path, resource_kind="mcp_server"))
+            changes.append(Change("update", global_config_path, resource_kind="mcp_server", label=name))
         elif existing_entry is not None and existing_entry.content_hash != desired_hash:
-            changes.append(Change("update", global_config_path, resource_kind="mcp_server"))
+            changes.append(Change("update", global_config_path, resource_kind="mcp_server", label=name))
 
     # Stale global servers — skip when MCP discovery is degraded to avoid
     # deleting previously-bridged entries due to a temporarily corrupt config.
@@ -1669,7 +1670,7 @@ def _plan_mcp_server_mutations(
                 )
             else:
                 del updated_registry.mcp_servers[name]
-                changes.append(Change("remove", global_config_path, resource_kind="mcp_server"))
+                changes.append(Change("remove", global_config_path, resource_kind="mcp_server", label=name))
 
     # --- Project scope ---
 
@@ -1690,17 +1691,17 @@ def _plan_mcp_server_mutations(
         prev_hash = (previous_state.managed_mcp_servers.get(name) if previous_state else None)
 
         if name not in previously_owned_project:
-            changes.append(Change("create", project_config_path, resource_kind="mcp_server"))
+            changes.append(Change("create", project_config_path, resource_kind="mcp_server", label=name))
         elif name not in existing_project_mcp:
             # Previously owned but missing from config.toml (external edit).
-            changes.append(Change("update", project_config_path, resource_kind="mcp_server"))
+            changes.append(Change("update", project_config_path, resource_kind="mcp_server", label=name))
         elif prev_hash is not None and prev_hash != desired_hash:
-            changes.append(Change("update", project_config_path, resource_kind="mcp_server"))
+            changes.append(Change("update", project_config_path, resource_kind="mcp_server", label=name))
 
     # Stale project servers — skip when MCP discovery is degraded.
     if not desired.mcp_discovery_degraded:
         for name in sorted(previously_owned_project - set(project_servers)):
-            changes.append(Change("remove", project_config_path, resource_kind="mcp_server"))
+            changes.append(Change("remove", project_config_path, resource_kind="mcp_server", label=name))
 
     return _McpPlanResult(
         changes=tuple(changes),
