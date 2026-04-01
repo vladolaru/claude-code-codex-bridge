@@ -363,7 +363,7 @@ def build_parser() -> argparse.ArgumentParser:
             "--exclude-plugin",
             action="append",
             default=None,
-            help="Skip a plugin (format: marketplace/plugin). Repeatable.",
+            help="Skip a plugin's skills, agents, and commands (format: marketplace/plugin). Does not exclude MCP servers — use --exclude-mcp-server separately. Repeatable.",
         )
         exclude_parser.add_argument(
             "--exclude-skill",
@@ -1531,6 +1531,11 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
             scope=scope.target,
         )
         print(f"{result.message}{scope_label}")
+        if result.success and kind == "plugin":
+            print(
+                "Note: plugin exclusions do not cover MCP servers. "
+                "Use `config exclude add mcp_server <name>` to exclude related MCP servers."
+            )
         return 0 if result.success else 1
 
     # -- remove --
@@ -1584,6 +1589,11 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
             config_path=scope.config_path,
         )
         print(f"{result.message}{scope_label}")
+        if result.success and kind == "plugin":
+            print(
+                "Note: plugin exclusions do not cover MCP servers. "
+                "Check `config exclude list` for any related MCP server exclusions to remove."
+            )
         return 0 if result.success else 1
 
     print(f"Error: unknown exclude command `{subcmd}`", file=sys.stderr)

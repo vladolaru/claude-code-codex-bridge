@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- `config exclude add/remove plugin` now prints a note reminding users
+  that MCP servers must be excluded separately.
+- `--exclude-plugin` CLI help text clarifies that MCP servers are not
+  covered by plugin exclusions.
+
 ### Fixed
 
 - `status` command now shows MCP server names instead of repeating the
