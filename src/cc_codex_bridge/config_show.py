@@ -14,7 +14,7 @@ from cc_codex_bridge.exclusions import SyncExclusions
 
 
 # Exclusion category names in display order.
-_EXCLUSION_KINDS: tuple[str, ...] = ("plugins", "skills", "agents", "commands")
+_EXCLUSION_KINDS: tuple[str, ...] = ("plugins", "skills", "agents", "commands", "mcp_servers")
 
 
 def format_config_show(
