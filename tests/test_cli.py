@@ -2159,6 +2159,41 @@ def test_status_payload_mcp_servers_preserve_config_paths():
     ]
 
 
+def test_status_report_uses_mcp_server_labels_for_pending_changes():
+    """Human-readable status must show MCP server names, not config paths."""
+    import re
+
+    from cc_codex_bridge.reconcile import Change
+
+    global_config_toml = Path("/home/user/.codex/config.toml")
+    project_config_toml = Path("/workspace/project/.codex/config.toml")
+    report = ReconcileReport(
+        changes=(
+            Change(
+                kind="create",
+                path=global_config_toml,
+                resource_kind="mcp_server",
+                label="context7",
+            ),
+            Change(
+                kind="update",
+                path=project_config_toml,
+                resource_kind="mcp_server",
+                label="wpcom",
+            ),
+        ),
+        applied=False,
+    )
+
+    output = cli.format_status_report(report, ExclusionReport())
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
+
+    assert "context7" in plain
+    assert "wpcom" in plain
+    assert str(global_config_toml) not in plain
+    assert str(project_config_toml) not in plain
+
+
 def test_status_no_drift_when_files_unmodified(tmp_path: Path, capsys):
     """Status output has empty drifted_files when no managed files were externally modified."""
     project_root = tmp_path / "project"
