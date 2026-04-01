@@ -2373,6 +2373,7 @@ def format_status_report(
         skills=frozenset(payload["excluded"]["skills"]),
         agents=frozenset(payload["excluded"]["agents"]),
         commands=frozenset(payload["excluded"]["commands"]),
+        mcp_servers=frozenset(payload["excluded"]["mcp_servers"]),
     )
     excl_lines = render_exclusion_block(_excl, c)
     if excl_lines:

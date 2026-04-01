@@ -2413,3 +2413,17 @@ def test_format_all_report_dry_run_banner_says_scan_findings_when_skips_exist():
     assert "scan found" in plain.lower()
     assert "SKIP:" in plain
     assert "NOTE:" in plain
+
+
+def test_status_report_includes_excluded_mcp_servers():
+    """format_status_report must render EXCLUDED_MCP_SERVERS when present."""
+    import re
+
+    report = ReconcileReport(changes=(), applied=False)
+    excl = ExclusionReport(mcp_servers=("context-a8c",))
+
+    output = cli.format_status_report(report, excl)
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
+
+    assert "EXCLUDED_MCP_SERVERS" in plain
+    assert "context-a8c" in plain
