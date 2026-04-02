@@ -81,7 +81,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["macos-13", "macos-14", "macos-15"]
+        os: ["macos-14", "macos-15"]
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     runs-on: ${{ matrix.os }}
 
@@ -99,7 +99,16 @@ jobs:
 
       - name: Download runtime wheels for this target
         run: |
+          PY_VER="${{ matrix.python-version }}"
+          PY_TAG="cp${PY_VER/./}"
           python -m pip download --only-binary=:all: --dest wheelhouse -r dist/runtime-deps.txt
+          python -m pip download --only-binary=:all: --dest wheelhouse \
+            --platform macosx_10_9_x86_64 \
+            --python-version "${PY_VER}" \
+            --implementation cp \
+            --abi "${PY_TAG}" \
+            --no-deps \
+            -r dist/runtime-deps.txt || true
           cp dist/*.whl wheelhouse/
 
       - name: Upload runtime wheelhouse slice
