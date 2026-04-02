@@ -142,11 +142,30 @@ def _translate_stdio(
 
     env = config.get("env")
     if isinstance(env, dict) and env:
-        table["env"] = dict(env)
-        # Warn about env values that look like literal credentials
+        static_env: dict[str, str] = {}
+        env_vars: list[str] = []
+
         for env_key, env_value in env.items():
-            if (isinstance(env_value, str)
-                    and not env_value.startswith("$")
+            if not isinstance(env_value, str):
+                continue
+
+            var_name = _extract_env_var_ref(env_value)
+            if var_name is not None:
+                env_vars.append(var_name)
+                continue
+
+            if _contains_env_var_ref(env_value):
+                diagnostics.append(McpTranslationDiagnostic(
+                    server_name=server.name,
+                    message=(
+                        f"env var '{env_key}' contains inline ${{VAR}} references "
+                        "that Codex cannot expand; the value was kept as a literal string"
+                    ),
+                ))
+                static_env[env_key] = env_value
+                continue
+
+            if (not env_value.startswith("$")
                     and _looks_like_credential_key(env_key)):
                 diagnostics.append(McpTranslationDiagnostic(
                     server_name=server.name,
@@ -156,6 +175,12 @@ def _translate_stdio(
                         "The value was included in the generated config"
                     ),
                 ))
+            static_env[env_key] = env_value
+
+        if static_env:
+            table["env"] = static_env
+        if env_vars:
+            table["env_vars"] = sorted(env_vars)
 
     return table
 

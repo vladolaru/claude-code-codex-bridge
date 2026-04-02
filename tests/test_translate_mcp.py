@@ -138,6 +138,110 @@ class TestStdioTranslation:
         assert gen.toml_table["command"] == "my-cmd"
         assert "env" not in gen.toml_table
 
+    def test_whole_value_env_var_ref_becomes_env_vars(self):
+        """stdio: env value that is exactly ${VAR} moves to env_vars."""
+        server = DiscoveredMcpServer(
+            name="gh-srv",
+            scope="global",
+            transport="stdio",
+            source="user-global",
+            config={
+                "command": "npx",
+                "args": ["-y", "@mcp/server-github"],
+                "env": {"GITHUB_TOKEN": "${GITHUB_TOKEN}"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert "env" not in gen.toml_table
+        assert gen.toml_table["env_vars"] == ["GITHUB_TOKEN"]
+        assert not result.diagnostics
+
+    def test_dollar_no_braces_env_var_ref_becomes_env_vars(self):
+        """stdio: env value that is exactly $VAR moves to env_vars."""
+        server = DiscoveredMcpServer(
+            name="srv",
+            scope="global",
+            transport="stdio",
+            source="user-global",
+            config={
+                "command": "node",
+                "env": {"MY_TOKEN": "$MY_TOKEN"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert "env" not in gen.toml_table
+        assert gen.toml_table["env_vars"] == ["MY_TOKEN"]
+
+    def test_mixed_env_var_ref_kept_with_diagnostic(self):
+        """stdio: env value with inline ${VAR} stays in env with diagnostic."""
+        server = DiscoveredMcpServer(
+            name="mix-srv",
+            scope="global",
+            transport="stdio",
+            source="user-global",
+            config={
+                "command": "node",
+                "env": {"URL": "https://${HOST}:8080/api"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["env"] == {"URL": "https://${HOST}:8080/api"}
+        assert "env_vars" not in gen.toml_table
+        assert len(result.diagnostics) == 1
+        assert "${" in result.diagnostics[0].message
+        assert "URL" in result.diagnostics[0].message
+
+    def test_env_mixed_static_and_var_refs(self):
+        """stdio: env with both static values and ${VAR} refs splits correctly."""
+        server = DiscoveredMcpServer(
+            name="mixed-srv",
+            scope="global",
+            transport="stdio",
+            source="user-global",
+            config={
+                "command": "node",
+                "env": {
+                    "NODE_ENV": "production",
+                    "API_KEY": "${API_KEY}",
+                    "DB_URL": "${DB_URL}",
+                },
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["env"] == {"NODE_ENV": "production"}
+        assert sorted(gen.toml_table["env_vars"]) == ["API_KEY", "DB_URL"]
+        assert not result.diagnostics
+
+    def test_non_string_env_values_filtered(self):
+        """stdio: non-string env values are silently filtered out."""
+        server = DiscoveredMcpServer(
+            name="bad-types-srv",
+            scope="global",
+            transport="stdio",
+            source="user-global",
+            config={
+                "command": "node",
+                "env": {
+                    "GOOD": "value",
+                    "NUMBER": 42,
+                    "NESTED": {"a": "b"},
+                    "BOOL": True,
+                },
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["env"] == {"GOOD": "value"}
+
 
 # -- HTTP servers ------------------------------------------------------------
 
@@ -501,7 +605,8 @@ class TestDiagnostics:
         result = translate_mcp_servers((server,))
 
         gen = result.servers[0]
-        assert gen.toml_table["env"] == {"API_KEY": "$MY_SECRET"}
+        assert "env" not in gen.toml_table
+        assert gen.toml_table["env_vars"] == ["MY_SECRET"]
         assert not result.diagnostics
 
     def test_oauth_config_warning(self):
