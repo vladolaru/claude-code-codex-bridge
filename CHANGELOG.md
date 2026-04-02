@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-04-02
+
+### Fixed
+
+- Offline wheelhouse now includes x86_64 wheels alongside arm64. Previously
+  only arm64 wheels were bundled, causing install failures when the system
+  `python3` was an x86_64 binary (e.g. Homebrew under Rosetta).
+
 ## [1.3.1] - 2026-04-02
 
 ### Fixed
