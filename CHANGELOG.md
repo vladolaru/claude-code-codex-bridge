@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-04-02
+
+### Fixed
+
+- Installer checksum verification always failed due to a spurious leading
+  space in the grep pattern matching `shasum -c` output.
+
 ## [1.3.0] - 2026-04-02
 
 ### Added
