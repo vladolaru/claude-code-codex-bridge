@@ -1,6 +1,8 @@
 # MCP Bridge Mapping: Claude Code → Codex
 
-This document analyzes how Claude Code MCP configurations map to Codex MCP configurations, what can be bridged automatically, and what gaps exist. It informs bridge design decisions for MCP support.
+This document is the canonical reference for how Claude Code MCP configurations map to Codex MCP configurations, what the bridge translates automatically, what gaps exist, and what the runtime implications are. It informs bridge design decisions for MCP support.
+
+Last verified against [Codex CLI source](https://github.com/openai/codex): 2026-04-02.
 
 ---
 
@@ -8,30 +10,31 @@ This document analyzes how Claude Code MCP configurations map to Codex MCP confi
 
 ### 1.1 stdio Servers
 
-| CC Field (JSON) | Codex Field (TOML) | Notes |
-|-----------------|-------------------|-------|
-| `command` | `command` | Direct 1:1 |
-| `args` | `args` | Direct 1:1 |
-| `env` | `env` | Direct 1:1 (both are string→string maps) |
-| — | `env_vars` | **Codex-only**: forward parent env vars by name. CC doesn't have this — it passes `env` values directly. |
-| — | `cwd` | **Codex-only**: working directory for server process. CC doesn't expose this. |
+| CC Field (JSON) | Codex Field (TOML) | Bridge Status | Notes |
+|-----------------|-------------------|---------------|-------|
+| `command` | `command` | **Mapped** | Direct 1:1 |
+| `args` | `args` | **Mapped** | Direct 1:1. Non-list values ignored. |
+| `env` | `env` | **Mapped** (partial) | Static string→string values map directly. See §3 for `${VAR}` expansion gap. |
+| — | `env_vars` | **NOT mapped** | **Critical gap.** Codex-only: names of host env vars to forward to child process. Required because Codex does NOT inherit the full parent env. See §3. |
+| — | `cwd` | Not mapped | Codex-only: working directory for server process. No CC equivalent. |
 
-**Bridgeable**: Yes, fully. CC's stdio config maps directly.
+**Bridgeable**: Core fields map directly. The `env_vars` gap is a **correctness issue** — see §3.
 
-### 1.2 HTTP Servers
+### 1.2 HTTP Servers (Streamable HTTP)
 
-| CC Field (JSON) | Codex Field (TOML) | Notes |
-|-----------------|-------------------|-------|
-| `url` | `url` | Direct 1:1 |
-| `type: "http"` | (inferred from `url`) | Codex infers transport from field presence |
-| `headers` | `http_headers` | Same semantics, different key name |
-| `headersHelper` | — | **CC-only**: shell command for dynamic headers. No Codex equivalent. |
-| — | `bearer_token_env_var` | **Codex-only**: dedicated bearer token field. CC uses `headers.Authorization` directly. |
-| — | `env_http_headers` | **Codex-only**: header values from env vars by name. |
-| `oauth.clientId` | `scopes` + OAuth login flow | Different OAuth models (see section 3) |
-| `oauth.callbackPort` | `mcp_oauth_callback_port` (global) | CC: per-server. Codex: global setting. |
+| CC Field (JSON) | Codex Field (TOML) | Bridge Status | Notes |
+|-----------------|-------------------|---------------|-------|
+| `url` | `url` | **Mapped** | Direct 1:1 |
+| `type: "http"` | (inferred from `url`) | **Stripped** | Codex infers transport from field presence; no `type` field exists |
+| `headers` | `http_headers` | **Mapped** (partial) | Renamed. Static literal values map. `${VAR}` values should map to `env_http_headers` instead — see §3. |
+| `headers.Authorization` with `Bearer ${VAR}` | `bearer_token_env_var` | **Mapped** | Env var name extracted; header removed from `http_headers` |
+| `headers.Authorization` with literal Bearer | — | **Omitted** | Literal credential dropped; diagnostic warning emitted |
+| `headersHelper` | — | **Diagnostic** | CC-only: shell command for dynamic headers. No Codex equivalent. Warning emitted. |
+| — | `bearer_token` | Not used | Codex accepts a literal bearer token but we correctly use `bearer_token_env_var` instead |
+| — | `env_http_headers` | **NOT mapped** | **Gap.** Codex-only: header values sourced from env var names at runtime. Should be used for CC headers containing `${VAR}` patterns. See §3. |
+| `oauth.*` | `scopes` + `oauth_resource` | **Diagnostic** | Different OAuth models. Warning emitted directing user to `codex mcp login`. |
 
-**Bridgeable**: Partially. URL and static headers map. OAuth and dynamic headers need special handling.
+**Bridgeable**: URL and static headers map. Bearer token extraction works. `${VAR}` header values and OAuth need attention.
 
 ### 1.3 SSE Servers
 
@@ -39,133 +42,258 @@ This document analyzes how Claude Code MCP configurations map to Codex MCP confi
 |----|-------|-------|
 | `type: "sse"` supported | Not supported | Codex only supports stdio and streamable HTTP |
 
-**Bridgeable**: No. SSE servers would need to be flagged as incompatible. In practice, SSE is deprecated in CC too — most servers support HTTP.
+**Not bridgeable.** SSE servers are skipped during discovery. SSE is deprecated in CC too — most servers support HTTP.
 
 ---
 
-## 2. Shared Fields Mapping
+## 2. Shared Configuration Fields
 
-| CC | Codex | Notes |
-|----|-------|-------|
-| — | `enabled` | **Codex-only**: CC doesn't have a disable toggle (you remove the server). |
-| — | `required` | **Codex-only**: `codex exec` fails if required server can't init. |
-| — | `startup_timeout_sec` | **Codex-only**: CC uses `MCP_TIMEOUT` env var instead. |
-| — | `tool_timeout_sec` | **Codex-only**: CC has `MAX_MCP_OUTPUT_TOKENS` but no per-server timeout. |
-| — | `enabled_tools` / `disabled_tools` | **Codex-only**: CC uses permission rules in `settings.json` instead. |
-| — | Per-tool `approval_mode` | **Codex-only**: CC uses the standard permission system. |
+### 2.1 Fields the Bridge Does NOT Generate
+
+These Codex-only fields have no CC equivalent. The bridge does not generate them, but they are valid in `config.toml` and users can add them manually alongside bridge-owned entries.
+
+| Codex Field | Type | Default | Description |
+|-------------|------|---------|-------------|
+| `enabled` | `bool` | `true` | Skip server initialization when `false` |
+| `required` | `bool` | `false` | `codex exec` exits if required server fails to start |
+| `startup_timeout_sec` | `f64` | `30.0` | Startup + initial tool list timeout (seconds, fractional OK) |
+| `startup_timeout_ms` | `u64` | — | Alternative to `_sec` in milliseconds; `_sec` takes precedence if both set |
+| `tool_timeout_sec` | `f64` | `120.0` | Per-tool-call timeout (seconds, fractional OK) |
+| `enabled_tools` | `string[]` | — | Allowlist of tool names exposed from this server |
+| `disabled_tools` | `string[]` | — | Denylist applied after `enabled_tools` |
+| `scopes` | `string[]` | — | OAuth scopes for `codex mcp login` |
+| `oauth_resource` | `string` | — | OAuth resource parameter (RFC 8707) |
+| `name` | `string` | — | Legacy display-name field; accepted but ignored |
+| `tools.<name>.approval_mode` | `string` | `auto` | Per-tool approval (`auto`/`prompt`/`approve`) |
+
+### 2.2 Transport Validation
+
+Codex validates that stdio and HTTP fields are mutually exclusive:
+- stdio fields (`args`, `env`, `env_vars`, `cwd`) rejected when `url` is present
+- HTTP fields (`url`, `bearer_token_env_var`, `http_headers`, `env_http_headers`, `oauth_resource`) rejected when `command` is present
+- Neither `command` nor `url` → error
+
+The bridge inherits this implicitly by routing to `_translate_stdio()` or `_translate_http()` based on discovered transport type.
 
 ---
 
-## 3. OAuth Mapping
+## 3. Environment Variable Handling (Critical Gap)
+
+### 3.1 The Codex Env Isolation Model
+
+**Codex does NOT inherit the full parent environment for stdio MCP server child processes.** It builds a minimal environment from a hardcoded allowlist, then layers explicit config on top.
+
+The environment construction order (source: `codex-rs/rmcp-client/src/utils.rs`):
+
+1. **Default allowlist** — only these host vars are forwarded automatically:
+   - Unix: `HOME`, `LOGNAME`, `PATH`, `SHELL`, `USER`, `__CF_USER_TEXT_ENCODING`, `LANG`, `LC_ALL`, `TERM`, `TMPDIR`, `TZ`
+   - Windows: `PATH`, `PATHEXT`, `COMSPEC`, `SYSTEMROOT`, `SYSTEMDRIVE`, `USERNAME`, `USERDOMAIN`, `USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `PROGRAMFILES`, `PROGRAMFILES(X86)`, `PROGRAMW6432`, `PROGRAMDATA`, `LOCALAPPDATA`, `APPDATA`, `TEMP`, `TMP`, `POWERSHELL`, `PWSH`
+2. **`env_vars`** — additional host env var names to forward (resolved from current environment)
+3. **`env`** — explicit key=value overrides (applied last, wins over inherited values)
+
+The child process is spawned with `env_clear()` then `envs(...)`, so it receives ONLY the constructed environment.
+
+**Claude Code, by contrast, passes the full parent environment** to MCP server child processes. This means any CC MCP server that depends on env vars like `GITHUB_TOKEN`, `NPM_TOKEN`, etc. works automatically in CC but **silently fails in Codex** unless those vars are explicitly listed in `env_vars`.
+
+### 3.2 `env_vars` — Forwarding Host Env Vars (stdio)
+
+```toml
+[mcp_servers.github]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+env_vars = ["GITHUB_TOKEN"]  # Forward from host env to child process
+```
+
+The bridge does not currently generate `env_vars`. This is the most impactful correctness gap.
+
+**Common env vars that need forwarding** (not in Codex's default allowlist):
+
+| Variable Pattern | Typical Usage |
+|-----------------|---------------|
+| `GITHUB_TOKEN`, `GITHUB_PERSONAL_ACCESS_TOKEN` | GitHub MCP servers |
+| `NPM_TOKEN` | npm/registry MCP servers |
+| `ANTHROPIC_API_KEY` | Anthropic MCP servers |
+| `OPENAI_API_KEY` | OpenAI MCP servers |
+| `SLACK_TOKEN`, `SLACK_BOT_TOKEN` | Slack MCP servers |
+| `LINEAR_API_KEY` | Linear MCP servers |
+| `DATABASE_URL` | Database MCP servers |
+| Any `*_API_KEY`, `*_TOKEN`, `*_SECRET` | API-authenticated servers |
+
+### 3.3 `${VAR}` Expansion Semantic Gap
+
+CC expands `${VAR_NAME}` references in `env` values at runtime. Codex does NOT — it treats the value as a literal string. This means:
+
+```json
+{"env": {"API_KEY": "${MY_SECRET}"}}
+```
+
+- **CC**: Resolves `${MY_SECRET}` from host env → passes the resolved value
+- **Codex**: Passes the literal string `${MY_SECRET}` as the env value
+
+The bridge must detect `${VAR}` patterns in CC `env` values and handle them:
+- If the entire value is `${VAR_NAME}`: remove from `env`, add var name to `env_vars` (it will be inherited from host)
+- If the value mixes literals with `${VAR}`: emit a diagnostic (Codex cannot do inline expansion)
+
+### 3.4 `env_http_headers` — Env-Sourced HTTP Headers
+
+```toml
+[mcp_servers.example]
+url = "https://api.example.com/mcp"
+
+[mcp_servers.example.env_http_headers]
+"X-API-Key" = "MY_API_KEY_ENV_VAR"
+```
+
+At runtime, Codex reads `$MY_API_KEY_ENV_VAR` from the host environment and sets it as the `X-API-Key` header value. Empty/missing values are silently skipped.
+
+The bridge currently puts all CC header values into `http_headers` (except for Bearer token extraction). Headers with `${VAR}` values should instead be mapped to `env_http_headers` with the env var name extracted.
+
+---
+
+## 4. OAuth Mapping
 
 CC and Codex handle OAuth differently:
 
 | Aspect | Claude Code | Codex |
 |--------|-------------|-------|
-| Config location | Per-server `oauth` object | Per-server `scopes` + global OAuth settings |
+| Config location | Per-server `oauth` object | Per-server `scopes` + `oauth_resource` + global settings |
 | Client ID | `oauth.clientId` per server | Dynamic client registration or pre-configured |
 | Callback port | `oauth.callbackPort` per server | `mcp_oauth_callback_port` global |
 | Metadata URL | `oauth.authServerMetadataUrl` | RFC 9728 auto-discovery |
 | Credential storage | System keychain | `mcp_oauth_credentials_store` (`auto`/`file`/`keyring`) |
 | Login flow | Automatic on connection | Explicit `codex mcp login <name>` |
 
-**Bridgeable**: Partially. The bridge can translate `scopes` and flag that OAuth login is needed, but the authentication flows are fundamentally different. Users will need to run `codex mcp login` separately.
+**Bridge strategy**: Emit a diagnostic warning. Optionally map `oauth.scopes` → `scopes` for convenience. Users must run `codex mcp login` separately.
 
 ---
 
-## 4. Tool Namespacing
+## 5. Tool Namespacing
 
 Both systems use the **same convention**: `mcp__<server>__<tool>` with double underscores.
 
 | Aspect | Claude Code | Codex |
 |--------|-------------|-------|
 | Format | `mcp__<server>__<tool>` | `mcp__<server>__<tool>` |
-| Plugin prefix | `mcp__plugin_<plugin>_<server>__<tool>` | Same server name, no special plugin prefix |
+| Plugin prefix | `mcp__plugin_<plugin>_<server>__<tool>` | No plugin prefix concept |
 | Max length | 64 chars | 64 chars |
 | Sanitization | Spaces → underscores | `[^a-zA-Z0-9_-]` → `_` + SHA1 suffix if truncated |
 
-**Bridgeable**: Yes. If the bridge preserves server names, tool references in skill prompts transfer directly. Plugin-prefixed tool names would need the `plugin_<name>_` prefix stripped.
+**Bridgeable**: Yes. Preserving server names ensures tool references transfer. Plugin-prefixed tool names need the `plugin_<name>_` prefix stripped.
 
 ---
 
-## 5. Scope Mapping
+## 6. Scope Mapping
 
 | CC Scope | Codex Scope | Bridge Action |
 |----------|-------------|---------------|
-| Local (`~/.claude.json` per-project) | Project (`.codex/config.toml`) | Write to `.codex/config.toml` |
+| Local (`~/.claude.json` per-project `mcpServers`) | Project (`.codex/config.toml`) | Write to `.codex/config.toml` |
 | Project (`.mcp.json`) | Project (`.codex/config.toml`) | Write to `.codex/config.toml` |
-| User (`~/.claude.json` global) | User (`~/.codex/config.toml`) | Write to `~/.codex/config.toml` |
+| User (`~/.claude.json` global `mcpServers`) | User (`~/.codex/config.toml`) | Write to `~/.codex/config.toml` |
 | Managed (`managed-mcp.json`) | System (`/etc/codex/config.toml`) | Out of scope — admin-managed |
-| Plugin-bundled | User or project config | Extract and translate |
+| Plugin-bundled | User or project config | Extract and translate as standalone config |
 
 ---
 
-## 6. Capability Gaps
+## 7. Performance: Server Lifecycle
 
-### 6.1 CC Features Without Codex Equivalent
+### 7.1 Session Startup
+
+Codex creates a fresh `McpConnectionManager` for every session (`Codex::spawn`). All enabled MCP servers are started concurrently via `JoinSet`. The startup flow per server:
+
+1. Validate server name
+2. Create `RmcpClient` (spawn child process for stdio, open HTTP connection for streamable HTTP)
+3. Send MCP `initialize` request with timeout (`startup_timeout_sec`, default 30s)
+4. List tools from server (within same timeout window)
+5. Report `Ready` or `Failed` status
+
+### 7.2 Subagent MCP Restart (Performance Issue)
+
+**Each subagent spawns fresh MCP server processes.** The `McpManager` (config reader) is shared via `Arc::clone`, but the `McpConnectionManager` (actual connections) is created new per `Codex::spawn`. There is no connection pooling or sharing of running MCP servers between parent and child sessions.
+
+With N subagents and M enabled MCP servers, Codex spawns `(N+1) × M` server processes per session.
+
+### 7.3 Implications for the Bridge
+
+- Every bridge-generated MCP server entry = one process spawn + handshake per session
+- Subagents multiply this cost linearly
+- Fewer bridged servers = faster startups
+- The `enabled` field can be used to temporarily disable servers
+- The `startup_timeout_sec` field helps with slow-starting servers
+
+---
+
+## 8. Capability Gaps
+
+### 8.1 CC Features Without Codex Equivalent
 
 | CC Feature | Impact | Workaround |
 |------------|--------|------------|
-| `headersHelper` (dynamic headers via shell) | Medium — enterprise/internal APIs | None. Users must use `env_http_headers` or `bearer_token_env_var` in Codex. |
-| SSE transport | Low — deprecated in CC too | Use HTTP transport instead |
-| MCP Prompts (`/mcp__server__prompt`) | Medium — CC exposes prompts as slash commands | Codex doesn't support MCP prompts at all |
-| `list_changed` dynamic updates | Low — runtime behavior | Codex supports server refresh but differently |
-| Tool Search (deferred loading) | Low — optimization, not functionality | Codex loads all tool schemas upfront |
-| Channels (`claude/channel` push) | Low — newer CC feature | Not available in Codex |
-| Per-server `MCP_TIMEOUT` | Low | Codex has per-server `startup_timeout_sec` (more granular) |
+| Full parent env inheritance for MCP servers | **High** | Use `env_vars` to forward specific vars (see §3) |
+| `${VAR}` expansion in `env` values | **High** | Use `env_vars` for full-value references; no workaround for inline expansion |
+| `${VAR}` in non-Bearer header values | **Medium** | Use `env_http_headers` in Codex |
+| `headersHelper` (dynamic headers via shell) | Medium | None. Users must use `env_http_headers` or `bearer_token_env_var`. |
+| SSE transport | Low | Use HTTP transport instead (SSE deprecated in CC) |
+| MCP Prompts (`/mcp__server__prompt`) | Medium | Codex doesn't support MCP prompts |
+| `list_changed` dynamic updates | Low | Codex supports server refresh but differently |
+| Tool Search (deferred loading) | Low | Codex loads all tool schemas upfront |
 
-### 6.2 Codex Features Without CC Equivalent
+### 8.2 Codex Features Without CC Equivalent
 
 | Codex Feature | Impact | Notes |
 |---------------|--------|-------|
-| `env_vars` (forward parent env vars by name) | Low | CC passes env values directly via `env` |
+| `env_vars` (forward host env vars by name) | **High** | Critical for servers that need env vars outside the default allowlist |
+| `env_http_headers` (header values from env vars) | **Medium** | Cleaner than CC's `${VAR}` in header values |
+| `enabled` toggle | Low | Useful for temporarily disabling without removing config |
+| `required` flag | Low | `codex exec` CI mode: exit on required server failure |
+| `enabled_tools` / `disabled_tools` | Medium | Server-level tool filtering |
+| Per-tool `approval_mode` | Low | Fine-grained approval control |
 | `cwd` (working directory) | Low | CC servers inherit CWD from CC process |
-| `enabled` toggle | Low | Useful for temporarily disabling |
-| `required` flag | Low | `codex exec` CI mode |
-| `enabled_tools` / `disabled_tools` | Medium | Codex-native tool filtering per-server |
-| Per-tool `approval_mode` | Low | Fine-grained approval |
-| `env_http_headers` | Low | Headers from env vars by name |
-| Skill MCP dependency auto-install | Medium | `agents/openai.yaml` can trigger install |
+| `startup_timeout_sec` / `tool_timeout_sec` | Low | CC uses `MCP_TIMEOUT` env var globally |
+| `scopes` / `oauth_resource` | Low | Pre-populate for `codex mcp login` |
 
 ---
 
-## 7. Bridge Strategy
+## 9. Bridge Strategy
 
-### 7.1 What to Bridge (Phase 1 — Core)
+### 9.1 Currently Implemented (Phase 1 — Core)
 
-1. **stdio servers**: Direct field mapping (`command`, `args`, `env`). Write to appropriate Codex `config.toml` scope.
-2. **HTTP servers**: Map `url`, translate `headers` → `http_headers`. Flag `headersHelper` as unsupported.
-3. **Server names**: Preserve exactly — this ensures tool name references (`mcp__server__tool`) work across both systems.
-4. **Scope mapping**: Local/project CC → `.codex/config.toml`; user CC → `~/.codex/config.toml`.
+1. **stdio servers**: Map `command`, `args`, `env` (static values). Write to appropriate Codex `config.toml` scope.
+2. **HTTP servers**: Map `url`, rename `headers` → `http_headers`. Extract `Bearer ${VAR}` → `bearer_token_env_var`. Flag `headersHelper` and `oauth` as diagnostics.
+3. **Server names**: Preserved exactly — ensures tool name references (`mcp__server__tool`) transfer.
+4. **Scope mapping**: CC local/project → `.codex/config.toml`; CC user → `~/.codex/config.toml`.
+5. **Credential safety**: Literal credentials in Authorization headers omitted with warning. Literal credential-like env values warned but included.
+6. **Ownership tracking**: Bridge-owned entries tracked in state/registry. User-authored entries never touched.
 
-### 7.2 What to Bridge (Phase 2 — Enhanced)
+### 9.2 Needed Improvements (Phase 2 — Env Handling)
 
-5. **OAuth servers**: Translate `scopes`, emit `codex mcp login` instructions for user.
-6. **Skill MCP dependencies**: When translating skills that reference MCP tools, generate `agents/openai.yaml` with `dependencies.tools` entries.
-7. **Permission → tool filtering**: Translate CC permission rules (`allow`/`deny` with `mcp__` patterns) to Codex `enabled_tools`/`disabled_tools` per-server.
+7. **Generate `env_vars` for stdio servers**: Scan CC `env` values and `args` for `${VAR}` references. Extract var names. Add CC `env` keys that look credential-like and aren't in Codex's default allowlist. This is the #1 correctness priority.
+8. **Handle `${VAR}` in CC `env` values**: When entire value is `${VAR}`, remove from `env` and add to `env_vars`. When value mixes literals with `${VAR}`, emit diagnostic.
+9. **Map `${VAR}` header values to `env_http_headers`**: Detect `${VAR_NAME}` patterns in CC header values and route to `env_http_headers` instead of `http_headers`.
+10. **Map `oauth.scopes` → `scopes`**: Pre-populate for `codex mcp login` convenience.
 
-### 7.3 What NOT to Bridge
+### 9.3 Not Bridged (By Design)
 
 - **Managed MCP** — admin-deployed, out of bridge scope
-- **`headersHelper`** — no Codex equivalent, flag as incompatible
-- **SSE transport** — deprecated, suggest HTTP migration
+- **`headersHelper`** — no Codex equivalent; diagnostic warning only
+- **SSE transport** — deprecated; skipped in discovery
 - **MCP Prompts** — Codex doesn't support them
-- **Plugin-bundled MCP servers** — need to be extracted and translated as standalone configs
+- **Plugin-bundled MCP servers** — skipped in discovery (plugin MCP is CC-internal)
 
-### 7.4 Ownership and Reconciliation
+### 9.4 Ownership and Reconciliation
 
-MCP server configs in Codex's `config.toml` are shared with other Codex features. The bridge must:
+MCP server configs in Codex's `config.toml` are shared with other Codex features. The bridge:
 
-- Track which `[mcp_servers.*]` entries it owns (via the existing bridge state/registry)
-- Never modify user-authored MCP entries
-- Handle merge conflicts when both CC and Codex define the same server name
-- Clean up bridge-owned entries on uninstall
+- Tracks which `[mcp_servers.*]` entries it owns (via bridge state + global registry)
+- Never modifies user-authored MCP entries
+- Handles same-name collisions by skipping (bridge yields to user)
+- Cleans up bridge-owned entries on uninstall or when CC source is removed
+- Uses content hashing for change detection (avoids unnecessary writes)
 
 ---
 
-## 8. Translation Examples
+## 10. Translation Examples
 
-### 8.1 stdio: CC → Codex
+### 10.1 stdio: CC → Codex
 
 **CC** (`~/.claude.json`):
 ```json
@@ -190,7 +318,33 @@ args = ["-y", "@upstash/context7-mcp"]
 API_KEY = "sk-..."
 ```
 
-### 8.2 HTTP: CC → Codex
+### 10.2 stdio with env var references (future bridge behavior)
+
+**CC**:
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_TOKEN": "${GITHUB_TOKEN}" }
+    }
+  }
+}
+```
+
+**Codex** (correct translation):
+```toml
+[mcp_servers.github]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+env_vars = ["GITHUB_TOKEN"]
+
+# Note: env.GITHUB_TOKEN removed because the entire value was ${GITHUB_TOKEN}
+# — Codex forwards the var directly from the host environment via env_vars
+```
+
+### 10.3 HTTP with Bearer token extraction
 
 **CC** (`.mcp.json`):
 ```json
@@ -211,17 +365,40 @@ API_KEY = "sk-..."
 ```toml
 [mcp_servers.github]
 url = "https://mcp.github.com/sse"
-
-# Note: CC's ${GITHUB_TOKEN} expansion in headers becomes
-# Codex's dedicated bearer_token_env_var field
 bearer_token_env_var = "GITHUB_TOKEN"
-
-# Alternatively, if the header isn't a simple Bearer pattern:
-# [mcp_servers.github.env_http_headers]
-# "Authorization" = "GITHUB_AUTH_HEADER"
 ```
 
-### 8.3 Plugin MCP: CC → Codex
+### 10.4 HTTP with env-sourced headers (future bridge behavior)
+
+**CC**:
+```json
+{
+  "mcpServers": {
+    "internal-api": {
+      "type": "http",
+      "url": "https://api.internal.com/mcp",
+      "headers": {
+        "X-API-Key": "${INTERNAL_API_KEY}",
+        "Accept": "application/json"
+      }
+    }
+  }
+}
+```
+
+**Codex** (correct translation):
+```toml
+[mcp_servers.internal-api]
+url = "https://api.internal.com/mcp"
+
+[mcp_servers.internal-api.http_headers]
+Accept = "application/json"
+
+[mcp_servers.internal-api.env_http_headers]
+"X-API-Key" = "INTERNAL_API_KEY"
+```
+
+### 10.5 Plugin MCP: CC → Codex
 
 **CC** (plugin `.mcp.json` with tool name `mcp__plugin_context-a8c_context-a8c__context-a8c-execute-tool`):
 
@@ -239,7 +416,15 @@ Tool name becomes `mcp__context-a8c__context-a8c-execute-tool` (plugin prefix dr
 
 ## Sources
 
-- [docs/codex-cli-reference.md](codex-cli-reference.md) — Codex MCP section 7
-- [docs/claude-code-mcp-reference.md](claude-code-mcp-reference.md) — CC MCP reference
-- [.claude/docs/research/2026-03-28-codex-mcp-implementation.md](../.claude/docs/research/2026-03-28-codex-mcp-implementation.md) — Detailed Codex research with Rust types
-- [.claude/docs/analysis/2026-03-28-claude-code-mcp-configuration.md](../.claude/docs/analysis/2026-03-28-claude-code-mcp-configuration.md) — Detailed CC research
+Codex behavior documented here was verified against the [Codex CLI source](https://github.com/openai/codex) (`codex-rs/` tree). Key source files for MCP handling:
+
+| File | What it defines |
+|------|----------------|
+| `codex-rs/config/src/mcp_types.rs` | `RawMcpServerConfig`, `McpServerConfig`, `McpServerTransportConfig` — the TOML schema and validation |
+| `codex-rs/rmcp-client/src/utils.rs` | `create_env_for_mcp_server`, `build_default_headers`, `DEFAULT_ENV_VARS` — env construction for child processes |
+| `codex-rs/codex-mcp/src/mcp_connection_manager.rs` | `McpConnectionManager::new`, `start_server_task` — connection lifecycle and startup |
+| `codex-rs/core/src/codex.rs` | Session initialization — where `McpConnectionManager` is created per-session |
+| `codex-rs/core/src/codex_delegate.rs` | Subagent spawning — shows `McpManager` (config) is shared but connections are not |
+| `codex-rs/core/config.schema.json` | Generated JSON Schema for the full `config.toml` format |
+
+Claude Code behavior documented here is based on [docs/claude-code-mcp-reference.md](claude-code-mcp-reference.md). Codex CLI behavior beyond MCP is covered in [docs/codex-cli-reference.md](codex-cli-reference.md).
