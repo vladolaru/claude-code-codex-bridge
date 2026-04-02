@@ -103,7 +103,7 @@ jobs:
           PY_TAG="cp${PY_VER/./}"
           python -m pip download --only-binary=:all: --dest wheelhouse -r dist/runtime-deps.txt
           python -m pip download --only-binary=:all: --dest wheelhouse \
-            --platform macosx_10_9_x86_64 \
+            --platform macosx_13_0_x86_64 \
             --python-version "${PY_VER}" \
             --implementation cp \
             --abi "${PY_TAG}" \
