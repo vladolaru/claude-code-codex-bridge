@@ -6,6 +6,7 @@ from cc_codex_bridge.mcp_env_templates import (
     collect_env_var_refs,
     expand_env_template,
 )
+from cc_codex_bridge.mcp_stdio_launcher import _build_child_env
 
 
 class TestCollectEnvVarRefs:
@@ -46,3 +47,23 @@ class TestExpandEnvTemplate:
 
     def test_uses_default_for_missing_variable(self):
         assert expand_env_template("${TOKEN:-fallback}", {}) == "fallback"
+
+
+class TestStdioLauncherEnvExpansion:
+    """Child-env construction for stdio launcher templates."""
+
+    def test_same_name_unset_reference_becomes_empty_string(self):
+        child_env = _build_child_env(
+            {"API_KEY": "${API_KEY}"},
+            base_env={},
+        )
+
+        assert child_env["API_KEY"] == ""
+
+    def test_alias_can_expand_from_forwarded_source_variable(self):
+        child_env = _build_child_env(
+            {"API_KEY": "${MY_SECRET}"},
+            base_env={"MY_SECRET": "top-secret"},
+        )
+
+        assert child_env["API_KEY"] == "top-secret"

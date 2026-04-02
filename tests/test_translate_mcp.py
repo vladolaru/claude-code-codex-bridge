@@ -153,8 +153,8 @@ class TestStdioTranslation:
         assert gen.toml_table["command"] == "my-cmd"
         assert "env" not in gen.toml_table
 
-    def test_whole_value_env_var_ref_becomes_env_vars(self):
-        """stdio: env value that is exactly ${VAR} moves to env_vars."""
+    def test_whole_value_env_var_ref_uses_launcher_and_forwards_sources(self):
+        """stdio: whole-value ${VAR} uses the launcher to preserve semantics."""
         server = DiscoveredMcpServer(
             name="gh-srv",
             scope="global",
@@ -169,12 +169,18 @@ class TestStdioTranslation:
         result = translate_mcp_servers((server,))
 
         gen = result.servers[0]
+        payload = _launcher_payload(gen)
         assert "env" not in gen.toml_table
         assert gen.toml_table["env_vars"] == ["GITHUB_TOKEN"]
+        assert payload == {
+            "command": "npx",
+            "args": ["-y", "@mcp/server-github"],
+            "env_templates": {"GITHUB_TOKEN": "${GITHUB_TOKEN}"},
+        }
         assert not result.diagnostics
 
-    def test_dollar_no_braces_env_var_ref_becomes_env_vars(self):
-        """stdio: env value that is exactly $VAR moves to env_vars."""
+    def test_dollar_no_braces_env_var_ref_uses_launcher_and_forwards_sources(self):
+        """stdio: whole-value $VAR uses the launcher to preserve semantics."""
         server = DiscoveredMcpServer(
             name="srv",
             scope="global",
@@ -188,8 +194,14 @@ class TestStdioTranslation:
         result = translate_mcp_servers((server,))
 
         gen = result.servers[0]
+        payload = _launcher_payload(gen)
         assert "env" not in gen.toml_table
         assert gen.toml_table["env_vars"] == ["MY_TOKEN"]
+        assert payload == {
+            "command": "node",
+            "args": [],
+            "env_templates": {"MY_TOKEN": "$MY_TOKEN"},
+        }
 
     def test_mixed_env_var_ref_uses_launcher_and_forwards_sources(self):
         """stdio: inline env-template values use the launcher instead of literals."""
@@ -235,8 +247,17 @@ class TestStdioTranslation:
         result = translate_mcp_servers((server,))
 
         gen = result.servers[0]
+        payload = _launcher_payload(gen)
         assert gen.toml_table["env"] == {"NODE_ENV": "production"}
         assert sorted(gen.toml_table["env_vars"]) == ["API_KEY", "DB_URL"]
+        assert payload == {
+            "command": "node",
+            "args": [],
+            "env_templates": {
+                "API_KEY": "${API_KEY}",
+                "DB_URL": "${DB_URL}",
+            },
+        }
         assert not result.diagnostics
 
     def test_env_alias_uses_launcher_and_preserves_destination_key(self):
@@ -781,8 +802,14 @@ class TestDiagnostics:
         result = translate_mcp_servers((server,))
 
         gen = result.servers[0]
+        payload = _launcher_payload(gen)
         assert "env" not in gen.toml_table
         assert gen.toml_table["env_vars"] == ["MY_SECRET"]
+        assert payload == {
+            "command": "node",
+            "args": ["server.js"],
+            "env_templates": {"API_KEY": "$MY_SECRET"},
+        }
         assert not result.diagnostics
 
     def test_oauth_config_warning(self):

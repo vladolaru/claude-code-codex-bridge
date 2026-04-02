@@ -145,13 +145,12 @@ def _translate_stdio(
             if not isinstance(env_value, str):
                 continue
 
-            var_name = _extract_env_var_ref(env_value)
-            if var_name is not None and var_name == env_key:
-                env_vars.add(var_name)
-                continue
-
             refs = collect_env_var_refs(env_value)
             if refs:
+                # Preserve Claude-style expansion semantics for every env
+                # template, including same-name refs that resolve to "" when
+                # the host variable is unset. Codex env_vars alone cannot
+                # represent that behavior.
                 env_templates[env_key] = env_value
                 env_vars.update(refs)
                 continue

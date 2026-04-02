@@ -1071,7 +1071,7 @@ These are current implemented simplifications, not necessarily permanent design 
 - commands are translated to native Codex prompt files (`~/.codex/prompts/`) rather than Codex skills, avoiding namespace collisions with the skill directory entirely
 - LaunchAgent scheduling with automatic `launchctl bootstrap/bootout` is supported; autosync uses a periodic schedule, not a file-watcher
 - MCP planning assumes `mcp_servers` is a TOML table when the document parses successfully — a hand-crafted scalar value (`mcp_servers = "oops"`) would pass TOML validation but crash during apply, leaving the registry inconsistent
-- MCP translation remaps exact whole-value `${VAR}` / `$VAR` references in env values and header values to native Codex fields where that mapping is lossless; stdio env templates that would otherwise change semantics are run through a bridge-owned launcher that expands them at runtime before execing the original MCP server command
+- MCP translation remaps exact whole-value `${VAR}` / `$VAR` header values to native Codex header fields when possible; stdio env templates always run through a bridge-owned launcher that expands them at runtime before execing the original MCP server command, preserving Claude-style behavior for unset, aliased, inline, and defaulted refs
 - MCP server names must match `[A-Za-z0-9_-]`; servers with dots, spaces, or other characters are skipped with a diagnostic — this is stricter than TOML's quoted-key support but required for registry key safety and Codex `mcp__<server>__<tool>` naming
 
 Any change to these constraints should update this file.
