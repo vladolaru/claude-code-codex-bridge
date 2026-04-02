@@ -154,7 +154,7 @@ curl -fsSL "${RELEASE_BASE_URL}/${WHEELHOUSE_ARCHIVE}" -o "${TMP_DIR}/${WHEELHOU
 
 (
   cd "${TMP_DIR}"
-  shasum -a 256 -c SHA256SUMS 2>/dev/null | grep " ${WHEELHOUSE_ARCHIVE}: OK$" >/dev/null \
+  shasum -a 256 -c SHA256SUMS 2>/dev/null | grep "${WHEELHOUSE_ARCHIVE}: OK$" >/dev/null \
     || fail "Checksum verification failed for ${WHEELHOUSE_ARCHIVE}"
 )
 
