@@ -14,6 +14,27 @@ DEFAULT_REPOSITORY = "vladolaru/claude-code-codex-bridge"
 INSTALLER_TEMPLATE_PATH = Path(__file__).resolve().parents[2] / "packaging" / "install.sh.in"
 WHEELHOUSE_ARCHIVE_PREFIX = "cc-codex-bridge-wheelhouse-"
 SUPPORTED_PYTHON_MINORS = ((3, 11), (3, 12), (3, 13), (3, 14))
+ROSETTA_NOTICE_TEMPLATE = """APPLE_SILICON_CAPABLE=\"$(sysctl -in hw.optional.arm64 2>/dev/null || printf '0')\"
+  [ \"${APPLE_SILICON_CAPABLE}\" = \"1\" ] || return 0
+
+  PYTHON_MACHINE=\"$(\"${PYTHON_BIN}\" - <<'PY'
+import platform
+
+print(platform.machine())
+PY
+)\"
+  [ \"${PYTHON_MACHINE}\" = \"x86_64\" ] || return 0
+
+  PYTHON_PLATFORM=\"$(\"${PYTHON_BIN}\" - <<'PY'
+import sysconfig
+
+print(sysconfig.get_platform())
+PY
+)\"
+
+  printf '%s\\n' \"Warning: Detected Apple Silicon hardware but ${PYTHON_BIN} is an x86_64 Python under Rosetta.\"
+  printf '%s\\n' \"         pip will resolve x86_64 wheels for platform tag ${PYTHON_PLATFORM}.\"
+  printf '%s\\n' \"         To install with a native arm64 interpreter, rerun with --python /opt/homebrew/bin/python3 from an arm64 shell.\""""
 
 
 def build_release_bundle(
@@ -91,6 +112,7 @@ def render_installer(
         .replace("@DEFAULT_TAG@", default_tag)
         .replace("@SUPPORTED_PYTHON_DISPLAY@", supported_python_display)
         .replace("@SUPPORTED_PYTHON_TUPLES@", supported_python_tuples)
+        .replace("@ROSETTA_NOTICE@", ROSETTA_NOTICE_TEMPLATE)
     )
 
 

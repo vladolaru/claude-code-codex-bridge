@@ -40,6 +40,30 @@ def test_render_installer_embeds_repository_and_default_tag(tmp_path: Path):
     assert SUPPORTED_PYTHON_MINORS == ((3, 11), (3, 12), (3, 13), (3, 14))
 
 
+def test_render_installer_includes_rosetta_python_guidance(tmp_path: Path):
+    """The installer should explain Rosetta Python mismatches on Apple Silicon."""
+    template_path = tmp_path / "install.sh.in"
+    template_path.write_text(
+        "#!/bin/sh\n"
+        "repo=@REPOSITORY@\n"
+        "tag=@DEFAULT_TAG@\n"
+        "check_rosetta() {\n"
+        "  @ROSETTA_NOTICE@\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    rendered = render_installer(
+        repository="example/repo",
+        default_tag="v9.9.9",
+        template_path=template_path,
+    )
+
+    assert "sysctl -in hw.optional.arm64" in rendered
+    assert "x86_64 Python under Rosetta" in rendered
+    assert "--python /opt/homebrew/bin/python3" in rendered
+
+
 def test_build_release_bundle_creates_archive_installer_and_checksums(tmp_path: Path):
     """Release bundling should produce the offline installer assets from wheelhouse inputs."""
     dist_dir = tmp_path / "dist"
