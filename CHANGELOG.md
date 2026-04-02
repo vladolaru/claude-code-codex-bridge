@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- MCP translation now generates `env_vars` for stdio servers when Claude Code
+  env values contain `${VAR}` or `$VAR` references, bridging Codex's env
+  forwarding model.
+- MCP translation now routes `${VAR}` and `$VAR` header values to Codex's
+  `env_http_headers` field instead of treating them as literal strings in
+  `http_headers`.
+- MCP translation now emits diagnostics for inline `${VAR}` references mixed
+  with literal text in env values and headers, because Codex cannot expand
+  those forms at runtime.
+
+### Fixed
+
+- Non-string values in Claude Code MCP stdio `env` maps are now filtered out
+  instead of producing broken TOML output for Codex.
+
 ## [1.2.2] - 2026-04-01
 
 ### Added

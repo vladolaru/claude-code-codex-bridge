@@ -609,11 +609,11 @@ User-level and plugin skills are installed to the global Codex skill registry at
 
 `src/cc_codex_bridge/translate_mcp.py` converts `DiscoveredMcpServer` objects into `GeneratedMcpServer` objects.
 
-stdio mapping: `command` → `command`, `args` → `args`, `env` → `env` (omitted when empty). The CC `type` field is stripped (Codex infers transport from field presence).
+stdio mapping: `command` → `command`, `args` → `args`, `env` → `env` (omitted when empty; non-string values filtered). The CC `type` field is stripped (Codex infers transport from field presence). Env values that are whole-value `${VAR}` or `$VAR` references are removed from `env` and the variable name is added to `env_vars` instead. Codex does not expand `${VAR}` syntax inside `env` values, but it does forward host env vars named in `env_vars`. Mixed values containing inline `${VAR}` references are kept as literals with a diagnostic.
 
-HTTP mapping: `url` → `url`, `headers` → `http_headers`. Special case: `Authorization: "Bearer ${VAR}"` headers are extracted into `bearer_token_env_var` and the header is removed.
+HTTP mapping: `url` → `url`, `headers` → `http_headers`. Special case: `Authorization: "Bearer ${VAR}"` headers are extracted into `bearer_token_env_var` and the header is removed. Header values that are whole-value `${VAR}` or `$VAR` references are routed to `env_http_headers` instead of `http_headers`, so Codex resolves them from the host environment at runtime. Mixed header values containing inline `${VAR}` references are kept in `http_headers` with a diagnostic.
 
-Diagnostics (warnings, not errors): `headersHelper` (no Codex equivalent), `oauth` (user must run `codex mcp login`).
+Diagnostics (warnings, not errors): `headersHelper` (no Codex equivalent), `oauth` (user must run `codex mcp login`), inline `${VAR}` references in env/header values that Codex cannot expand, and literal credential values in env/headers.
 
 ### 8.7 MCP TOML editing
 
@@ -1071,7 +1071,7 @@ These are current implemented simplifications, not necessarily permanent design 
 - commands are translated to native Codex prompt files (`~/.codex/prompts/`) rather than Codex skills, avoiding namespace collisions with the skill directory entirely
 - LaunchAgent scheduling with automatic `launchctl bootstrap/bootout` is supported; autosync uses a periodic schedule, not a file-watcher
 - MCP planning assumes `mcp_servers` is a TOML table when the document parses successfully — a hand-crafted scalar value (`mcp_servers = "oops"`) would pass TOML validation but crash during apply, leaving the registry inconsistent
-- MCP translation does not remap Claude `${VAR}` env-var references in non-Authorization fields — Codex may treat these as literal strings rather than expanding them at runtime; the bridge copies the syntax verbatim and relies on the host shell or Codex runtime to resolve them
+- MCP translation remaps whole-value `${VAR}` references in env values (to `env_vars`) and header values (to `env_http_headers`) but cannot handle inline `${VAR}` mixed with literals; those values are kept as literal strings with a diagnostic
 - MCP server names must match `[A-Za-z0-9_-]`; servers with dots, spaces, or other characters are skipped with a diagnostic — this is stricter than TOML's quoted-key support but required for registry key safety and Codex `mcp__<server>__<tool>` naming
 
 Any change to these constraints should update this file.
