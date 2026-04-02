@@ -21,6 +21,16 @@ _BEARER_TOKEN_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Matches a whole-value env var reference:
+#   ${VAR_NAME}  (with braces, entire string)
+#   $VAR_NAME    (without braces, entire string)
+_WHOLE_ENV_VAR_RE = re.compile(
+    r"^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$"
+)
+
+# Matches any ${VAR_NAME} embedded anywhere in a string.
+_INLINE_ENV_VAR_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}")
+
 
 def translate_mcp_servers(
     servers: tuple[DiscoveredMcpServer, ...],
@@ -90,6 +100,21 @@ def _looks_like_credential_key(key: str) -> bool:
     """Return True if *key* contains a fragment suggesting a credential."""
     lower = key.lower()
     return any(frag in lower for frag in _CREDENTIAL_KEY_FRAGMENTS)
+
+
+def _extract_env_var_ref(value: str) -> str | None:
+    """If *value* is exactly ``${VAR}`` or ``$VAR``, return the var name."""
+    if not value:
+        return None
+    match = _WHOLE_ENV_VAR_RE.match(value)
+    if match:
+        return match.group(1) or match.group(2)
+    return None
+
+
+def _contains_env_var_ref(value: str) -> bool:
+    """Return True if *value* contains any ``${VAR}`` pattern."""
+    return bool(_INLINE_ENV_VAR_RE.search(value))
 
 
 def _is_valid_mcp_name(name: str) -> bool:

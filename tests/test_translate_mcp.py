@@ -633,3 +633,55 @@ class TestFormatMcpTranslationDiagnostics:
         ]
         result = format_mcp_translation_diagnostics(diags)
         assert result == "MCP server 'test-srv': some warning"
+
+
+class TestEnvVarPatterns:
+    """Tests for env var reference detection helpers."""
+
+    def test_whole_value_braces(self):
+        """${VAR_NAME} as entire value is detected as whole-value reference."""
+        from cc_codex_bridge.translate_mcp import _extract_env_var_ref
+
+        assert _extract_env_var_ref("${GITHUB_TOKEN}") == "GITHUB_TOKEN"
+
+    def test_whole_value_dollar_no_braces(self):
+        """$VAR_NAME as entire value is detected as whole-value reference."""
+        from cc_codex_bridge.translate_mcp import _extract_env_var_ref
+
+        assert _extract_env_var_ref("$MY_SECRET") == "MY_SECRET"
+
+    def test_mixed_value_returns_none(self):
+        """Literal mixed with ${VAR} is not a whole-value reference."""
+        from cc_codex_bridge.translate_mcp import _extract_env_var_ref
+
+        assert _extract_env_var_ref("prefix-${TOKEN}") is None
+
+    def test_plain_literal_returns_none(self):
+        """Plain literal string is not an env var reference."""
+        from cc_codex_bridge.translate_mcp import _extract_env_var_ref
+
+        assert _extract_env_var_ref("sk-abc123") is None
+
+    def test_empty_returns_none(self):
+        """Empty string is not an env var reference."""
+        from cc_codex_bridge.translate_mcp import _extract_env_var_ref
+
+        assert _extract_env_var_ref("") is None
+
+    def test_contains_env_var_ref_detects_inline(self):
+        """String containing ${VAR} among other text is detected."""
+        from cc_codex_bridge.translate_mcp import _contains_env_var_ref
+
+        assert _contains_env_var_ref("prefix-${TOKEN}-suffix") is True
+
+    def test_contains_env_var_ref_plain_literal(self):
+        """Plain literal string returns False."""
+        from cc_codex_bridge.translate_mcp import _contains_env_var_ref
+
+        assert _contains_env_var_ref("just-a-string") is False
+
+    def test_contains_env_var_ref_whole_value(self):
+        """Whole-value ${VAR} also returns True for contains check."""
+        from cc_codex_bridge.translate_mcp import _contains_env_var_ref
+
+        assert _contains_env_var_ref("${TOKEN}") is True
