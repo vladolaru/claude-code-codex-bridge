@@ -212,6 +212,7 @@ def _translate_http(
     headers = config.get("headers")
     if isinstance(headers, dict):
         remaining_headers: dict[str, str] = {}
+        env_http_headers: dict[str, str] = {}
         for key, value in headers.items():
             if not isinstance(value, str):
                 continue
@@ -236,7 +237,8 @@ def _translate_http(
                     continue
                 # Other auth schemes (Basic, etc.) — omit literal credential
                 # (not an env var reference) from generated config.toml.
-                if not value.strip().startswith("$"):
+                if (not value.strip().startswith("$")
+                        and not _contains_env_var_ref(value)):
                     diagnostics.append(McpTranslationDiagnostic(
                         server_name=server.name,
                         message=(
@@ -246,6 +248,23 @@ def _translate_http(
                         ),
                     ))
                     continue
+
+            var_name = _extract_env_var_ref(value)
+            if var_name is not None:
+                env_http_headers[key] = var_name
+                continue
+
+            if _contains_env_var_ref(value):
+                diagnostics.append(McpTranslationDiagnostic(
+                    server_name=server.name,
+                    message=(
+                        f"header '{key}' contains inline ${{VAR}} references "
+                        "that Codex cannot expand; the value was kept as a literal string"
+                    ),
+                ))
+                remaining_headers[key] = value
+                continue
+
             # Scan non-Authorization headers for literal credentials.
             # Values starting with $ are env var references and are safe.
             if (not value.strip().startswith("$")
@@ -262,5 +281,7 @@ def _translate_http(
 
         if remaining_headers:
             table["http_headers"] = remaining_headers
+        if env_http_headers:
+            table["env_http_headers"] = env_http_headers
 
     return table

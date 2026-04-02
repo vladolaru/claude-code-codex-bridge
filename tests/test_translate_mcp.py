@@ -383,7 +383,8 @@ class TestHttpTranslation:
         result = translate_mcp_servers((server,))
 
         gen = result.servers[0]
-        assert gen.toml_table["http_headers"] == {"Authorization": "$MY_AUTH_TOKEN"}
+        assert "http_headers" not in gen.toml_table
+        assert gen.toml_table["env_http_headers"] == {"Authorization": "MY_AUTH_TOKEN"}
         assert not result.diagnostics
 
     def test_empty_headers_after_extraction_omitted(self):
@@ -484,6 +485,112 @@ class TestHttpTranslation:
         assert "bearer_token_env_var" not in gen.toml_table
         assert gen.toml_table.get("http_headers", {}).get("X-Custom") == "valid-value"
 
+    def test_env_var_header_value_becomes_env_http_headers(self):
+        """HTTP: header with ${VAR} value routes to env_http_headers."""
+        server = DiscoveredMcpServer(
+            name="env-hdr-srv",
+            scope="global",
+            transport="http",
+            source="user-global",
+            config={
+                "url": "https://example.com/mcp",
+                "headers": {
+                    "X-API-Key": "${MY_API_KEY}",
+                    "Accept": "application/json",
+                },
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["http_headers"] == {"Accept": "application/json"}
+        assert gen.toml_table["env_http_headers"] == {"X-API-Key": "MY_API_KEY"}
+        assert not result.diagnostics
+
+    def test_dollar_no_braces_header_value_becomes_env_http_headers(self):
+        """HTTP: header with $VAR value routes to env_http_headers."""
+        server = DiscoveredMcpServer(
+            name="dollar-hdr-srv",
+            scope="global",
+            transport="http",
+            source="user-global",
+            config={
+                "url": "https://example.com/mcp",
+                "headers": {"X-Token": "$SECRET_TOKEN"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert "http_headers" not in gen.toml_table
+        assert gen.toml_table["env_http_headers"] == {"X-Token": "SECRET_TOKEN"}
+
+    def test_mixed_env_var_header_value_diagnostic(self):
+        """HTTP: header with inline ${VAR} mixed with literal emits diagnostic."""
+        server = DiscoveredMcpServer(
+            name="mix-hdr-srv",
+            scope="global",
+            transport="http",
+            source="user-global",
+            config={
+                "url": "https://example.com/mcp",
+                "headers": {"Authorization": "Token ${GH_TOKEN}"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["http_headers"] == {"Authorization": "Token ${GH_TOKEN}"}
+        assert "env_http_headers" not in gen.toml_table
+        assert len(result.diagnostics) == 1
+        assert "${" in result.diagnostics[0].message
+
+    def test_all_headers_env_var_refs_no_http_headers(self):
+        """HTTP: when all headers are env var refs, http_headers is omitted."""
+        server = DiscoveredMcpServer(
+            name="all-env-srv",
+            scope="global",
+            transport="http",
+            source="user-global",
+            config={
+                "url": "https://example.com/mcp",
+                "headers": {
+                    "X-Key": "${KEY_VAR}",
+                    "X-Secret": "${SECRET_VAR}",
+                },
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert "http_headers" not in gen.toml_table
+        assert gen.toml_table["env_http_headers"] == {
+            "X-Key": "KEY_VAR",
+            "X-Secret": "SECRET_VAR",
+        }
+
+    def test_bearer_extraction_still_takes_priority(self):
+        """HTTP: Bearer ${VAR} still goes to bearer_token_env_var, not env_http_headers."""
+        server = DiscoveredMcpServer(
+            name="bearer-pri-srv",
+            scope="global",
+            transport="http",
+            source="user-global",
+            config={
+                "url": "https://example.com/mcp",
+                "headers": {
+                    "Authorization": "Bearer ${MY_TOKEN}",
+                    "X-Extra": "${EXTRA_VAR}",
+                },
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["bearer_token_env_var"] == "MY_TOKEN"
+        assert "http_headers" not in gen.toml_table
+        assert gen.toml_table["env_http_headers"] == {"X-Extra": "EXTRA_VAR"}
+
 
 # -- Diagnostics (warnings) -------------------------------------------------
 
@@ -565,7 +672,8 @@ class TestDiagnostics:
         result = translate_mcp_servers((server,))
 
         gen = result.servers[0]
-        assert gen.toml_table["http_headers"] == {"X-API-Key": "$MY_API_KEY"}
+        assert "http_headers" not in gen.toml_table
+        assert gen.toml_table["env_http_headers"] == {"X-API-Key": "MY_API_KEY"}
         assert not result.diagnostics
 
     def test_stdio_literal_env_value_warning(self):
