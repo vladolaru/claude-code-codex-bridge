@@ -130,9 +130,18 @@ CC expands `${VAR_NAME}` references in `env` values at runtime. Codex does NOT �
 - **CC**: Resolves `${MY_SECRET}` from host env → passes the resolved value
 - **Codex**: Passes the literal string `${MY_SECRET}` as the env value
 
-The bridge must detect `${VAR}` patterns in CC `env` values and handle them:
-- If the entire value is `${VAR_NAME}`: remove from `env`, add var name to `env_vars` (it will be inherited from host)
-- If the value mixes literals with `${VAR}`: emit a diagnostic (Codex cannot do inline expansion)
+The bridge detects env-template references in CC `env` values and handles them
+in two tiers:
+
+- If the entire value is `${VAR_NAME}` or `$VAR_NAME` and the destination key
+  is the same as the referenced var, the bridge removes it from `env` and adds
+  the var name to `env_vars`.
+- If the value would change semantics when collapsed to `env_vars` alone
+  (for example `API_KEY = "${MY_SECRET}"`, mixed literal+env templates, or
+  `${VAR:-default}` forms), the bridge preserves the original behavior by
+  wrapping the server command with a bridge-owned stdio launcher. The launcher
+  receives the referenced source vars via `env_vars`, expands the template at
+  runtime, then execs the original MCP server command.
 
 ### 3.4 `env_http_headers` — Env-Sourced HTTP Headers
 
@@ -146,7 +155,10 @@ url = "https://api.example.com/mcp"
 
 At runtime, Codex reads `$MY_API_KEY_ENV_VAR` from the host environment and sets it as the `X-API-Key` header value. Empty/missing values are silently skipped.
 
-The bridge currently puts all CC header values into `http_headers` (except for Bearer token extraction). Headers with `${VAR}` values should instead be mapped to `env_http_headers` with the env var name extracted.
+The bridge maps exact whole-value `${VAR}` and `$VAR` header values to
+`env_http_headers`. Header values that mix literal text with env references
+cannot be represented natively in Codex, so they are preserved in
+`http_headers` with a diagnostic warning instead of being dropped.
 
 ---
 
@@ -257,19 +269,18 @@ With N subagents and M enabled MCP servers, Codex spawns `(N+1) × M` server pro
 
 ### 9.1 Currently Implemented (Phase 1 — Core)
 
-1. **stdio servers**: Map `command`, `args`, `env` (static values). Write to appropriate Codex `config.toml` scope.
-2. **HTTP servers**: Map `url`, rename `headers` → `http_headers`. Extract `Bearer ${VAR}` → `bearer_token_env_var`. Flag `headersHelper` and `oauth` as diagnostics.
+1. **stdio servers**: Map `command`, `args`, and static `env` values directly. Exact same-name `${VAR}` / `$VAR` env values become `env_vars`. Non-lossless env templates use a bridge-owned stdio launcher plus `env_vars` forwarding.
+2. **HTTP servers**: Map `url`, rename `headers` → `http_headers`. Exact `Bearer ${VAR}` / `Bearer $VAR` values become `bearer_token_env_var`. Exact whole-value env refs become `env_http_headers`. Mixed template values are preserved with diagnostics. `headersHelper` and `oauth` are flagged as diagnostics.
 3. **Server names**: Preserved exactly — ensures tool name references (`mcp__server__tool`) transfer.
 4. **Scope mapping**: CC local/project → `.codex/config.toml`; CC user → `~/.codex/config.toml`.
 5. **Credential safety**: Literal credentials in Authorization headers omitted with warning. Literal credential-like env values warned but included.
 6. **Ownership tracking**: Bridge-owned entries tracked in state/registry. User-authored entries never touched.
 
-### 9.2 Needed Improvements (Phase 2 — Env Handling)
+### 9.2 Needed Improvements (Phase 2 — Remaining Gaps)
 
-7. **Generate `env_vars` for stdio servers**: Scan CC `env` values and `args` for `${VAR}` references. Extract var names. Add CC `env` keys that look credential-like and aren't in Codex's default allowlist. This is the #1 correctness priority.
-8. **Handle `${VAR}` in CC `env` values**: When entire value is `${VAR}`, remove from `env` and add to `env_vars`. When value mixes literals with `${VAR}`, emit diagnostic.
-9. **Map `${VAR}` header values to `env_http_headers`**: Detect `${VAR_NAME}` patterns in CC header values and route to `env_http_headers` instead of `http_headers`.
-10. **Map `oauth.scopes` → `scopes`**: Pre-populate for `codex mcp login` convenience.
+7. **Scan `args`, `command`, and `url` for CC env-template expansion**: the current bridge only rewrites stdio `env` values and HTTP headers.
+8. **Handle special CC placeholders such as `${CLAUDE_PROJECT_DIR}`** in MCP translation where applicable.
+9. **Map `oauth.scopes` → `scopes`**: Pre-populate for `codex mcp login` convenience.
 
 ### 9.3 Not Bridged (By Design)
 

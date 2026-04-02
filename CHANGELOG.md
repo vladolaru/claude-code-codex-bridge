@@ -11,17 +11,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - MCP translation now generates `env_vars` for stdio servers when Claude Code
   env values contain `${VAR}` or `$VAR` references, bridging Codex's env
   forwarding model.
+- MCP translation now falls back to a bridge-owned stdio launcher when Claude
+  Code env values require runtime expansion that Codex cannot represent
+  losslessly with native `env` + `env_vars` fields alone.
 - MCP translation now routes `${VAR}` and `$VAR` header values to Codex's
   `env_http_headers` field instead of treating them as literal strings in
   `http_headers`.
-- MCP translation now emits diagnostics for inline `${VAR}` references mixed
-  with literal text in env values and headers, because Codex cannot expand
-  those forms at runtime.
 
 ### Fixed
 
 - Non-string values in Claude Code MCP stdio `env` maps are now filtered out
   instead of producing broken TOML output for Codex.
+- stdio env aliases and inline env templates now preserve Claude Code
+  semantics instead of collapsing to lossy `env_vars` entries.
+- mixed Bearer Authorization header templates are now preserved with a
+  diagnostic instead of being dropped as literal bearer tokens.
 
 ## [1.2.2] - 2026-04-01
 

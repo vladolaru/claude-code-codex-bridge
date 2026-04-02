@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
+import json
+import re
+import sys
 
+from cc_codex_bridge.mcp_env_templates import (
+    collect_env_var_refs,
+    contains_env_var_ref,
+    extract_whole_env_var_ref,
+)
 from cc_codex_bridge.model import (
     DiscoveredMcpServer,
     GeneratedMcpServer,
@@ -20,17 +27,6 @@ _BEARER_TOKEN_RE = re.compile(
     r"^Bearer\s+\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$",
     re.IGNORECASE,
 )
-
-# Matches a whole-value env var reference:
-#   ${VAR_NAME}  (with braces, entire string)
-#   $VAR_NAME    (without braces, entire string)
-_WHOLE_ENV_VAR_RE = re.compile(
-    r"^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$"
-)
-
-# Matches any ${VAR_NAME} embedded anywhere in a string.
-_INLINE_ENV_VAR_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}")
-
 
 def translate_mcp_servers(
     servers: tuple[DiscoveredMcpServer, ...],
@@ -104,17 +100,12 @@ def _looks_like_credential_key(key: str) -> bool:
 
 def _extract_env_var_ref(value: str) -> str | None:
     """If *value* is exactly ``${VAR}`` or ``$VAR``, return the var name."""
-    if not value:
-        return None
-    match = _WHOLE_ENV_VAR_RE.match(value)
-    if match:
-        return match.group(1) or match.group(2)
-    return None
+    return extract_whole_env_var_ref(value)
 
 
 def _contains_env_var_ref(value: str) -> bool:
-    """Return True if *value* contains any ``${VAR}`` pattern."""
-    return bool(_INLINE_ENV_VAR_RE.search(value))
+    """Return True if *value* contains any env-variable reference pattern."""
+    return contains_env_var_ref(value)
 
 
 def _is_valid_mcp_name(name: str) -> bool:
@@ -134,35 +125,35 @@ def _translate_stdio(
     config = server.config
     table: dict = {}
 
-    table["command"] = config["command"]
-
     args = config.get("args")
+    command = config["command"]
+    arg_list: list[str] = []
     if isinstance(args, list):
-        table["args"] = list(args)
+        arg_list = list(args)
+
+    table["command"] = command
+    if arg_list:
+        table["args"] = arg_list
 
     env = config.get("env")
     if isinstance(env, dict) and env:
         static_env: dict[str, str] = {}
-        env_vars: list[str] = []
+        env_templates: dict[str, str] = {}
+        env_vars: set[str] = set()
 
         for env_key, env_value in env.items():
             if not isinstance(env_value, str):
                 continue
 
             var_name = _extract_env_var_ref(env_value)
-            if var_name is not None:
-                env_vars.append(var_name)
+            if var_name is not None and var_name == env_key:
+                env_vars.add(var_name)
                 continue
 
-            if _contains_env_var_ref(env_value):
-                diagnostics.append(McpTranslationDiagnostic(
-                    server_name=server.name,
-                    message=(
-                        f"env var '{env_key}' contains inline ${{VAR}} references "
-                        "that Codex cannot expand; the value was kept as a literal string"
-                    ),
-                ))
-                static_env[env_key] = env_value
+            refs = collect_env_var_refs(env_value)
+            if refs:
+                env_templates[env_key] = env_value
+                env_vars.update(refs)
                 continue
 
             if (not env_value.startswith("$")
@@ -181,6 +172,11 @@ def _translate_stdio(
             table["env"] = static_env
         if env_vars:
             table["env_vars"] = sorted(env_vars)
+
+        if env_templates:
+            command, arg_list = _build_stdio_launcher(command, arg_list, env_templates)
+            table["command"] = command
+            table["args"] = arg_list
 
     return table
 
@@ -216,12 +212,28 @@ def _translate_http(
         for key, value in headers.items():
             if not isinstance(value, str):
                 continue
+
+            whole_ref = _extract_env_var_ref(value)
+            has_env_refs = _contains_env_var_ref(value)
             if key.lower() == "authorization":
                 match = _BEARER_TOKEN_RE.match(value)
                 if match:
                     # Extract env var name from either group (braces or no braces)
                     var_name = match.group(1) or match.group(2)
                     table["bearer_token_env_var"] = var_name
+                    continue
+                if whole_ref is not None:
+                    env_http_headers[key] = whole_ref
+                    continue
+                if has_env_refs:
+                    diagnostics.append(McpTranslationDiagnostic(
+                        server_name=server.name,
+                        message=(
+                            f"header '{key}' contains inline ${{VAR}} references "
+                            "that Codex cannot expand; the value was kept as a literal string"
+                        ),
+                    ))
+                    remaining_headers[key] = value
                     continue
                 # Literal bearer token — do NOT persist the secret into
                 # generated config.  Warn the user to use an env var ref.
@@ -237,8 +249,7 @@ def _translate_http(
                     continue
                 # Other auth schemes (Basic, etc.) — omit literal credential
                 # (not an env var reference) from generated config.toml.
-                if (not value.strip().startswith("$")
-                        and not _contains_env_var_ref(value)):
+                if not value.strip().startswith("$"):
                     diagnostics.append(McpTranslationDiagnostic(
                         server_name=server.name,
                         message=(
@@ -249,12 +260,11 @@ def _translate_http(
                     ))
                     continue
 
-            var_name = _extract_env_var_ref(value)
-            if var_name is not None:
-                env_http_headers[key] = var_name
+            if whole_ref is not None:
+                env_http_headers[key] = whole_ref
                 continue
 
-            if _contains_env_var_ref(value):
+            if has_env_refs:
                 diagnostics.append(McpTranslationDiagnostic(
                     server_name=server.name,
                     message=(
@@ -285,3 +295,28 @@ def _translate_http(
             table["env_http_headers"] = env_http_headers
 
     return table
+
+
+def _build_stdio_launcher(
+    command: str,
+    args: list[str],
+    env_templates: dict[str, str],
+) -> tuple[str, list[str]]:
+    """Wrap a stdio MCP server with the bridge launcher for env templates."""
+    payload_json = json.dumps(
+        {
+            "command": command,
+            "args": args,
+            "env_templates": env_templates,
+        },
+        separators=(",", ":"),
+    )
+    return (
+        sys.executable,
+        [
+            "-m",
+            "cc_codex_bridge.mcp_stdio_launcher",
+            "--payload-json",
+            payload_json,
+        ],
+    )

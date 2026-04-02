@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import sys
+
 import pytest
 
 from cc_codex_bridge.model import (
@@ -14,6 +17,18 @@ from cc_codex_bridge.translate_mcp import (
     format_mcp_translation_diagnostics,
     translate_mcp_servers,
 )
+
+
+def _launcher_payload(gen: GeneratedMcpServer) -> dict:
+    """Decode the stdio launcher payload from a translated MCP server."""
+    assert gen.toml_table["command"] == sys.executable
+    args = gen.toml_table["args"]
+    assert args[:3] == [
+        "-m",
+        "cc_codex_bridge.mcp_stdio_launcher",
+        "--payload-json",
+    ]
+    return json.loads(args[3])
 
 
 # -- stdio servers -----------------------------------------------------------
@@ -176,8 +191,8 @@ class TestStdioTranslation:
         assert "env" not in gen.toml_table
         assert gen.toml_table["env_vars"] == ["MY_TOKEN"]
 
-    def test_mixed_env_var_ref_kept_with_diagnostic(self):
-        """stdio: env value with inline ${VAR} stays in env with diagnostic."""
+    def test_mixed_env_var_ref_uses_launcher_and_forwards_sources(self):
+        """stdio: inline env-template values use the launcher instead of literals."""
         server = DiscoveredMcpServer(
             name="mix-srv",
             scope="global",
@@ -191,11 +206,15 @@ class TestStdioTranslation:
         result = translate_mcp_servers((server,))
 
         gen = result.servers[0]
-        assert gen.toml_table["env"] == {"URL": "https://${HOST}:8080/api"}
-        assert "env_vars" not in gen.toml_table
-        assert len(result.diagnostics) == 1
-        assert "${" in result.diagnostics[0].message
-        assert "URL" in result.diagnostics[0].message
+        payload = _launcher_payload(gen)
+        assert payload == {
+            "command": "node",
+            "args": [],
+            "env_templates": {"URL": "https://${HOST}:8080/api"},
+        }
+        assert gen.toml_table["env_vars"] == ["HOST"]
+        assert "env" not in gen.toml_table
+        assert not result.diagnostics
 
     def test_env_mixed_static_and_var_refs(self):
         """stdio: env with both static values and ${VAR} refs splits correctly."""
@@ -218,6 +237,32 @@ class TestStdioTranslation:
         gen = result.servers[0]
         assert gen.toml_table["env"] == {"NODE_ENV": "production"}
         assert sorted(gen.toml_table["env_vars"]) == ["API_KEY", "DB_URL"]
+        assert not result.diagnostics
+
+    def test_env_alias_uses_launcher_and_preserves_destination_key(self):
+        """stdio: aliased env values use the launcher instead of lossy env_vars."""
+        server = DiscoveredMcpServer(
+            name="alias-srv",
+            scope="global",
+            transport="stdio",
+            source="user-global",
+            config={
+                "command": "node",
+                "args": ["server.js"],
+                "env": {"API_KEY": "${MY_SECRET}"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        payload = _launcher_payload(gen)
+        assert payload == {
+            "command": "node",
+            "args": ["server.js"],
+            "env_templates": {"API_KEY": "${MY_SECRET}"},
+        }
+        assert gen.toml_table["env_vars"] == ["MY_SECRET"]
+        assert "env" not in gen.toml_table
         assert not result.diagnostics
 
     def test_non_string_env_values_filtered(self):
@@ -543,6 +588,29 @@ class TestHttpTranslation:
         assert gen.toml_table["http_headers"] == {"Authorization": "Token ${GH_TOKEN}"}
         assert "env_http_headers" not in gen.toml_table
         assert len(result.diagnostics) == 1
+        assert "${" in result.diagnostics[0].message
+
+    def test_mixed_bearer_header_value_is_preserved_with_diagnostic(self):
+        """HTTP: mixed Bearer template stays as a literal header with a warning."""
+        server = DiscoveredMcpServer(
+            name="mix-bearer-srv",
+            scope="global",
+            transport="http",
+            source="user-global",
+            config={
+                "url": "https://example.com/mcp",
+                "headers": {"Authorization": "Bearer prefix-${TOKEN}"},
+            },
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["http_headers"] == {
+            "Authorization": "Bearer prefix-${TOKEN}",
+        }
+        assert "bearer_token_env_var" not in gen.toml_table
+        assert len(result.diagnostics) == 1
+        assert "Authorization" in result.diagnostics[0].message
         assert "${" in result.diagnostics[0].message
 
     def test_all_headers_env_var_refs_no_http_headers(self):
