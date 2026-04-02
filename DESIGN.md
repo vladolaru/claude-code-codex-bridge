@@ -609,11 +609,11 @@ User-level and plugin skills are installed to the global Codex skill registry at
 
 `src/cc_codex_bridge/translate_mcp.py` converts `DiscoveredMcpServer` objects into `GeneratedMcpServer` objects.
 
-stdio mapping: `command` → `command`, `args` → `args`, `env` → `env` (omitted when empty; non-string values filtered). The CC `type` field is stripped (Codex infers transport from field presence). Env values that are whole-value `${VAR}` or `$VAR` references are removed from `env` and the variable name is added to `env_vars` instead. Codex does not expand `${VAR}` syntax inside `env` values, but it does forward host env vars named in `env_vars`. Mixed values containing inline `${VAR}` references are kept as literals with a diagnostic.
+stdio mapping: `command` → `command`, `args` → `args`, `env` → `env` (omitted when empty; non-string values filtered). The CC `type` field is stripped (Codex infers transport from field presence). Env values containing `${VAR}`, `$VAR`, or `${VAR:-default}` references are removed from `env`, their referenced source vars are added to `env_vars`, and the original templates are expanded at runtime by a bridge-owned stdio launcher so Claude-style semantics are preserved.
 
-HTTP mapping: `url` → `url`, `headers` → `http_headers`. Special case: `Authorization: "Bearer ${VAR}"` headers are extracted into `bearer_token_env_var` and the header is removed. Header values that are whole-value `${VAR}` or `$VAR` references are routed to `env_http_headers` instead of `http_headers`, so Codex resolves them from the host environment at runtime. Mixed header values containing inline `${VAR}` references are kept in `http_headers` with a diagnostic.
+HTTP mapping: `url` → `url`, `headers` → `http_headers`. URL values containing `${VAR}` references are kept literal with a diagnostic because Codex has no URL env-expansion mechanism. Special case: `Authorization: "Bearer ${VAR}"` headers are extracted into `bearer_token_env_var` and the header is removed. Header values that are whole-value `${VAR}` or `$VAR` references are routed to `env_http_headers` instead of `http_headers`, so Codex resolves them from the host environment at runtime. Mixed header values containing inline `${VAR}` references are kept in `http_headers` with a diagnostic.
 
-Diagnostics (warnings, not errors): `headersHelper` (no Codex equivalent), `oauth` (user must run `codex mcp login`), inline `${VAR}` references in env/header values that Codex cannot expand, and literal credential values in env/headers.
+Diagnostics (warnings, not errors): `headersHelper` (no Codex equivalent), `oauth` (user must run `codex mcp login`), HTTP URL/header template references that Codex cannot expand natively, and literal credential values in env/headers.
 
 ### 8.7 MCP TOML editing
 

@@ -188,7 +188,17 @@ def _translate_http(
     config = server.config
     table: dict = {}
 
-    table["url"] = config["url"]
+    url = config["url"]
+    table["url"] = url
+
+    if _contains_env_var_ref(url):
+        diagnostics.append(McpTranslationDiagnostic(
+            server_name=server.name,
+            message=(
+                "url contains inline ${VAR} references that Codex cannot expand; "
+                "the value was kept as a literal string"
+            ),
+        ))
 
     # Warn about unsupported features
     if "headersHelper" in config:

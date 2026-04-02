@@ -17,6 +17,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- HTTP MCP URLs containing `${VAR}` or `$VAR` references now emit a
+  diagnostic instead of being passed through silently as if Codex could
+  expand them.
 - Non-string values in Claude Code MCP stdio `env` maps are now filtered out
   instead of producing broken TOML output for Codex.
 - stdio env templates now preserve Claude Code semantics for unset, aliased,

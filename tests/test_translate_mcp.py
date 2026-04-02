@@ -329,6 +329,23 @@ class TestHttpTranslation:
         assert gen.toml_table["url"] == "https://example.com/mcp"
         assert "type" not in gen.toml_table
 
+    def test_url_with_env_var_ref_emits_diagnostic_and_stays_literal(self):
+        """HTTP: url templates warn because Codex cannot expand them."""
+        server = DiscoveredMcpServer(
+            name="templated-url-srv",
+            scope="global",
+            transport="http",
+            source="user-global",
+            config={"url": "${API_BASE_URL}/mcp"},
+        )
+        result = translate_mcp_servers((server,))
+
+        gen = result.servers[0]
+        assert gen.toml_table["url"] == "${API_BASE_URL}/mcp"
+        assert len(result.diagnostics) == 1
+        assert "url" in result.diagnostics[0].message
+        assert "${VAR}" in result.diagnostics[0].message
+
     def test_headers_become_http_headers(self):
         """HTTP: headers is renamed to http_headers."""
         server = DiscoveredMcpServer(
