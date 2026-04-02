@@ -162,6 +162,13 @@ curl -fsSL https://github.com/vladolaru/claude-code-codex-bridge/releases/latest
 
 The installer downloads a self-contained wheelhouse bundle and installs with `pip --no-index` — no PyPI needed. Supports Python 3.11, 3.12, 3.13, and 3.14.
 
+On Apple Silicon, the installer follows the architecture of the Python interpreter you give it, not just the hardware. If your shell or Homebrew Python is running under Rosetta, the installer will resolve `x86_64` wheels. To force a native arm64 install, rerun it with an arm64 interpreter explicitly:
+
+```bash
+curl -fsSL https://github.com/vladolaru/claude-code-codex-bridge/releases/latest/download/install.sh | \
+  bash -s -- --python /opt/homebrew/bin/python3
+```
+
 To install a specific version:
 
 ```bash

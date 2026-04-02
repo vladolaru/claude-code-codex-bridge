@@ -112,6 +112,10 @@ need_cmd tar
 need_cmd shasum
 need_cmd "${PYTHON_BIN}"
 
+warn_if_rosetta_python() {
+  @ROSETTA_NOTICE@
+}
+
 canonicalize_path() {
   "${PYTHON_BIN}" - "$1" <<'PY'
 from pathlib import Path
@@ -135,6 +139,8 @@ if current_version not in supported_versions:
         f"Supported versions: {supported_display}"
     )
 PY
+
+warn_if_rosetta_python
 
 INSTALL_ROOT="$(canonicalize_path "${INSTALL_ROOT}")"
 BIN_DIR="$(canonicalize_path "${BIN_DIR}")"

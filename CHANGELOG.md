@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Release installer now warns when it detects an Apple Silicon Mac running an
+  `x86_64` Python under Rosetta, and points users to `--python
+  /opt/homebrew/bin/python3` for a native arm64 install.
+
 ## [1.3.2] - 2026-04-02
 
 ### Fixed
