@@ -1108,6 +1108,54 @@ def test_resolve_skill_dir_placeholders_noop_without_placeholder(tmp_path: Path)
     assert resolved[0].files[0].content is original_content  # identity — no copy
 
 
+def test_skill_dir_variable_resolves_to_codex_install_path(
+    make_plugin_version, tmp_path: Path,
+):
+    """End-to-end: ${CLAUDE_SKILL_DIR} in source resolves to codex install path."""
+    cache_root, version_dir = make_plugin_version(
+        "market", "arch-plugin", "1.0.0",
+        skill_names=("software-architecture",),
+    )
+    skill_dir = version_dir / "skills" / "software-architecture"
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: software-architecture\n"
+        "description: Architecture patterns\n"
+        "---\n\n"
+        "Read `${CLAUDE_SKILL_DIR}/patterns/behavioral/strategy.md` for details.\n"
+        "Bare ref: `${CLAUDE_SKILL_DIR}`\n"
+    )
+    patterns_dir = skill_dir / "patterns" / "behavioral"
+    patterns_dir.mkdir(parents=True)
+    (patterns_dir / "strategy.md").write_text("Strategy pattern.\n")
+
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+
+    from cc_codex_bridge.translate_skills import (
+        assign_skill_names,
+        resolve_skill_dir_placeholders,
+        translate_installed_skills,
+        SKILL_DIR_PLACEHOLDER,
+    )
+    from cc_codex_bridge.discover import discover_latest_plugins
+
+    skills = assign_skill_names(
+        translate_installed_skills(discover_latest_plugins(cache_root)).skills
+    )
+    resolved = resolve_skill_dir_placeholders(skills, codex_home / "skills")
+
+    assert len(resolved) == 1
+    skill_md = next(f for f in resolved[0].files if f.relative_path == Path("SKILL.md"))
+    content = skill_md.content.decode()
+
+    expected_base = str(codex_home / "skills" / "software-architecture")
+    assert f"{expected_base}/patterns/behavioral/strategy.md" in content
+    assert f"`{expected_base}`" in content
+    assert SKILL_DIR_PLACEHOLDER not in content
+    assert str(cache_root) not in content
+
+
 def _write_skill_directory(destination: Path, skill: GeneratedSkill) -> Path:
     """Materialize one generated skill tree for test assertions."""
     destination.mkdir(parents=True, exist_ok=True)

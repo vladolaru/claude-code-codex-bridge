@@ -393,6 +393,7 @@ def build_project_desired_state(
     )
     from cc_codex_bridge.translate_skills import (
         assign_skill_names,
+        resolve_skill_dir_placeholders,
         translate_installed_skills,
         translate_standalone_skills,
     )
@@ -502,6 +503,15 @@ def build_project_desired_state(
             ).decode()
             if rewritten_md != result.user_claude_md:
                 result = replace(result, user_claude_md=rewritten_md)
+
+    # Resolve ${CLAUDE_SKILL_DIR} placeholders to actual install paths
+    codex_home_resolved = Path(codex_home or DEFAULT_CODEX_HOME).expanduser().resolve()
+    all_global_skills = resolve_skill_dir_placeholders(
+        all_global_skills, codex_home_resolved / "skills",
+    )
+    all_project_skills = resolve_skill_dir_placeholders(
+        all_project_skills, result.project.root.resolve() / SKILLS_RELATIVE_ROOT,
+    )
 
     # Render project-local agent .toml files (after reference rewriting)
     project_agent_files: list[tuple[Path, bytes]] = []
