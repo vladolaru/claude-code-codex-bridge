@@ -1014,6 +1014,37 @@ def test_skill_plugin_root_transitive_vendoring(make_plugin_version, tmp_path: P
     assert any(f.relative_path == Path("defaults.json") for f in config_resource.files)
 
 
+def test_skill_dir_variable_uses_placeholder(make_plugin_version, tmp_path: Path):
+    """${CLAUDE_SKILL_DIR} references produce a placeholder, not source-absolute paths."""
+    from cc_codex_bridge.translate_skills import SKILL_DIR_PLACEHOLDER
+
+    cache_root, version_dir = make_plugin_version(
+        "market", "arch-plugin", "1.0.0",
+        skill_names=("software-architecture",),
+    )
+    skill_dir = version_dir / "skills" / "software-architecture"
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: software-architecture\n"
+        "description: Architecture patterns\n"
+        "---\n\n"
+        "Read `${CLAUDE_SKILL_DIR}/patterns/behavioral/strategy.md` for details.\n"
+    )
+    patterns_dir = skill_dir / "patterns" / "behavioral"
+    patterns_dir.mkdir(parents=True)
+    (patterns_dir / "strategy.md").write_text("Strategy pattern.\n")
+
+    skills = translate_installed_skills(discover_latest_plugins(cache_root)).skills
+    assert len(skills) == 1
+    skill_md = next(f for f in skills[0].files if f.relative_path == Path("SKILL.md"))
+    content = skill_md.content.decode()
+
+    # Must contain placeholder, not source path
+    assert SKILL_DIR_PLACEHOLDER in content
+    assert str(version_dir) not in content
+    assert f"{SKILL_DIR_PLACEHOLDER}/patterns/behavioral/strategy.md" in content
+
+
 def _write_skill_directory(destination: Path, skill: GeneratedSkill) -> Path:
     """Materialize one generated skill tree for test assertions."""
     destination.mkdir(parents=True, exist_ok=True)

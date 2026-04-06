@@ -43,6 +43,8 @@ IGNORED_SKILL_DIRS = {".git", "node_modules", "__pycache__", ".venv", ".tox"}
 
 MAX_SKILL_NAME_LENGTH = 64
 
+SKILL_DIR_PLACEHOLDER = "__BRIDGE_SKILL_DIR__"
+
 
 def assign_skill_names(
     skills: tuple[GeneratedSkill, ...],
@@ -448,19 +450,26 @@ _SKILL_DIR_PATH_RE = re.compile(
 
 
 def _replace_skill_dir_variable(content: str, skill_path: Path) -> str:
-    """Replace ``${CLAUDE_SKILL_DIR}`` references with resolved absolute paths.
+    """Replace ``${CLAUDE_SKILL_DIR}`` with a placeholder for late resolution.
 
-    Claude Code resolves this variable at runtime to the skill's own directory.
-    Each occurrence is resolved as a complete path (including any ``../``
-    components) so the result contains no relative traversals.
+    Paths that stay within the skill directory become
+    ``__BRIDGE_SKILL_DIR__/relative/path``.  Paths that escape the skill
+    directory (via ``../``) are resolved to absolute source paths as a
+    fallback — these won't be relocated by the bridge.
     """
     resolved_root = skill_path.resolve()
 
     def _resolve_match(m: re.Match) -> str:
         suffix = m.group(1)
-        if suffix:
-            return str((resolved_root / suffix.lstrip("/")).resolve())
-        return str(resolved_root)
+        if not suffix:
+            return SKILL_DIR_PLACEHOLDER
+        full = (resolved_root / suffix.lstrip("/")).resolve()
+        try:
+            relative = full.relative_to(resolved_root)
+            return f"{SKILL_DIR_PLACEHOLDER}/{relative}"
+        except ValueError:
+            # Path escapes the skill directory — keep absolute
+            return str(full)
 
     return _SKILL_DIR_PATH_RE.sub(_resolve_match, content)
 
