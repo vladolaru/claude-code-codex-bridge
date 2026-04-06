@@ -1045,6 +1045,69 @@ def test_skill_dir_variable_uses_placeholder(make_plugin_version, tmp_path: Path
     assert f"{SKILL_DIR_PLACEHOLDER}/patterns/behavioral/strategy.md" in content
 
 
+def test_resolve_skill_dir_placeholders(tmp_path: Path):
+    """Placeholder resolution replaces __BRIDGE_SKILL_DIR__ with actual install path."""
+    from cc_codex_bridge.translate_skills import (
+        SKILL_DIR_PLACEHOLDER,
+        resolve_skill_dir_placeholders,
+    )
+
+    content_with_placeholder = (
+        f"Read `{SKILL_DIR_PLACEHOLDER}/patterns/strategy.md` for details.\n"
+    ).encode()
+
+    skill = GeneratedSkill(
+        marketplace="market",
+        plugin_name="arch-plugin",
+        source_path=Path("/tmp/source"),
+        install_dir_name="software-architecture",
+        original_skill_name="software-architecture",
+        codex_skill_name="software-architecture",
+        files=(
+            GeneratedSkillFile(
+                relative_path=Path("SKILL.md"),
+                content=content_with_placeholder,
+                mode=0o644,
+            ),
+        ),
+    )
+
+    install_base = tmp_path / ".codex" / "skills"
+    resolved = resolve_skill_dir_placeholders((skill,), install_base)
+
+    assert len(resolved) == 1
+    skill_md = resolved[0].files[0]
+    content = skill_md.content.decode()
+    expected_path = str(install_base / "software-architecture")
+    assert f"{expected_path}/patterns/strategy.md" in content
+    assert SKILL_DIR_PLACEHOLDER not in content
+
+
+def test_resolve_skill_dir_placeholders_noop_without_placeholder(tmp_path: Path):
+    """Skills without placeholders pass through unchanged."""
+    from cc_codex_bridge.translate_skills import resolve_skill_dir_placeholders
+
+    original_content = b"No placeholders here.\n"
+    skill = GeneratedSkill(
+        marketplace="market",
+        plugin_name="tools",
+        source_path=Path("/tmp/source"),
+        install_dir_name="my-tool",
+        original_skill_name="my-tool",
+        codex_skill_name="my-tool",
+        files=(
+            GeneratedSkillFile(
+                relative_path=Path("SKILL.md"),
+                content=original_content,
+                mode=0o644,
+            ),
+        ),
+    )
+
+    resolved = resolve_skill_dir_placeholders((skill,), tmp_path / "skills")
+    assert resolved[0].files[0].content is original_content  # identity — no copy
+
+
 def _write_skill_directory(destination: Path, skill: GeneratedSkill) -> Path:
     """Materialize one generated skill tree for test assertions."""
     destination.mkdir(parents=True, exist_ok=True)

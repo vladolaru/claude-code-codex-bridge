@@ -115,6 +115,34 @@ def assign_skill_names(
     return tuple(sorted(result, key=lambda s: s.install_dir_name))
 
 
+def resolve_skill_dir_placeholders(
+    skills: tuple[GeneratedSkill, ...],
+    install_base: Path,
+) -> tuple[GeneratedSkill, ...]:
+    """Replace skill directory placeholders with actual install paths.
+
+    Called after ``assign_skill_names()`` when the final install directory
+    name and Codex home path are both known.
+    """
+    placeholder = SKILL_DIR_PLACEHOLDER.encode()
+    result: list[GeneratedSkill] = []
+    for skill in skills:
+        install_path = str(install_base / skill.install_dir_name).encode()
+        new_files: list[GeneratedSkillFile] = []
+        changed = False
+        for f in skill.files:
+            if placeholder in f.content:
+                new_files.append(replace(f, content=f.content.replace(placeholder, install_path)))
+                changed = True
+            else:
+                new_files.append(f)
+        if changed:
+            result.append(replace(skill, files=tuple(new_files)))
+        else:
+            result.append(skill)
+    return tuple(result)
+
+
 class _RawSkill:
     """Intermediate Claude skill metadata before conflict resolution."""
 
