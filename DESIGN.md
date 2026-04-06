@@ -504,6 +504,15 @@ Current relocation behavior:
 - collisions between referenced sibling names and existing skill subdirectories are a hard error
 - missing referenced siblings are treated as a hard translation error
 
+`${CLAUDE_SKILL_DIR}` variable handling:
+
+- Claude Code resolves `${CLAUDE_SKILL_DIR}` at runtime to the skill's own directory
+- during translation, references within the skill directory are replaced with a placeholder (`__BRIDGE_SKILL_DIR__/relative/path`)
+- references that escape the skill directory (via `../`) fall back to absolute source paths
+- placeholders are resolved to the actual Codex install path after `assign_skill_names()` in the reconcile pipeline
+- global skills resolve to `~/.codex/skills/<install_dir_name>/`
+- project skills resolve to `<project>/.codex/skills/<install_dir_name>/`
+
 ### Skill naming
 
 All generated skill install names use the bare skill directory name by default.
