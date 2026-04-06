@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-04-06
+
 ### Fixed
 
 - Bridged skills using `${CLAUDE_SKILL_DIR}` references now resolve to the Codex install path instead of the Claude Code plugin cache path
