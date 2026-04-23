@@ -2194,6 +2194,43 @@ def test_status_report_uses_mcp_server_labels_for_pending_changes():
     assert str(project_config_toml) not in plain
 
 
+def test_status_report_renders_release_counts_and_symbols():
+    """format_status_report shows release counts and `!` detail lines."""
+    import re
+
+    from cc_codex_bridge.reconcile import Change
+
+    global_config_toml = Path("/home/user/.codex/config.toml")
+    global_skill_dir = Path("/home/user/.codex/skills/shared-skill")
+    report = ReconcileReport(
+        changes=(
+            Change(
+                kind="release",
+                path=global_config_toml,
+                resource_kind="mcp_server",
+                label="trino",
+            ),
+            Change(
+                kind="release",
+                path=global_skill_dir,
+                resource_kind="skill",
+                label="shared-skill",
+            ),
+        ),
+        applied=False,
+    )
+
+    output = cli.format_status_report(report, ExclusionReport())
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", output)
+
+    # Release column visible in per-category count rows.
+    assert "release = 1" in plain
+    # At least one `!` detail line for each release Change.
+    assert "! " in plain
+    # MCP labels still preferred over paths for display.
+    assert "trino" in plain
+
+
 def test_status_no_drift_when_files_unmodified(tmp_path: Path, capsys):
     """Status output has empty drifted_files when no managed files were externally modified."""
     project_root = tmp_path / "project"
