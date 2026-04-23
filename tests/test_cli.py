@@ -2194,6 +2194,31 @@ def test_status_report_uses_mcp_server_labels_for_pending_changes():
     assert str(project_config_toml) not in plain
 
 
+def test_status_json_exposes_release_bucket():
+    """format_status_json keys out release alongside create/update/remove."""
+    from cc_codex_bridge.reconcile import Change
+
+    report = ReconcileReport(
+        changes=(
+            Change(
+                kind="release",
+                path=Path("/home/user/.codex/skills/shared-skill"),
+                resource_kind="skill",
+                label="shared-skill",
+            ),
+        ),
+        applied=False,
+    )
+
+    output = cli.format_status_json(report, ExclusionReport())
+    payload = json.loads(output)
+
+    skills = payload["categorized_changes"]["skills"]
+    assert "release" in skills
+    assert skills["release"] == ["/home/user/.codex/skills/shared-skill"]
+    assert skills["remove"] == []
+
+
 def test_status_report_renders_release_counts_and_symbols():
     """format_status_report shows release counts and `!` detail lines."""
     import re
