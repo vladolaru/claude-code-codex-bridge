@@ -263,8 +263,19 @@ def test_reconcile_keeps_shared_skill_when_one_project_drops_claim(
 
     report = reconcile_desired_state(_build_desired(first_project, cache_root, codex_home))
 
+    # A release Change surfaces the ownership drop, but no remove — the
+    # file stays for project-b.
+    release_changes = [
+        c for c in report.changes
+        if c.kind == "release" and c.path == installed_skill
+    ]
+    assert len(release_changes) == 1
+    assert release_changes[0].resource_kind == "skill"
+    assert all(
+        not (c.kind == "remove" and c.path == installed_skill)
+        for c in report.changes
+    )
     assert installed_skill.exists()
-    assert all(change.path != installed_skill for change in report.changes)
     bridge_home = tmp_path / "home" / ".cc-codex-bridge"
     assert _read_global_registry(bridge_home)["skills"]["prompt-engineer"]["owners"] == [
         str(second_project)

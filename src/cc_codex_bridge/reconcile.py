@@ -2156,15 +2156,18 @@ def _plan_skill_mutations(
         remaining_owners = tuple(
             owner for owner in entry.owners if owner != desired.project_root
         )
+        stale_path = desired.codex_home / "skills" / install_dir_name
         if remaining_owners:
             updated_registry.skills[install_dir_name] = GlobalSkillEntry(
                 content_hash=entry.content_hash,
                 owners=remaining_owners,
             )
+            changes.append(
+                Change("release", stale_path, resource_kind="skill", label=install_dir_name)
+            )
             continue
 
         del updated_registry.skills[install_dir_name]
-        stale_path = desired.codex_home / "skills" / install_dir_name
         if stale_path.exists():
             changes.append(Change("remove", stale_path, resource_kind="skill"))
 
