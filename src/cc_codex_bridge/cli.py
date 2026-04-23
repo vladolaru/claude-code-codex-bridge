@@ -1442,6 +1442,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
         handle_exclude_add,
         handle_exclude_list,
         handle_exclude_remove,
+        is_user_global_entity,
         list_discoverable_entities,
     )
     from cc_codex_bridge.config_scope import resolve_config_scope
@@ -1566,6 +1567,19 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
             print(
                 "Note: plugin exclusions do not cover MCP servers. "
                 "Use `config exclude add mcp_server <name>` to exclude related MCP servers."
+            )
+        if result.success and is_user_global_entity(kind, entity_id, discovery):
+            if scope.target == "project":
+                print(
+                    f"Note: this {kind} is user-global (shared across projects). "
+                    "Project-scope exclusion only drops this project's ownership — "
+                    "the entry stays in Codex until every owning project also "
+                    "excludes it. Rerun with `--global` to exclude across all projects."
+                )
+            print(
+                "Run `cc-codex-bridge reconcile --all` to apply this exclusion to "
+                "Codex (the shared entry is only removed once the last owning "
+                "project drops it)."
             )
         if result.success and scope.target == "global":
             _remove_redundant_project_exclusions(kind, entity_id)

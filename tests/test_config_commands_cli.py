@@ -257,3 +257,109 @@ def test_config_exclude_add_global_shows_scope_in_message(
     assert exit_code == 0
     captured = capsys.readouterr()
     assert "(global)" in captured.out.lower(), f"Expected '(global)' in output: {captured.out}"
+
+
+def _install_mcp_discovery(monkeypatch, tmp_path, mcp_server):
+    """Install a fake discovery returning *mcp_server* with an empty project."""
+    import cc_codex_bridge.discover as discover_module
+    from cc_codex_bridge.model import DiscoveryResult, ProjectContext
+
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# test\n")
+
+    monkeypatch.setattr(discover_module, "discover", lambda **kw: DiscoveryResult(
+        project=ProjectContext(root=project_root, agents_md_path=project_root / "AGENTS.md"),
+        plugins=(),
+        user_skills=(),
+        user_agents=(),
+        user_commands=(),
+        project_skills=(),
+        project_agents=(),
+        project_commands=(),
+        user_claude_md=None,
+        mcp_servers=(mcp_server,),
+    ))
+    return project_root
+
+
+def test_config_exclude_add_project_scope_warns_for_user_global_mcp(
+    tmp_path, monkeypatch, capsys,
+):
+    """Project-scope exclusion of a user-global MCP emits a scope-hint warning."""
+    from cc_codex_bridge.model import DiscoveredMcpServer
+
+    project_root = _install_mcp_discovery(
+        monkeypatch, tmp_path,
+        DiscoveredMcpServer(
+            name="trino",
+            scope="global",
+            config={"command": "trino-mcp"},
+            transport="stdio",
+            source="~/.claude.json",
+        ),
+    )
+    monkeypatch.chdir(project_root)
+
+    exit_code = cli.main(["config", "exclude", "add", "mcp_server", "trino"])
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "user-global" in out
+    assert "--global" in out
+    assert "reconcile --all" in out
+
+
+def test_config_exclude_add_global_scope_hints_reconcile_for_user_global_mcp(
+    tmp_path, monkeypatch, capsys,
+):
+    """Global-scope exclusion of a user-global MCP skips the scope warning but
+    still hints at reconcile."""
+    from cc_codex_bridge.model import DiscoveredMcpServer
+
+    project_root = _install_mcp_discovery(
+        monkeypatch, tmp_path,
+        DiscoveredMcpServer(
+            name="trino",
+            scope="global",
+            config={"command": "trino-mcp"},
+            transport="stdio",
+            source="~/.claude.json",
+        ),
+    )
+    monkeypatch.chdir(project_root)
+
+    exit_code = cli.main([
+        "config", "exclude", "add", "--global", "mcp_server", "trino",
+    ])
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "reconcile --all" in out
+    assert "Project-scope exclusion" not in out
+
+
+def test_config_exclude_add_project_scoped_mcp_stays_silent(
+    tmp_path, monkeypatch, capsys,
+):
+    """A project-scope MCP gets no warning or reconcile hint — the exclusion
+    only affects local project state, so the extra guidance would be noise."""
+    from cc_codex_bridge.model import DiscoveredMcpServer
+
+    project_root = _install_mcp_discovery(
+        monkeypatch, tmp_path,
+        DiscoveredMcpServer(
+            name="local-only",
+            scope="project",
+            config={"command": "local-mcp"},
+            transport="stdio",
+            source=".mcp.json",
+        ),
+    )
+    monkeypatch.chdir(project_root)
+
+    exit_code = cli.main([
+        "config", "exclude", "add", "mcp_server", "local-only",
+    ])
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "user-global" not in out
+    assert "reconcile --all" not in out

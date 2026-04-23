@@ -42,6 +42,50 @@ class ExcludeListResult:
     mcp_servers: tuple[str, ...]
 
 
+def is_user_global_entity(
+    kind: str,
+    entity_id: str,
+    discovery: DiscoveryResult,
+) -> bool:
+    """Return True if *entity_id* refers to a user-global (non-project) entity.
+
+    User-global entities are ones the bridge writes into the shared
+    ``~/.codex/`` namespace rather than per-project ``.codex/``.  A
+    project-scope exclusion of a user-global entity only drops *this*
+    project's ownership claim — the entry stays in Codex for as long as
+    any other project still bridges it.
+
+    Handled cases (return True):
+    - any plugin (CC plugins are always user-level)
+    - MCP server discovered at ``"global"`` scope (top-level ``mcpServers``
+      in ``~/.claude.json``)
+    - skill/agent/command with a 3-part ID (``marketplace/plugin/name``) —
+      plugin-owned entities are user-global
+    - skill/agent/command with a 2-part ``user/<name>`` ID
+
+    Conservative cases (return False):
+    - MCP server at ``"project"`` scope
+    - skill/agent/command with a 2-part ``project/<name>`` ID
+    - bare 1-part skill/agent/command IDs — ambiguous without resolving
+      against discovery, and callers should only emit the warning on
+      unambiguous user-global IDs
+    """
+    if kind == "plugin":
+        return True
+    if kind == "mcp_server":
+        return any(
+            s.name == entity_id and s.scope == "global"
+            for s in discovery.mcp_servers
+        )
+    if kind in ("skill", "agent", "command"):
+        parts = entity_id.split("/")
+        if len(parts) == 3:
+            return True
+        if len(parts) == 2:
+            return parts[0] == "user"
+    return False
+
+
 def list_discoverable_entities(
     discovery: DiscoveryResult,
     scope: str = "project",

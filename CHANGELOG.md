@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `config exclude add` now surfaces scope-aware guidance when the excluded
+  entity is user-global (plugin, `marketplace/plugin/name` skill/agent/command,
+  `user/<name>` skill/agent/command, or an MCP server with global scope).
+  Project-scope exclusions print a hint that the exclusion only drops this
+  project's ownership claim and suggest rerunning with `--global` to apply
+  across all projects. Every successful user-global exclusion also prints a
+  reminder to run `cc-codex-bridge reconcile --all`, since the shared Codex
+  entry is only removed once the last owning project drops it.
+
 ## [1.3.3] - 2026-04-06
 
 ### Fixed
