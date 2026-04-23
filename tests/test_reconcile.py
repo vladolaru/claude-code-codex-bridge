@@ -381,6 +381,49 @@ def test_reconcile_rejects_skill_conflict_from_non_owner(
         reconcile_desired_state(_build_desired(second_project, cache_root, codex_home))
 
 
+def test_reconcile_emits_release_when_shared_agent_owner_drops(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Dropping one shared agent owner emits a release Change, not remove."""
+    first_project, _ = make_project("project-a")
+    second_project, _ = make_project("project-b")
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "pirategoat-tools",
+        "1.0.0",
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nBody.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    installed_agent = codex_home / "agents" / "reviewer.toml"
+
+    reconcile_desired_state(_build_desired(first_project, cache_root, codex_home))
+    reconcile_desired_state(_build_desired(second_project, cache_root, codex_home))
+    assert installed_agent.exists()
+
+    # New plugin version drops the agent.
+    _, later_version_dir = make_plugin_version("market", "pirategoat-tools", "1.0.1")
+    assert not (later_version_dir / "agents").exists()
+
+    report = reconcile_desired_state(_build_desired(first_project, cache_root, codex_home))
+
+    release_changes = [
+        c for c in report.changes
+        if c.kind == "release" and c.path == installed_agent
+    ]
+    assert len(release_changes) == 1
+    assert release_changes[0].resource_kind == "agent"
+    assert all(
+        not (c.kind == "remove" and c.path == installed_agent)
+        for c in report.changes
+    )
+    assert installed_agent.exists()
+
+
 def test_reconcile_updates_shared_agent_when_plugin_upgrades(
     make_project,
     make_plugin_version,

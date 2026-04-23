@@ -2401,15 +2401,18 @@ def _plan_global_agent_mutations(
         remaining_owners = tuple(
             owner for owner in entry.owners if owner != desired.project_root
         )
+        stale_path = desired.codex_home / "agents" / filename
         if remaining_owners:
             updated_registry.agents[filename] = GlobalAgentEntry(
                 content_hash=entry.content_hash,
                 owners=remaining_owners,
             )
+            changes.append(
+                Change("release", stale_path, resource_kind="agent", label=filename)
+            )
             continue
 
         del updated_registry.agents[filename]
-        stale_path = desired.codex_home / "agents" / filename
         if stale_path.exists():
             changes.append(Change("remove", stale_path, resource_kind="agent"))
 
