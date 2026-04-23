@@ -360,7 +360,39 @@ def test_build_log_entry_from_reconcile_changes():
     assert len(entry.changes) == 3
     assert entry.changes[0].type == "create"
     assert entry.changes[0].artifact == "skill"
-    assert entry.summary == {"created": 1, "updated": 1, "removed": 1}
+    assert entry.summary == {
+        "created": 1,
+        "updated": 1,
+        "removed": 1,
+        "released": 0,
+    }
+
+
+def test_build_log_entry_counts_release_in_summary():
+    """Release Changes appear in the activity log summary and per-change type."""
+    from cc_codex_bridge.reconcile import Change
+    from cc_codex_bridge.activity_log import build_log_entry_from_changes
+
+    entry = build_log_entry_from_changes(
+        action="reconcile",
+        project="/tmp/proj",
+        changes=(
+            Change(
+                kind="release",
+                path=Path("/home/user/.codex/skills/shared"),
+                resource_kind="skill",
+                label="shared",
+            ),
+        ),
+    )
+    assert entry.summary == {
+        "created": 0,
+        "updated": 0,
+        "removed": 0,
+        "released": 1,
+    }
+    assert entry.changes[0].type == "release"
+    assert entry.changes[0].artifact == "skill"
 
 
 def test_build_log_entry_empty_changes():

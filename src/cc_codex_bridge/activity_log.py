@@ -12,7 +12,7 @@ from pathlib import Path
 class LogChange:
     """One artifact mutation within a log entry."""
 
-    type: str       # e.g. "create", "update", "remove", "restore"
+    type: str       # e.g. "create", "update", "remove", "restore", "release"
     artifact: str   # "skill", "agent", "prompt", "project_file", "plugin_resource"
     path: str
 
@@ -31,7 +31,13 @@ class LogEntry:
         created = sum(1 for c in self.changes if c.type == "create")
         updated = sum(1 for c in self.changes if c.type == "update")
         removed = sum(1 for c in self.changes if c.type == "remove")
-        return {"created": created, "updated": updated, "removed": removed}
+        released = sum(1 for c in self.changes if c.type == "release")
+        return {
+            "created": created,
+            "updated": updated,
+            "removed": removed,
+            "released": released,
+        }
 
     def to_json_line(self) -> str:
         payload = {
