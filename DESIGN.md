@@ -221,6 +221,30 @@ The global registry records:
 - bridge-owned global MCP server names with content hashes and owning project roots
 - a sorted list of all reconciled project roots (the `projects` list)
 
+### Change kinds and ownership transitions
+
+Planners emit `Change` records with one of five kinds. The reconcile and
+status reports render all of them so pending mutations are never silent:
+
+- `create` — a new file or directory is being written.
+- `update` — an existing generator-owned file is being rewritten.
+- `remove` — the entry is fully gone from the registry (this project was
+  the last owner). The on-disk file or `config.toml` entry is deleted.
+- `release` — this project drops its ownership claim on a shared global
+  artifact, but other projects still own the entry. Only the registry is
+  updated; the on-disk file is preserved for remaining owners.
+  Applies to all five global-registry artifact types: skills, agents,
+  prompts, vendored plugin resource dirs, and MCP server entries.
+- `restore` — legacy shim undo for the `CLAUDE.md` / `AGENTS.md`
+  bootstrap path (unchanged by the release-kind addition).
+
+`_apply_changes` treats `release` as an explicit no-op at the filesystem
+layer; the registry write queued on the same plan carries the state
+transition. `_apply_mcp_server_changes` additionally excludes released
+global MCP names from the "previously owned by this project" set before
+writing `~/.codex/config.toml`, so the apply phase does not rewrite the
+shared entry out from under other owners.
+
 ### Safety rules
 
 - project files are never overwritten unless they were previously recorded as managed, and their on-disk content hash matches the stored hash (drift detection)

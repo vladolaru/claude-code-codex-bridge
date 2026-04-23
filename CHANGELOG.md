@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Status and reconcile reports now render a `release` column and
+  per-item `!` lines for pending ownership drops on shared global
+  artifacts (skills, agents, prompts, vendored plugin resource dirs,
+  MCP servers). Previously these mutations were silent: `status` showed
+  `remove = 0` and `in_sync` even though the next reconcile would
+  update the global registry.
+- Activity log `summary` now carries a `released` count alongside
+  `created`, `updated`, and `removed`, so daily JSONL logs correctly
+  reflect runs that only dropped ownership on shared entries.
+
+### Changed
+
+- The five global-registry planners (`_plan_skill_mutations`,
+  `_plan_global_agent_mutations`, `_plan_prompt_mutations`,
+  `_plan_plugin_resource_mutations`, `_plan_mcp_server_mutations`) emit
+  a new `Change` with kind `"release"` when the current project drops
+  an ownership claim on a shared entry that other projects still own.
+  `_apply_changes` treats `release` as a filesystem no-op; the registry
+  write queued on the same plan carries the state transition.
+- `_apply_mcp_server_changes` now excludes released global MCP names
+  from the "previously owned by this project" set, so a project
+  releasing a shared MCP entry no longer rewrites the global
+  `~/.codex/config.toml` and briefly removes an entry that other
+  projects still rely on.
+
 ## [1.4.0] - 2026-04-23
 
 ### Added
