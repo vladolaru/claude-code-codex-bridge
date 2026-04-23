@@ -4296,6 +4296,13 @@ def test_reconcile_releases_stale_plugin_resources_preserves_shared_dirs(
     # No remove change since the dir is still needed
     remove_changes_a = [c for c in report_a2.changes if c.kind == "remove" and c.resource_kind == "plugin_resource"]
     assert len(remove_changes_a) == 0
+    # But a release change surfaces the ownership drop
+    release_changes_a = [
+        c for c in report_a2.changes
+        if c.kind == "release" and c.resource_kind == "plugin_resource"
+    ]
+    assert len(release_changes_a) == 1
+    assert release_changes_a[0].path == vendored_dir
 
     # Reconcile project B WITHOUT the plugin
     build_b2 = build_project_desired_state(
