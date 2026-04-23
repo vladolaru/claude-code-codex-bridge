@@ -1425,8 +1425,20 @@ def _apply_changes(
     # Apply MCP server changes (batched TOML writes)
     managed_mcp_servers: dict[str, str] = {}
     if any(c.resource_kind == "mcp_server" for c in plan.changes):
+        # Released global servers — this project dropped its ownership but
+        # other projects still own the entry.  Treat them as "not previously
+        # owned by me" so _apply_mcp_server_changes does not rewrite the
+        # global config.toml and delete the shared entry.
+        released_global_mcp = {
+            c.label
+            for c in plan.changes
+            if c.kind == "release"
+            and c.resource_kind == "mcp_server"
+            and c.path == desired.codex_home / "config.toml"
+        }
+        apply_previously_owned_global = previously_owned_global_mcp - released_global_mcp
         managed_mcp_servers = _apply_mcp_server_changes(
-            desired, previous_state, previously_owned_global_mcp,
+            desired, previous_state, apply_previously_owned_global,
             user_authored_global=plan.mcp_user_authored_global,
         )
     else:
@@ -1682,6 +1694,9 @@ def _plan_mcp_server_mutations(
                 updated_registry.mcp_servers[name] = GlobalMcpServerEntry(
                     content_hash=entry.content_hash,
                     owners=remaining_owners,
+                )
+                changes.append(
+                    Change("release", global_config_path, resource_kind="mcp_server", label=name)
                 )
             else:
                 del updated_registry.mcp_servers[name]
