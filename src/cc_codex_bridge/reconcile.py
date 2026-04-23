@@ -1336,6 +1336,11 @@ def _apply_changes(
     }
 
     for change in plan.changes:
+        if change.kind == "release":
+            # Ownership-only change on a shared global artifact: the
+            # registry write queued below carries the state transition.
+            # The on-disk file is preserved for remaining owners.
+            continue
         if change.resource_kind == "global_instructions":
             if change.kind in ("create", "update"):
                 _atomic_write_file(change.path, desired.global_instructions, container=desired.codex_home)

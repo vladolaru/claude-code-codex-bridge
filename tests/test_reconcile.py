@@ -5220,3 +5220,57 @@ def test_clean_preserves_agents_md_when_claude_is_symlink_to_it(
     assert claude_path.resolve() == agents_path.resolve()
     removed_paths = {c.path for c in report.changes if c.kind == "remove"}
     assert agents_path not in removed_paths
+
+
+# ---------------------------------------------------------------------------
+# release Change kind — _apply_changes treats it as a filesystem no-op.
+# ---------------------------------------------------------------------------
+
+
+def test_apply_changes_release_kind_is_filesystem_noop(tmp_path: Path):
+    """A release Change must neither create, update, nor remove files.
+
+    The registry write queued by the planner carries the actual state
+    transition; _apply_changes only touches the filesystem for
+    create/update/remove.
+    """
+    from cc_codex_bridge.reconcile import (
+        Change,
+        DesiredState,
+        _MutationPlan,
+        _apply_changes,
+    )
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "bridge-home"
+    # Seed a target "shared" file so the release Change points at an
+    # existing path.  The no-op contract says the file must survive.
+    target_skill_dir = codex_home / "skills" / "shared-skill"
+    target_skill_dir.mkdir(parents=True)
+    seeded_file = target_skill_dir / "SKILL.md"
+    seeded_file.write_text("---\nname: shared-skill\ndescription: s\n---\n\nBody.\n")
+
+    desired = DesiredState(
+        project_root=project_root,
+        codex_home=codex_home,
+        bridge_home=bridge_home,
+        project_files=(),
+        preserved_project_files=(),
+        skills=(),
+        state_path=bridge_home / "projects" / "x" / "state.json",
+    )
+    plan = _MutationPlan(
+        changes=(
+            Change("release", target_skill_dir, resource_kind="skill", label="shared-skill"),
+        ),
+        registry_writes=(),
+    )
+
+    _apply_changes(desired, plan, frozenset(), None, None)
+
+    # File and directory must still exist untouched.
+    assert target_skill_dir.exists()
+    assert seeded_file.exists()
+    assert seeded_file.read_text().startswith("---\nname: shared-skill\n")
