@@ -60,6 +60,30 @@ def test_change_symbols_covers_all_kinds():
     assert CHANGE_SYMBOLS["create"] == "+"
     assert CHANGE_SYMBOLS["update"] == "~"
     assert CHANGE_SYMBOLS["remove"] == "-"
+    assert CHANGE_SYMBOLS["release"] == "!"
+
+
+def test_change_color_for_release_uses_warn():
+    from cc_codex_bridge.render import change_color
+
+    # Distinct-fn dict so identity comparison is meaningful.
+    c = {
+        "warn": lambda s: f"W:{s}",
+        "dim": lambda s: f"D:{s}",
+    }
+    assert change_color("release", c) is c["warn"]
+
+
+def test_render_change_line_release_contains_bang():
+    line = strip_ansi(render_change_line("release", "path/to/file"))
+    assert "!" in line
+    assert "path/to/file" in line
+
+
+def test_render_change_line_release_with_resource_kind():
+    line = strip_ansi(render_change_line("release", "some/path", "mcp_server"))
+    assert "!" in line
+    assert "(mcp_server)" in line
 
 
 # ---------------------------------------------------------------------------
