@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-04-23
+
 ### Added
 
 - `config exclude add` now surfaces scope-aware guidance when the excluded
