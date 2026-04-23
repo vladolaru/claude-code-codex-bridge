@@ -2525,15 +2525,18 @@ def _plan_prompt_mutations(
         remaining_owners = tuple(
             owner for owner in entry.owners if owner != desired.project_root
         )
+        stale_path = desired.codex_home / "prompts" / filename
         if remaining_owners:
             updated_registry.prompts[filename] = GlobalPromptEntry(
                 content_hash=entry.content_hash,
                 owners=remaining_owners,
             )
+            changes.append(
+                Change("release", stale_path, resource_kind="prompt", label=filename)
+            )
             continue
 
         del updated_registry.prompts[filename]
-        stale_path = desired.codex_home / "prompts" / filename
         if stale_path.exists():
             changes.append(Change("remove", stale_path, resource_kind="prompt"))
 

@@ -3633,6 +3633,75 @@ def test_reconcile_shared_prompt_advances_on_upgrade(make_project, tmp_path: Pat
     assert (codex_home / "prompts" / "review.md").read_bytes() == shared_content_v2
 
 
+def test_reconcile_emits_release_when_shared_prompt_owner_drops(make_project, tmp_path: Path):
+    """Dropping one shared prompt owner emits a release Change, not remove."""
+    from cc_codex_bridge.model import (
+        ClaudeShimDecision,
+        DiscoveryResult,
+        GeneratedPrompt,
+        ProjectContext,
+    )
+    from cc_codex_bridge.reconcile import build_desired_state, reconcile_desired_state
+
+    project_a, _ = make_project("project-a")
+    project_b = tmp_path / "project-b"
+    project_b.mkdir()
+    (project_b / "AGENTS.md").write_text("# B\n")
+
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "bridge-home"
+
+    shared_content = b"---\ndescription: 'Review code'\n---\n\nReview.\n"
+    prompt = GeneratedPrompt(
+        filename="review.md",
+        content=shared_content,
+        source_path=project_a / ".claude" / "commands" / "review.md",
+        marketplace="market",
+        plugin_name="tools",
+    )
+    installed_prompt = codex_home / "prompts" / "review.md"
+
+    # Both projects reconcile with the same shared prompt.
+    for project_root in (project_a, project_b):
+        discovery = DiscoveryResult(
+            project=ProjectContext(root=project_root, agents_md_path=project_root / "AGENTS.md"),
+            plugins=(),
+        )
+        shim = ClaudeShimDecision(action="skip", path=project_root / "CLAUDE.md")
+        state = build_desired_state(
+            discovery, shim, (),
+            codex_home=codex_home, bridge_home=bridge_home,
+            global_prompts=(prompt,),
+        )
+        reconcile_desired_state(state)
+    assert installed_prompt.exists()
+
+    # project-a reconciles with empty prompts (dropping the shared entry).
+    discovery_a = DiscoveryResult(
+        project=ProjectContext(root=project_a, agents_md_path=project_a / "AGENTS.md"),
+        plugins=(),
+    )
+    shim_a = ClaudeShimDecision(action="skip", path=project_a / "CLAUDE.md")
+    state_a_empty = build_desired_state(
+        discovery_a, shim_a, (),
+        codex_home=codex_home, bridge_home=bridge_home,
+        global_prompts=(),
+    )
+    report = reconcile_desired_state(state_a_empty)
+
+    release_changes = [
+        c for c in report.changes
+        if c.kind == "release" and c.path == installed_prompt
+    ]
+    assert len(release_changes) == 1
+    assert release_changes[0].resource_kind == "prompt"
+    assert all(
+        not (c.kind == "remove" and c.path == installed_prompt)
+        for c in report.changes
+    )
+    assert installed_prompt.exists()
+
+
 def _reconcile_once(project_root, cache_root, codex_home):
     """Run a full discover+translate+reconcile and return the desired state."""
     from cc_codex_bridge.discover import discover
