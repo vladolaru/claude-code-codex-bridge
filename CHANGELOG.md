@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-04-29
+
 ### Fixed
 
 - Disabled malformed plugin cache entries no longer block discovery when
