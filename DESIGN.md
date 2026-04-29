@@ -112,7 +112,7 @@ The runtime is a deterministic pipeline:
 1. resolve the target project root by searching upward for `AGENTS.md`
 2. query `claude plugins list --json` for enabled plugin IDs (using the project root as CWD for project-scoped settings)
 3. discover installed Claude plugins from `~/.claude/plugins/cache` or `--cache-dir`
-4. choose the highest semantic version for each `<marketplace>/<plugin>` and filter to only enabled plugins
+4. skip plugin cache directories outside the enabled-plugin set, then choose the highest semantic version for each enabled `<marketplace>/<plugin>`
 5. discover user-level skills, agents, and global instructions from `~/.claude/` (or `--claude-home`)
 6. discover project-level skills and agents from `.claude/`
 6b. discover MCP server definitions from `~/.claude.json` (user-global and per-project) and `.mcp.json` (project-shared)
@@ -245,6 +245,11 @@ global MCP names from the "previously owned by this project" set before
 writing `~/.codex/config.toml`, so the apply phase does not rewrite the
 shared entry out from under other owners.
 
+MCP planning also computes the exact project-scope MCP hash map that will be
+stored in bridge state. `status`, `reconcile --dry-run`, and mutating
+`reconcile` all compare against that planned state instead of reconstructing
+MCP ownership separately during apply.
+
 ### Safety rules
 
 - project files are never overwritten unless they were previously recorded as managed, and their on-disk content hash matches the stored hash (drift detection)
@@ -282,10 +287,7 @@ shared entry out from under other owners.
 - MCP entries in `config.toml` are ownership-aware: only bridge-owned entries (tracked in state or registry) are modified; user-authored entries with the same name are never touched or adopted
 - user-authored MCP entries that collide with bridge-discovered servers are skipped during apply and excluded from state/registry tracking — `clean` will not remove them
 - when MCP discovery is degraded (config file exists but contains malformed JSON), stale-entry removal is suppressed — previously-bridged entries survive until the file is fixed
-
-#### Known limitation: multi-project global MCP update on first reconcile
-
-When project B first encounters a global MCP server already created by project A with different content, B adds itself as a co-owner in the registry but cannot update `config.toml` because the entry is not in B's `owned` set. The registry records B's desired hash while the disk retains A's content. This self-heals on B's second reconcile (B is then in `previously_owned_global`) or on A's next reconcile. This is accepted because MCP servers overwhelmingly come from plugins with identical configs across projects — the scenario of two projects wanting different content for the same global MCP server name is not realistic in practice. Do not attempt to fix this without a concrete real-world use case that demonstrates the need.
+- global registry writes happen after generated artifact writes and MCP `config.toml` writes succeed; a failed MCP config update or removal leaves the previous registry hash and ownership state intact for the next reconcile
 
 ## 7. Discovery Architecture
 
@@ -305,7 +307,8 @@ Discovery lives in `src/cc_codex_bridge/discover.py`.
 - structure is expected as `<cache>/<marketplace>/<plugin>/<version>/`
 - only directories with valid semantic-version names are considered plugin versions
 - malformed version directories are ignored
-- if a plugin has no valid semantic-version subdirectories, discovery fails
+- if a plugin in discovery scope has no valid semantic-version subdirectories, discovery fails
+- when an enabled-plugin set is available, disabled plugin directories are skipped before version validation, so stale disabled cache entries cannot block sync
 - an empty or missing plugin cache returns an empty tuple (non-fatal) when other sources exist
 
 ### User-level discovery
@@ -351,7 +354,7 @@ When a source file exists but contains malformed JSON, discovery is *degraded*: 
 - `query_enabled_plugin_ids()` shells out to `claude plugins list --json` using the project root as CWD
 - the CLI output provides an authoritative enablement status that reflects the merged settings hierarchy (user → project → local)
 - the CLI's `id` format (`plugin-name@marketplace`) is converted to the bridge's internal `marketplace/plugin_name` format
-- after cache scanning, `discover_latest_plugins()` filters to only plugins present in the enabled set
+- `discover_latest_plugins()` applies the enabled set before validating plugin version directories
 - uninstalled-but-cached plugins are excluded because the CLI only lists installed plugins
 - the CLI's `installPath` and `version` fields are not used — they are stale for a significant portion of enabled plugins due to auto-updates that don't refresh the install metadata
 - if the `claude` CLI is not on PATH, discovery raises a `DiscoveryError` with installation instructions
@@ -677,6 +680,7 @@ Reconcile lives in `src/cc_codex_bridge/reconcile.py`.
 - global agents (global registry, installed as `.toml` files to `~/.codex/agents/`)
 - global instructions content (for `~/.codex/AGENTS.md`)
 - vendored plugin resources (bridge-internal, written to `~/.cc-codex-bridge/plugins/`)
+- MCP servers (global entries tracked in the registry, project entries tracked in bridge state)
 - path to the state file (under bridge home)
 
 ### Diff model
@@ -692,6 +696,8 @@ Supported kinds in current reporting:
 - `create`
 - `update`
 - `remove`
+- `release`
+- `restore`
 
 ### Reconcile flow
 
@@ -703,13 +709,10 @@ Supported kinds in current reporting:
 6. compute desired global agent file mutations and reconcile changes from registry ownership plus content hashes
 7. compute desired global instructions changes for `~/.codex/AGENTS.md`
 8. validate ownership constraints
-9. write project file and skill directory changes directly
-10. compute vendored plugin resource content hashes, claim registry ownership, and write vendored plugin resource directories under bridge home
-11. detect stale plugin resources no longer in the desired state and release registry ownership (last-owner directories are removed)
-12. write global agent files and instructions file if needed
-13. write updated global registry file (a single file tracks skills, agents, and plugin resources)
-14. write the state file under bridge home
-15. remove stale managed outputs whose last owner released them
+9. write project file, project skill, global skill, agent, prompt, instruction, and vendored plugin resource changes
+10. apply MCP server mutations to the relevant Codex `config.toml` files
+11. write the updated global registry file after artifact and MCP config writes succeed
+12. write the state file under bridge home, including the planned project-scope MCP hash map
 
 `diff_desired_state()` additionally reports state file create/update changes that `reconcile_desired_state()` would perform, ensuring `status` and `reconcile --dry-run` show the same pending changes as a real reconcile.
 

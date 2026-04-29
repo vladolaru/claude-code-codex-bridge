@@ -169,6 +169,7 @@ class _McpPlanResult:
     registry: GlobalResourceRegistry
     previously_owned_global: frozenset[str] = frozenset()
     user_authored_global: frozenset[str] = frozenset()
+    managed_mcp_servers: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -180,6 +181,7 @@ class _MutationPlan:
     project_file_changes: tuple[Change, ...] = ()
     mcp_previously_owned_global: frozenset[str] = frozenset()
     mcp_user_authored_global: frozenset[str] = frozenset()
+    managed_mcp_servers: tuple[tuple[str, str], ...] = ()
 
 
 def build_desired_state(
@@ -647,6 +649,7 @@ def diff_desired_state(desired: DesiredState) -> ReconcileReport:
         prev_managed,
         prev_managed_files,
         plan.project_file_changes,
+        managed_mcp_servers=dict(plan.managed_mcp_servers),
     )
     _validate_mutation_targets(
         desired,
@@ -675,6 +678,7 @@ def reconcile_desired_state(desired: DesiredState) -> ReconcileReport:
         prev_managed,
         prev_managed_files,
         plan.project_file_changes,
+        managed_mcp_servers=dict(plan.managed_mcp_servers),
     )
     _validate_mutation_targets(
         desired,
@@ -1413,17 +1417,10 @@ def _apply_changes(
                 change.path.unlink(missing_ok=True)
                 _cleanup_empty_parents(change.path.parent, desired.project_root / ".codex")
 
-    for registry_write in plan.registry_writes:
-        _atomic_write_file(
-            registry_write.destination,
-            registry_write.content,
-            container=registry_write.container,
-        )
-
     seed_config_stub(desired.bridge_home)
 
     # Apply MCP server changes (batched TOML writes)
-    managed_mcp_servers: dict[str, str] = {}
+    managed_mcp_servers: dict[str, str] = dict(plan.managed_mcp_servers)
     if any(c.resource_kind == "mcp_server" for c in plan.changes):
         # Released global servers — this project dropped its ownership but
         # other projects still own the entry.  Treat them as "not previously
@@ -1437,18 +1434,17 @@ def _apply_changes(
             and c.path == desired.codex_home / "config.toml"
         }
         apply_previously_owned_global = previously_owned_global_mcp - released_global_mcp
-        managed_mcp_servers = _apply_mcp_server_changes(
+        _apply_mcp_server_changes(
             desired, previous_state, apply_previously_owned_global,
             user_authored_global=plan.mcp_user_authored_global,
         )
-    else:
-        # No MCP changes — carry forward previously tracked project-scope
-        # servers (critical for degraded discovery).  Do not add desired
-        # servers unconditionally: if no "create" was planned, the server
-        # is either already tracked (carried forward from state) or was
-        # skipped as user-authored.
-        if previous_state:
-            managed_mcp_servers.update(previous_state.managed_mcp_servers)
+
+    for registry_write in plan.registry_writes:
+        _atomic_write_file(
+            registry_write.destination,
+            registry_write.content,
+            container=registry_write.container,
+        )
 
     retained_previous_project_files = _retained_stale_managed_project_files(
         desired,
@@ -1733,11 +1729,23 @@ def _plan_mcp_server_mutations(
         for name in sorted(previously_owned_project - set(project_servers)):
             changes.append(Change("remove", project_config_path, resource_kind="mcp_server", label=name))
 
+    managed_mcp_servers: dict[str, str] = {}
+    if desired.mcp_discovery_degraded and previous_state:
+        managed_mcp_servers.update(previous_state.managed_mcp_servers)
+
+    for name in sorted(project_servers):
+        if name in user_authored_project:
+            continue
+        managed_mcp_servers[name] = hash_mcp_server_table(
+            project_servers[name].toml_table
+        )
+
     return _McpPlanResult(
         changes=tuple(changes),
         registry=updated_registry,
         previously_owned_global=frozenset(previously_owned_global),
         user_authored_global=frozenset(user_authored_global),
+        managed_mcp_servers=tuple(sorted(managed_mcp_servers.items())),
     )
 
 
@@ -1746,7 +1754,7 @@ def _apply_mcp_server_changes(
     previous_state: BridgeState | None,
     previously_owned_global: set[str],
     user_authored_global: frozenset[str] = frozenset(),
-) -> dict[str, str]:
+) -> None:
     """Apply MCP server changes to config.toml files.
 
     Args:
@@ -1756,19 +1764,12 @@ def _apply_mcp_server_changes(
             are not known to the registry.  The planning phase already excluded
             these from registry ownership claims, so no post-apply rollback is
             needed.
-
-    Returns:
-        managed_mcp_servers: dict mapping project-scope server names to their
-            content hashes, for the new project state.
     """
     from cc_codex_bridge.toml_config import (
         apply_mcp_changes,
-        hash_mcp_server_table,
         read_codex_config,
         write_codex_config,
     )
-
-    managed_mcp_servers: dict[str, str] = {}
 
     global_servers, project_servers = _partition_mcp_servers_by_scope(desired.mcp_servers)
 
@@ -1799,36 +1800,18 @@ def _apply_mcp_server_changes(
     if previous_state is not None:
         previously_owned_project = set(previous_state.managed_mcp_servers)
 
-    project_changes_summary: dict[str, list[str]] = {"added": [], "updated": [], "removed": []}
     if project_servers or previously_owned_project:
         project_config_path = desired.project_root / ".codex" / "config.toml"
         _assert_path_contained(
             project_config_path, desired.project_root, label="Project MCP config"
         )
         doc = read_codex_config(project_config_path)
-        project_changes_summary = apply_mcp_changes(
+        apply_mcp_changes(
             doc,
             desired={name: s.toml_table for name, s in project_servers.items()},
             owned=previously_owned_project,
         )
         write_codex_config(project_config_path, doc)
-
-    # Build managed_mcp_servers for state — only track entries the bridge controls.
-    # Include: previously owned entries still desired (retained) + newly added entries.
-    # Exclude: desired entries that already existed as user-authored (skipped by apply).
-    #
-    # When discovery is degraded, some previously-owned servers may not appear
-    # in project_servers (they weren't discovered).  Carry forward their hashes
-    # from previous state so ownership tracking is preserved — otherwise the
-    # next healthy run would classify those config.toml entries as user-authored.
-    if desired.mcp_discovery_degraded and previous_state:
-        managed_mcp_servers.update(previous_state.managed_mcp_servers)
-
-    bridge_controlled = previously_owned_project | set(project_changes_summary["added"])
-    for name in sorted(bridge_controlled & set(project_servers)):
-        managed_mcp_servers[name] = hash_mcp_server_table(project_servers[name].toml_table)
-
-    return managed_mcp_servers
 
 
 def _clean_mcp_config_entries(
@@ -1915,6 +1898,7 @@ def _plan_mutations(
         project_file_changes=project_changes,
         mcp_previously_owned_global=mcp_result.previously_owned_global,
         mcp_user_authored_global=mcp_result.user_authored_global,
+        managed_mcp_servers=mcp_result.managed_mcp_servers,
     )
 
 
@@ -2809,6 +2793,8 @@ def _state_write_needed(
     previously_managed: frozenset[str] = frozenset(),
     previous_managed_files: "dict[str, str] | None" = None,
     project_file_changes: tuple[Change, ...] = (),
+    *,
+    managed_mcp_servers: "dict[str, str] | None" = None,
 ) -> bool:
     """Return True when the project-local state file must be updated."""
     retained_previous_project_files = _retained_stale_managed_project_files(
@@ -2821,6 +2807,7 @@ def _state_write_needed(
         previously_managed,
         previous_managed_files,
         retained_previous_project_files=retained_previous_project_files,
+        managed_mcp_servers=managed_mcp_servers,
     ).to_json().encode()
     return not desired.state_path.exists() or desired.state_path.read_bytes() != state_bytes
 

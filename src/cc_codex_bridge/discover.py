@@ -184,6 +184,9 @@ def discover_latest_plugins(
 
     for marketplace_dir in sorted(_iter_dirs(root)):
         for plugin_dir in sorted(_iter_dirs(marketplace_dir)):
+            plugin_id = f"{marketplace_dir.name}/{plugin_dir.name}"
+            if enabled_ids is not None and plugin_id not in enabled_ids:
+                continue
             versions = list(_collect_plugin_versions(marketplace_dir.name, plugin_dir))
             if not versions:
                 raise DiscoveryError(

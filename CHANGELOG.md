@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Disabled malformed plugin cache entries no longer block discovery when
+  `claude plugins list --json` reports them as disabled; the enabled-plugin
+  filter now runs before semantic-version validation for cache directories.
+- Project-scoped MCP reconciles no longer report a perpetual state-file update
+  after the first successful run; status comparison now uses the same planned
+  MCP hashes that reconcile writes to state.
+- Global MCP registry hash and ownership updates now commit only after the
+  corresponding `~/.codex/config.toml` write succeeds, preventing registry
+  state from getting ahead of failed MCP config updates or removals.
+
 ## [1.5.0] - 2026-04-23
 
 ### Added
