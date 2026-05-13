@@ -36,7 +36,7 @@ def _format_skill_validation_diagnostic(diagnostic: SkillValidationDiagnostic) -
     return f"  skill '{diagnostic.skill_name}' ({diagnostic.source_path}): bridged with warnings — {warnings_text}"
 
 
-SIBLING_SKILL_REF_RE = re.compile(r"(?<!\.)\.\./(?P<skill>[A-Za-z0-9._-]+)/")
+SIBLING_SKILL_REF_RE = re.compile(r"(?<![./])\.\./(?P<skill>[A-Za-z0-9_-][A-Za-z0-9._-]*)/")
 _FENCED_CODE_BLOCK_RE = re.compile(r"^```[^\n]*\n.*?^```", re.MULTILINE | re.DOTALL)
 IGNORED_NAMES = {".DS_Store", "__pycache__"}
 IGNORED_SKILL_DIRS = {".git", "node_modules", "__pycache__", ".venv", ".tox"}
