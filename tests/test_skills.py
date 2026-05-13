@@ -734,6 +734,43 @@ def test_sibling_reference_regex_ignores_code_blocks(
     assert b"../mailpoet/" in skill_md.content
 
 
+def test_sibling_reference_regex_ignores_parent_traversal(
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """``../../foo/`` paths must not extract ``..`` as a sibling skill name.
+
+    Real-world case: ``claude-session-driver`` SKILL.md documents that scripts
+    live at ``../../scripts/`` relative to the skill base directory.  The
+    sibling-reference regex's character class allows dots, so a naive match on
+    ``../../scripts/`` captures ``..`` as the skill name, then the bridge
+    resolves two levels up from the skill directory and tries to vendor the
+    entire plugin (including ``.claude-plugin/marketplace.json``) into the
+    generated skill, producing relative paths with leading ``..`` segments
+    that fail the registry's path-traversal guard.
+    """
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "session-tools",
+        "1.0.0",
+        skill_names=("driving-sessions",),
+    )
+    skill_dir = version_dir / "skills" / "driving-sessions"
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: driving-sessions\n"
+        "description: Drive sessions\n"
+        "---\n\n"
+        "All scripts live at `../../scripts/` relative to this skill's base directory.\n"
+    )
+
+    skills = translate_installed_skills(discover_latest_plugins(cache_root)).skills
+
+    assert len(skills) == 1
+    file_paths = [f.relative_path.as_posix() for f in skills[0].files]
+    assert not any(p.startswith("..") for p in file_paths), file_paths
+
+
 def test_translate_standalone_skill_empty_input():
     """Empty skill paths produce empty result."""
     result = translate_standalone_skills((), scope="user")

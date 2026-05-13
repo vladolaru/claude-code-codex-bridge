@@ -17,6 +17,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   final target path across ``bin/*``, ``pyvenv.cfg``, and ``activate``
   scripts, and a post-relocation ``--help`` smoke test guards against
   regressions.
+- Skill content that documents paths like ``../../scripts/`` no longer
+  derails reconcile.  The sibling-reference regex previously captured
+  ``..`` as a skill name on greedy match, causing the bridge to vendor
+  the entire plugin two levels up (including ``.claude-plugin/marketplace.json``)
+  into the generated skill and tripping the registry's path-traversal guard.
+  The regex now rejects deeper-path traversal (``/../``) and names that
+  start with a dot.
 
 ## [1.5.1] - 2026-04-29
 
