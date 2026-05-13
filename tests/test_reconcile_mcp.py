@@ -124,6 +124,135 @@ class TestGlobalMcpReconcile:
         assert "[mcp_servers.wpcom]" in content
         assert "context7" not in content, f"context7 still in config after removal. MCP changes: {[(c.kind, c.resource_kind) for c in mcp2]}"
 
+    def test_release_emitted_when_shared_mcp_has_other_owners(
+        self, tmp_path, make_project,
+    ):
+        """Dropping one owner of a shared MCP emits a release Change, not remove.
+
+        The file in ~/.codex/config.toml stays because another project
+        still owns the entry; the release Change surfaces the
+        ownership-drop in the report so status doesn't look like a no-op.
+        """
+        first_project, _ = make_project("project-a")
+        second_project, _ = make_project("project-b")
+        codex_home = tmp_path / "codex"
+        bridge_home = tmp_path / "bridge"
+
+        servers = (
+            GeneratedMcpServer(
+                name="wpcom",
+                scope="global",
+                toml_table={"command": "/bin/bash", "args": ["-c", "npx wpcom"]},
+                source_description="user-global",
+            ),
+        )
+
+        # Both projects own the same MCP.
+        _build_and_reconcile(first_project, servers, codex_home, bridge_home)
+        _build_and_reconcile(second_project, servers, codex_home, bridge_home)
+
+        # First project drops the MCP from its desired state (e.g. via
+        # exclusion).
+        report = _build_and_reconcile(first_project, (), codex_home, bridge_home)
+
+        release_changes = [
+            c for c in report.changes
+            if c.kind == "release" and c.resource_kind == "mcp_server"
+        ]
+        assert len(release_changes) == 1, (
+            f"expected one release Change, got: "
+            f"{[(c.kind, c.resource_kind, c.label) for c in report.changes]}"
+        )
+        assert release_changes[0].label == "wpcom"
+
+        # No remove for wpcom — second_project still owns it.
+        assert all(
+            not (c.kind == "remove" and c.resource_kind == "mcp_server" and c.label == "wpcom")
+            for c in report.changes
+        )
+
+        # The entry stays in the global config.toml.
+        config_path = codex_home / "config.toml"
+        assert "[mcp_servers.wpcom]" in config_path.read_text()
+
+    def test_registry_stays_unchanged_when_global_config_update_write_fails(
+        self, tmp_path, make_project, monkeypatch,
+    ):
+        """Registry hashes must not advance before the global config write succeeds."""
+        project, _ = make_project()
+        codex_home = tmp_path / "codex"
+        bridge_home = tmp_path / "bridge"
+
+        initial = (
+            GeneratedMcpServer(
+                name="wpcom",
+                scope="global",
+                toml_table={"command": "wpcom-server", "args": ["--version=1"]},
+                source_description="user-global",
+            ),
+        )
+        updated = (
+            GeneratedMcpServer(
+                name="wpcom",
+                scope="global",
+                toml_table={"command": "wpcom-server", "args": ["--version=2"]},
+                source_description="user-global",
+            ),
+        )
+
+        _build_and_reconcile(project, initial, codex_home, bridge_home)
+        registry_path = bridge_home / "registry.json"
+        original_registry = registry_path.read_text()
+
+        def fail_config_write(path, doc):
+            raise OSError("simulated config.toml write failure")
+
+        monkeypatch.setattr(
+            "cc_codex_bridge.toml_config.write_codex_config",
+            fail_config_write,
+        )
+
+        with pytest.raises(OSError, match="simulated config.toml write failure"):
+            _build_and_reconcile(project, updated, codex_home, bridge_home)
+
+        assert registry_path.read_text() == original_registry
+        assert "--version=1" in (codex_home / "config.toml").read_text()
+
+    def test_registry_stays_unchanged_when_global_config_removal_write_fails(
+        self, tmp_path, make_project, monkeypatch,
+    ):
+        """Registry ownership must not be released before removal from config.toml succeeds."""
+        project, _ = make_project()
+        codex_home = tmp_path / "codex"
+        bridge_home = tmp_path / "bridge"
+
+        servers = (
+            GeneratedMcpServer(
+                name="wpcom",
+                scope="global",
+                toml_table={"command": "wpcom-server"},
+                source_description="user-global",
+            ),
+        )
+
+        _build_and_reconcile(project, servers, codex_home, bridge_home)
+        registry_path = bridge_home / "registry.json"
+        original_registry = registry_path.read_text()
+
+        def fail_config_write(path, doc):
+            raise OSError("simulated config.toml write failure")
+
+        monkeypatch.setattr(
+            "cc_codex_bridge.toml_config.write_codex_config",
+            fail_config_write,
+        )
+
+        with pytest.raises(OSError, match="simulated config.toml write failure"):
+            _build_and_reconcile(project, (), codex_home, bridge_home)
+
+        assert registry_path.read_text() == original_registry
+        assert "wpcom" in (codex_home / "config.toml").read_text()
+
 
 class TestProjectMcpReconcile:
     """Tests for project-scope MCP server reconciliation."""
@@ -150,6 +279,28 @@ class TestProjectMcpReconcile:
         content = project_config.read_text()
         assert "[mcp_servers.figma]" in content
         assert "mcp.figma.com" in content
+
+    def test_project_server_reconcile_is_idempotent_after_state_tracks_hash(
+        self, tmp_path, make_project,
+    ):
+        """State comparison must include project MCP hashes written during apply."""
+        project, _ = make_project()
+        codex_home = tmp_path / "codex"
+        bridge_home = tmp_path / "bridge"
+
+        servers = (
+            GeneratedMcpServer(
+                name="figma",
+                scope="project",
+                toml_table={"url": "https://mcp.figma.com/mcp"},
+                source_description="project-local",
+            ),
+        )
+
+        _build_and_reconcile(project, servers, codex_home, bridge_home)
+        report = _build_and_reconcile(project, servers, codex_home, bridge_home)
+
+        assert report.changes == ()
 
     def test_mixed_scopes_separate_files(self, tmp_path, make_project):
         project, _ = make_project()

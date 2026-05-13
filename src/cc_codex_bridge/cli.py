@@ -1442,6 +1442,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
         handle_exclude_add,
         handle_exclude_list,
         handle_exclude_remove,
+        is_user_global_entity,
         list_discoverable_entities,
     )
     from cc_codex_bridge.config_scope import resolve_config_scope
@@ -1566,6 +1567,19 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
             print(
                 "Note: plugin exclusions do not cover MCP servers. "
                 "Use `config exclude add mcp_server <name>` to exclude related MCP servers."
+            )
+        if result.success and is_user_global_entity(kind, entity_id, discovery):
+            if scope.target == "project":
+                print(
+                    f"Note: this {kind} is user-global (shared across projects). "
+                    "Project-scope exclusion only drops this project's ownership — "
+                    "the entry stays in Codex until every owning project also "
+                    "excludes it. Rerun with `--global` to exclude across all projects."
+                )
+            print(
+                "Run `cc-codex-bridge reconcile --all` to apply this exclusion to "
+                "Codex (the shared entry is only removed once the last owning "
+                "project drops it)."
             )
         if result.success and scope.target == "global":
             _remove_redundant_project_exclusions(kind, entity_id)
@@ -2166,6 +2180,16 @@ def _print_summary(
     return "\n".join(lines)
 
 
+STATUS_CHANGE_KINDS: tuple[str, ...] = ("create", "update", "remove", "release")
+"""Change kinds surfaced in status/reconcile output.
+
+``release`` was introduced alongside the planner-level ownership drop
+visibility (a project stops contributing to a shared global artifact but
+the file stays in place for remaining owners).  Earlier versions only
+covered ``create``/``update``/``remove``.
+"""
+
+
 def _build_status_payload(
     report,
     exclusion_report: ExclusionReport,
@@ -2181,22 +2205,18 @@ def _build_status_payload(
 ) -> dict[str, object]:
     """Build a stable status payload from reconcile diff output."""
     drifted = sorted(drifted_files or [])
-    categorized_changes: dict[str, dict[str, list[str]]] = {
-        "project_files": {"create": [], "update": [], "remove": []},
-        "skills": {"create": [], "update": [], "remove": []},
-        "agents": {"create": [], "update": [], "remove": []},
-        "prompts": {"create": [], "update": [], "remove": []},
-        "mcp_servers": {"create": [], "update": [], "remove": []},
-        "global": {"create": [], "update": [], "remove": []},
-    }
-    display_changes: dict[str, dict[str, list[str]]] = {
-        "project_files": {"create": [], "update": [], "remove": []},
-        "skills": {"create": [], "update": [], "remove": []},
-        "agents": {"create": [], "update": [], "remove": []},
-        "prompts": {"create": [], "update": [], "remove": []},
-        "mcp_servers": {"create": [], "update": [], "remove": []},
-        "global": {"create": [], "update": [], "remove": []},
-    }
+    _status_categories = (
+        "project_files", "skills", "agents", "prompts", "mcp_servers", "global",
+    )
+
+    def _fresh_category_dict() -> dict[str, dict[str, list[str]]]:
+        return {
+            category: {kind: [] for kind in STATUS_CHANGE_KINDS}
+            for category in _status_categories
+        }
+
+    categorized_changes: dict[str, dict[str, list[str]]] = _fresh_category_dict()
+    display_changes: dict[str, dict[str, list[str]]] = _fresh_category_dict()
     pending_change_count = 0
     status = "invalid" if diagnostics else "in_sync"
 
@@ -2364,15 +2384,17 @@ def format_status_report(
         n_create = len(cat["create"])
         n_update = len(cat["update"])
         n_remove = len(cat["remove"])
+        n_release = len(cat["release"])
         create_s = c["create"](f"create = {n_create}") if n_create else f"create = {n_create}"
         update_s = c["update"](f"update = {n_update}") if n_update else f"update = {n_update}"
         remove_s = c["remove"](f"remove = {n_remove}") if n_remove else f"remove = {n_remove}"
-        return f"{create_s} {update_s} {remove_s}"
+        release_s = c["warn"](f"release = {n_release}") if n_release else f"release = {n_release}"
+        return f"{create_s} {update_s} {remove_s} {release_s}"
 
     def _detail_lines(cat: dict) -> list[str]:
-        """Return indented +/~/- lines for all changes in a category."""
+        """Return indented +/~/-/! lines for all changes in a category."""
         result = []
-        for kind in ("create", "update", "remove"):
+        for kind in STATUS_CHANGE_KINDS:
             for path in cat[kind]:
                 result.append(render_change_line(kind, path, c=c))
         return result

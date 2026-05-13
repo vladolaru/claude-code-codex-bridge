@@ -187,6 +187,44 @@ else
     rm -rf "${TARGET_DIR}"
   fi
   mv "${STAGE_DIR}" "${TARGET_DIR}"
+
+  # pip's wheel installer bakes the staging venv path into entry-point
+  # shebangs (e.g. ${STAGE_DIR}/bin/python).  After the mv above, those
+  # shebangs reference a path that no longer exists, leaving the
+  # ``cc-codex-bridge`` command with a bad interpreter.  Rewrite the
+  # staging path to the final target path across the venv files that
+  # embed it: bin/* shebangs, pyvenv.cfg, and activate scripts.
+  "${TARGET_DIR}/bin/python" - "${STAGE_DIR}" "${TARGET_DIR}" <<'PY'
+import sys
+from pathlib import Path
+
+stage = sys.argv[1]
+target = sys.argv[2]
+stage_b = stage.encode()
+target_b = target.encode()
+target_dir = Path(target)
+
+bin_dir = target_dir / "bin"
+if bin_dir.is_dir():
+    for entry in bin_dir.iterdir():
+        if entry.is_symlink() or not entry.is_file():
+            continue
+        try:
+            data = entry.read_bytes()
+        except OSError:
+            continue
+        if stage_b in data:
+            entry.write_bytes(data.replace(stage_b, target_b))
+
+cfg = target_dir / "pyvenv.cfg"
+if cfg.is_file():
+    text = cfg.read_text()
+    if stage in text:
+        cfg.write_text(text.replace(stage, target))
+PY
+
+  "${TARGET_DIR}/bin/${PACKAGE_NAME}" --help >/dev/null \
+    || fail "Post-relocation smoke test failed for ${TARGET_DIR}/bin/${PACKAGE_NAME}"
 fi
 
 ln -sfn "${TARGET_DIR}" "${CURRENT_LINK}"

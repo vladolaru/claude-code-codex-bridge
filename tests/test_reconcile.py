@@ -263,8 +263,19 @@ def test_reconcile_keeps_shared_skill_when_one_project_drops_claim(
 
     report = reconcile_desired_state(_build_desired(first_project, cache_root, codex_home))
 
+    # A release Change surfaces the ownership drop, but no remove — the
+    # file stays for project-b.
+    release_changes = [
+        c for c in report.changes
+        if c.kind == "release" and c.path == installed_skill
+    ]
+    assert len(release_changes) == 1
+    assert release_changes[0].resource_kind == "skill"
+    assert all(
+        not (c.kind == "remove" and c.path == installed_skill)
+        for c in report.changes
+    )
     assert installed_skill.exists()
-    assert all(change.path != installed_skill for change in report.changes)
     bridge_home = tmp_path / "home" / ".cc-codex-bridge"
     assert _read_global_registry(bridge_home)["skills"]["prompt-engineer"]["owners"] == [
         str(second_project)
@@ -368,6 +379,49 @@ def test_reconcile_rejects_skill_conflict_from_non_owner(
     )
     with pytest.raises(ReconcileError, match="Generated skill registry conflict"):
         reconcile_desired_state(_build_desired(second_project, cache_root, codex_home))
+
+
+def test_reconcile_emits_release_when_shared_agent_owner_drops(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Dropping one shared agent owner emits a release Change, not remove."""
+    first_project, _ = make_project("project-a")
+    second_project, _ = make_project("project-b")
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "pirategoat-tools",
+        "1.0.0",
+        agent_names=("reviewer",),
+    )
+    (version_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: Review\n---\n\nBody.\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    installed_agent = codex_home / "agents" / "reviewer.toml"
+
+    reconcile_desired_state(_build_desired(first_project, cache_root, codex_home))
+    reconcile_desired_state(_build_desired(second_project, cache_root, codex_home))
+    assert installed_agent.exists()
+
+    # New plugin version drops the agent.
+    _, later_version_dir = make_plugin_version("market", "pirategoat-tools", "1.0.1")
+    assert not (later_version_dir / "agents").exists()
+
+    report = reconcile_desired_state(_build_desired(first_project, cache_root, codex_home))
+
+    release_changes = [
+        c for c in report.changes
+        if c.kind == "release" and c.path == installed_agent
+    ]
+    assert len(release_changes) == 1
+    assert release_changes[0].resource_kind == "agent"
+    assert all(
+        not (c.kind == "remove" and c.path == installed_agent)
+        for c in report.changes
+    )
+    assert installed_agent.exists()
 
 
 def test_reconcile_updates_shared_agent_when_plugin_upgrades(
@@ -3579,6 +3633,75 @@ def test_reconcile_shared_prompt_advances_on_upgrade(make_project, tmp_path: Pat
     assert (codex_home / "prompts" / "review.md").read_bytes() == shared_content_v2
 
 
+def test_reconcile_emits_release_when_shared_prompt_owner_drops(make_project, tmp_path: Path):
+    """Dropping one shared prompt owner emits a release Change, not remove."""
+    from cc_codex_bridge.model import (
+        ClaudeShimDecision,
+        DiscoveryResult,
+        GeneratedPrompt,
+        ProjectContext,
+    )
+    from cc_codex_bridge.reconcile import build_desired_state, reconcile_desired_state
+
+    project_a, _ = make_project("project-a")
+    project_b = tmp_path / "project-b"
+    project_b.mkdir()
+    (project_b / "AGENTS.md").write_text("# B\n")
+
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "bridge-home"
+
+    shared_content = b"---\ndescription: 'Review code'\n---\n\nReview.\n"
+    prompt = GeneratedPrompt(
+        filename="review.md",
+        content=shared_content,
+        source_path=project_a / ".claude" / "commands" / "review.md",
+        marketplace="market",
+        plugin_name="tools",
+    )
+    installed_prompt = codex_home / "prompts" / "review.md"
+
+    # Both projects reconcile with the same shared prompt.
+    for project_root in (project_a, project_b):
+        discovery = DiscoveryResult(
+            project=ProjectContext(root=project_root, agents_md_path=project_root / "AGENTS.md"),
+            plugins=(),
+        )
+        shim = ClaudeShimDecision(action="skip", path=project_root / "CLAUDE.md")
+        state = build_desired_state(
+            discovery, shim, (),
+            codex_home=codex_home, bridge_home=bridge_home,
+            global_prompts=(prompt,),
+        )
+        reconcile_desired_state(state)
+    assert installed_prompt.exists()
+
+    # project-a reconciles with empty prompts (dropping the shared entry).
+    discovery_a = DiscoveryResult(
+        project=ProjectContext(root=project_a, agents_md_path=project_a / "AGENTS.md"),
+        plugins=(),
+    )
+    shim_a = ClaudeShimDecision(action="skip", path=project_a / "CLAUDE.md")
+    state_a_empty = build_desired_state(
+        discovery_a, shim_a, (),
+        codex_home=codex_home, bridge_home=bridge_home,
+        global_prompts=(),
+    )
+    report = reconcile_desired_state(state_a_empty)
+
+    release_changes = [
+        c for c in report.changes
+        if c.kind == "release" and c.path == installed_prompt
+    ]
+    assert len(release_changes) == 1
+    assert release_changes[0].resource_kind == "prompt"
+    assert all(
+        not (c.kind == "remove" and c.path == installed_prompt)
+        for c in report.changes
+    )
+    assert installed_prompt.exists()
+
+
 def _reconcile_once(project_root, cache_root, codex_home):
     """Run a full discover+translate+reconcile and return the desired state."""
     from cc_codex_bridge.discover import discover
@@ -4173,6 +4296,13 @@ def test_reconcile_releases_stale_plugin_resources_preserves_shared_dirs(
     # No remove change since the dir is still needed
     remove_changes_a = [c for c in report_a2.changes if c.kind == "remove" and c.resource_kind == "plugin_resource"]
     assert len(remove_changes_a) == 0
+    # But a release change surfaces the ownership drop
+    release_changes_a = [
+        c for c in report_a2.changes
+        if c.kind == "release" and c.resource_kind == "plugin_resource"
+    ]
+    assert len(release_changes_a) == 1
+    assert release_changes_a[0].path == vendored_dir
 
     # Reconcile project B WITHOUT the plugin
     build_b2 = build_project_desired_state(
@@ -5220,3 +5350,57 @@ def test_clean_preserves_agents_md_when_claude_is_symlink_to_it(
     assert claude_path.resolve() == agents_path.resolve()
     removed_paths = {c.path for c in report.changes if c.kind == "remove"}
     assert agents_path not in removed_paths
+
+
+# ---------------------------------------------------------------------------
+# release Change kind — _apply_changes treats it as a filesystem no-op.
+# ---------------------------------------------------------------------------
+
+
+def test_apply_changes_release_kind_is_filesystem_noop(tmp_path: Path):
+    """A release Change must neither create, update, nor remove files.
+
+    The registry write queued by the planner carries the actual state
+    transition; _apply_changes only touches the filesystem for
+    create/update/remove.
+    """
+    from cc_codex_bridge.reconcile import (
+        Change,
+        DesiredState,
+        _MutationPlan,
+        _apply_changes,
+    )
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "bridge-home"
+    # Seed a target "shared" file so the release Change points at an
+    # existing path.  The no-op contract says the file must survive.
+    target_skill_dir = codex_home / "skills" / "shared-skill"
+    target_skill_dir.mkdir(parents=True)
+    seeded_file = target_skill_dir / "SKILL.md"
+    seeded_file.write_text("---\nname: shared-skill\ndescription: s\n---\n\nBody.\n")
+
+    desired = DesiredState(
+        project_root=project_root,
+        codex_home=codex_home,
+        bridge_home=bridge_home,
+        project_files=(),
+        preserved_project_files=(),
+        skills=(),
+        state_path=bridge_home / "projects" / "x" / "state.json",
+    )
+    plan = _MutationPlan(
+        changes=(
+            Change("release", target_skill_dir, resource_kind="skill", label="shared-skill"),
+        ),
+        registry_writes=(),
+    )
+
+    _apply_changes(desired, plan, frozenset(), None, None)
+
+    # File and directory must still exist untouched.
+    assert target_skill_dir.exists()
+    assert seeded_file.exists()
+    assert seeded_file.read_text().startswith("---\nname: shared-skill\n")

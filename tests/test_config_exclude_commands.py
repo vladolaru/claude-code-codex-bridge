@@ -13,6 +13,7 @@ from cc_codex_bridge.config_exclude_commands import (
     handle_exclude_add,
     handle_exclude_list,
     handle_exclude_remove,
+    is_user_global_entity,
     list_discoverable_entities,
 )
 from cc_codex_bridge.config_writer import read_config_data, write_config_data
@@ -184,6 +185,79 @@ class TestListDiscoverableEntities:
         )
         entities = list_discoverable_entities(discovery)
         assert entities["mcp_server"] == ["my-server", "project-server"]
+
+
+# ---------------------------------------------------------------------------
+# is_user_global_entity
+# ---------------------------------------------------------------------------
+
+
+class TestIsUserGlobalEntity:
+    """Tests for is_user_global_entity helper."""
+
+    def test_plugin_is_always_user_global(self, tmp_path: Path) -> None:
+        discovery = _make_discovery(tmp_path)
+        assert is_user_global_entity("plugin", "market/alpha", discovery) is True
+
+    def test_mcp_server_global_scope_is_user_global(self, tmp_path: Path) -> None:
+        discovery = _make_discovery(
+            tmp_path,
+            mcp_servers=(
+                DiscoveredMcpServer(
+                    name="trino",
+                    scope="global",
+                    config={"command": "trino-mcp"},
+                    transport="stdio",
+                    source="~/.claude.json",
+                ),
+            ),
+        )
+        assert is_user_global_entity("mcp_server", "trino", discovery) is True
+
+    def test_mcp_server_project_scope_is_not_user_global(self, tmp_path: Path) -> None:
+        discovery = _make_discovery(
+            tmp_path,
+            mcp_servers=(
+                DiscoveredMcpServer(
+                    name="local",
+                    scope="project",
+                    config={"command": "local-mcp"},
+                    transport="stdio",
+                    source=".mcp.json",
+                ),
+            ),
+        )
+        assert is_user_global_entity("mcp_server", "local", discovery) is False
+
+    def test_mcp_server_unknown_name_is_not_user_global(self, tmp_path: Path) -> None:
+        discovery = _make_discovery(tmp_path)
+        assert is_user_global_entity("mcp_server", "missing", discovery) is False
+
+    def test_three_part_skill_id_is_user_global(self, tmp_path: Path) -> None:
+        discovery = _make_discovery(tmp_path)
+        assert (
+            is_user_global_entity("skill", "market/alpha/code-review", discovery)
+            is True
+        )
+
+    def test_user_scoped_skill_id_is_user_global(self, tmp_path: Path) -> None:
+        discovery = _make_discovery(tmp_path)
+        assert is_user_global_entity("skill", "user/custom-skill", discovery) is True
+
+    def test_project_scoped_skill_id_is_not_user_global(self, tmp_path: Path) -> None:
+        discovery = _make_discovery(tmp_path)
+        assert (
+            is_user_global_entity("skill", "project/custom-skill", discovery) is False
+        )
+
+    def test_one_part_skill_id_is_conservative(self, tmp_path: Path) -> None:
+        """Bare 1-part IDs are ambiguous; helper stays quiet rather than guessing."""
+        discovery = _make_discovery(tmp_path)
+        assert is_user_global_entity("skill", "code-review", discovery) is False
+
+    def test_unknown_kind_returns_false(self, tmp_path: Path) -> None:
+        discovery = _make_discovery(tmp_path)
+        assert is_user_global_entity("nope", "whatever", discovery) is False
 
 
 # ---------------------------------------------------------------------------

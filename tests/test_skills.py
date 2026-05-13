@@ -734,6 +734,43 @@ def test_sibling_reference_regex_ignores_code_blocks(
     assert b"../mailpoet/" in skill_md.content
 
 
+def test_sibling_reference_regex_ignores_parent_traversal(
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """``../../foo/`` paths must not extract ``..`` as a sibling skill name.
+
+    Real-world case: ``claude-session-driver`` SKILL.md documents that scripts
+    live at ``../../scripts/`` relative to the skill base directory.  The
+    sibling-reference regex's character class allows dots, so a naive match on
+    ``../../scripts/`` captures ``..`` as the skill name, then the bridge
+    resolves two levels up from the skill directory and tries to vendor the
+    entire plugin (including ``.claude-plugin/marketplace.json``) into the
+    generated skill, producing relative paths with leading ``..`` segments
+    that fail the registry's path-traversal guard.
+    """
+    cache_root, version_dir = make_plugin_version(
+        "market",
+        "session-tools",
+        "1.0.0",
+        skill_names=("driving-sessions",),
+    )
+    skill_dir = version_dir / "skills" / "driving-sessions"
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: driving-sessions\n"
+        "description: Drive sessions\n"
+        "---\n\n"
+        "All scripts live at `../../scripts/` relative to this skill's base directory.\n"
+    )
+
+    skills = translate_installed_skills(discover_latest_plugins(cache_root)).skills
+
+    assert len(skills) == 1
+    file_paths = [f.relative_path.as_posix() for f in skills[0].files]
+    assert not any(p.startswith("..") for p in file_paths), file_paths
+
+
 def test_translate_standalone_skill_empty_input():
     """Empty skill paths produce empty result."""
     result = translate_standalone_skills((), scope="user")
@@ -1012,6 +1049,148 @@ def test_skill_plugin_root_transitive_vendoring(make_plugin_version, tmp_path: P
     # Verify the config file is in the vendored resources
     config_resource = next(r for r in result.plugin_resources if r.target_dir_name == "config")
     assert any(f.relative_path == Path("defaults.json") for f in config_resource.files)
+
+
+def test_skill_dir_variable_uses_placeholder(make_plugin_version, tmp_path: Path):
+    """${CLAUDE_SKILL_DIR} references produce a placeholder, not source-absolute paths."""
+    from cc_codex_bridge.translate_skills import SKILL_DIR_PLACEHOLDER
+
+    cache_root, version_dir = make_plugin_version(
+        "market", "arch-plugin", "1.0.0",
+        skill_names=("software-architecture",),
+    )
+    skill_dir = version_dir / "skills" / "software-architecture"
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: software-architecture\n"
+        "description: Architecture patterns\n"
+        "---\n\n"
+        "Read `${CLAUDE_SKILL_DIR}/patterns/behavioral/strategy.md` for details.\n"
+    )
+    patterns_dir = skill_dir / "patterns" / "behavioral"
+    patterns_dir.mkdir(parents=True)
+    (patterns_dir / "strategy.md").write_text("Strategy pattern.\n")
+
+    skills = translate_installed_skills(discover_latest_plugins(cache_root)).skills
+    assert len(skills) == 1
+    skill_md = next(f for f in skills[0].files if f.relative_path == Path("SKILL.md"))
+    content = skill_md.content.decode()
+
+    # Must contain placeholder, not source path
+    assert SKILL_DIR_PLACEHOLDER in content
+    assert str(version_dir) not in content
+    assert f"{SKILL_DIR_PLACEHOLDER}/patterns/behavioral/strategy.md" in content
+
+
+def test_resolve_skill_dir_placeholders(tmp_path: Path):
+    """Placeholder resolution replaces __BRIDGE_SKILL_DIR__ with actual install path."""
+    from cc_codex_bridge.translate_skills import (
+        SKILL_DIR_PLACEHOLDER,
+        resolve_skill_dir_placeholders,
+    )
+
+    content_with_placeholder = (
+        f"Read `{SKILL_DIR_PLACEHOLDER}/patterns/strategy.md` for details.\n"
+    ).encode()
+
+    skill = GeneratedSkill(
+        marketplace="market",
+        plugin_name="arch-plugin",
+        source_path=Path("/tmp/source"),
+        install_dir_name="software-architecture",
+        original_skill_name="software-architecture",
+        codex_skill_name="software-architecture",
+        files=(
+            GeneratedSkillFile(
+                relative_path=Path("SKILL.md"),
+                content=content_with_placeholder,
+                mode=0o644,
+            ),
+        ),
+    )
+
+    install_base = tmp_path / ".codex" / "skills"
+    resolved = resolve_skill_dir_placeholders((skill,), install_base)
+
+    assert len(resolved) == 1
+    skill_md = resolved[0].files[0]
+    content = skill_md.content.decode()
+    expected_path = str(install_base / "software-architecture")
+    assert f"{expected_path}/patterns/strategy.md" in content
+    assert SKILL_DIR_PLACEHOLDER not in content
+
+
+def test_resolve_skill_dir_placeholders_noop_without_placeholder(tmp_path: Path):
+    """Skills without placeholders pass through unchanged."""
+    from cc_codex_bridge.translate_skills import resolve_skill_dir_placeholders
+
+    original_content = b"No placeholders here.\n"
+    skill = GeneratedSkill(
+        marketplace="market",
+        plugin_name="tools",
+        source_path=Path("/tmp/source"),
+        install_dir_name="my-tool",
+        original_skill_name="my-tool",
+        codex_skill_name="my-tool",
+        files=(
+            GeneratedSkillFile(
+                relative_path=Path("SKILL.md"),
+                content=original_content,
+                mode=0o644,
+            ),
+        ),
+    )
+
+    resolved = resolve_skill_dir_placeholders((skill,), tmp_path / "skills")
+    assert resolved[0].files[0].content is original_content  # identity — no copy
+
+
+def test_skill_dir_variable_resolves_to_codex_install_path(
+    make_plugin_version, tmp_path: Path,
+):
+    """End-to-end: ${CLAUDE_SKILL_DIR} in source resolves to codex install path."""
+    cache_root, version_dir = make_plugin_version(
+        "market", "arch-plugin", "1.0.0",
+        skill_names=("software-architecture",),
+    )
+    skill_dir = version_dir / "skills" / "software-architecture"
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: software-architecture\n"
+        "description: Architecture patterns\n"
+        "---\n\n"
+        "Read `${CLAUDE_SKILL_DIR}/patterns/behavioral/strategy.md` for details.\n"
+        "Bare ref: `${CLAUDE_SKILL_DIR}`\n"
+    )
+    patterns_dir = skill_dir / "patterns" / "behavioral"
+    patterns_dir.mkdir(parents=True)
+    (patterns_dir / "strategy.md").write_text("Strategy pattern.\n")
+
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+
+    from cc_codex_bridge.translate_skills import (
+        assign_skill_names,
+        resolve_skill_dir_placeholders,
+        translate_installed_skills,
+        SKILL_DIR_PLACEHOLDER,
+    )
+    from cc_codex_bridge.discover import discover_latest_plugins
+
+    skills = assign_skill_names(
+        translate_installed_skills(discover_latest_plugins(cache_root)).skills
+    )
+    resolved = resolve_skill_dir_placeholders(skills, codex_home / "skills")
+
+    assert len(resolved) == 1
+    skill_md = next(f for f in resolved[0].files if f.relative_path == Path("SKILL.md"))
+    content = skill_md.content.decode()
+
+    expected_base = str(codex_home / "skills" / "software-architecture")
+    assert f"{expected_base}/patterns/behavioral/strategy.md" in content
+    assert f"`{expected_base}`" in content
+    assert SKILL_DIR_PLACEHOLDER not in content
+    assert str(cache_root) not in content
 
 
 def _write_skill_directory(destination: Path, skill: GeneratedSkill) -> Path:

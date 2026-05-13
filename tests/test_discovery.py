@@ -535,6 +535,24 @@ def test_discover_latest_plugins_filters_by_enabled_ids(make_plugin_version):
     assert names == {"alpha", "gamma"}
 
 
+def test_discover_latest_plugins_ignores_disabled_malformed_cache_entries(
+    make_plugin_version, tmp_path: Path,
+):
+    """Disabled plugin cache entries are outside sync scope and cannot block discovery."""
+    cache_root, _ = make_plugin_version(
+        "market", "enabled", "1.0.0", skill_names=("skill-a",)
+    )
+    (cache_root / "market" / "old-disabled-plugin" / "latest").mkdir(parents=True)
+
+    plugins = discover_latest_plugins(
+        cache_root,
+        enabled_ids=frozenset({"market/enabled"}),
+    )
+
+    assert len(plugins) == 1
+    assert plugins[0].plugin_name == "enabled"
+
+
 def test_discover_latest_plugins_returns_all_when_no_filter(make_plugin_version):
     """Without an enabled filter, all plugins are returned (backward compat)."""
     cache_root, _ = make_plugin_version(

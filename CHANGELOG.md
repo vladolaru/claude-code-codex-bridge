@@ -12,6 +12,87 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `x86_64` Python under Rosetta, and points users to `--python
   /opt/homebrew/bin/python3` for a native arm64 install.
 
+### Fixed
+
+- Installer no longer leaves the ``cc-codex-bridge`` command with a
+  ``bad interpreter`` error after install.  pip's wheel installer bakes
+  the staging venv path into entry-point shebangs; the previous flow
+  built the venv at ``${STAGE_DIR}`` and then ``mv``-ed it to
+  ``${TARGET_DIR}``, leaving every script's shebang pointing at a path
+  that no longer existed.  The staging path is now rewritten to the
+  final target path across ``bin/*``, ``pyvenv.cfg``, and ``activate``
+  scripts, and a post-relocation ``--help`` smoke test guards against
+  regressions.
+- Skill content that documents paths like ``../../scripts/`` no longer
+  derails reconcile.  The sibling-reference regex previously captured
+  ``..`` as a skill name on greedy match, causing the bridge to vendor
+  the entire plugin two levels up (including ``.claude-plugin/marketplace.json``)
+  into the generated skill and tripping the registry's path-traversal guard.
+  The regex now rejects deeper-path traversal (``/../``) and names that
+  start with a dot.
+
+## [1.5.1] - 2026-04-29
+
+### Fixed
+
+- Disabled malformed plugin cache entries no longer block discovery when
+  `claude plugins list --json` reports them as disabled; the enabled-plugin
+  filter now runs before semantic-version validation for cache directories.
+- Project-scoped MCP reconciles no longer report a perpetual state-file update
+  after the first successful run; status comparison now uses the same planned
+  MCP hashes that reconcile writes to state.
+- Global MCP registry hash and ownership updates now commit only after the
+  corresponding `~/.codex/config.toml` write succeeds, preventing registry
+  state from getting ahead of failed MCP config updates or removals.
+
+## [1.5.0] - 2026-04-23
+
+### Added
+
+- Status and reconcile reports now render a `release` column and
+  per-item `!` lines for pending ownership drops on shared global
+  artifacts (skills, agents, prompts, vendored plugin resource dirs,
+  MCP servers). Previously these mutations were silent: `status` showed
+  `remove = 0` and `in_sync` even though the next reconcile would
+  update the global registry.
+- Activity log `summary` now carries a `released` count alongside
+  `created`, `updated`, and `removed`, so daily JSONL logs correctly
+  reflect runs that only dropped ownership on shared entries.
+
+### Changed
+
+- The five global-registry planners (`_plan_skill_mutations`,
+  `_plan_global_agent_mutations`, `_plan_prompt_mutations`,
+  `_plan_plugin_resource_mutations`, `_plan_mcp_server_mutations`) emit
+  a new `Change` with kind `"release"` when the current project drops
+  an ownership claim on a shared entry that other projects still own.
+  `_apply_changes` treats `release` as a filesystem no-op; the registry
+  write queued on the same plan carries the state transition.
+- `_apply_mcp_server_changes` now excludes released global MCP names
+  from the "previously owned by this project" set, so a project
+  releasing a shared MCP entry no longer rewrites the global
+  `~/.codex/config.toml` and briefly removes an entry that other
+  projects still rely on.
+
+## [1.4.0] - 2026-04-23
+
+### Added
+
+- `config exclude add` now surfaces scope-aware guidance when the excluded
+  entity is user-global (plugin, `marketplace/plugin/name` skill/agent/command,
+  `user/<name>` skill/agent/command, or an MCP server with global scope).
+  Project-scope exclusions print a hint that the exclusion only drops this
+  project's ownership claim and suggest rerunning with `--global` to apply
+  across all projects. Every successful user-global exclusion also prints a
+  reminder to run `cc-codex-bridge reconcile --all`, since the shared Codex
+  entry is only removed once the last owning project drops it.
+
+## [1.3.3] - 2026-04-06
+
+### Fixed
+
+- Bridged skills using `${CLAUDE_SKILL_DIR}` references now resolve to the Codex install path instead of the Claude Code plugin cache path
+
 ## [1.3.2] - 2026-04-02
 
 ### Fixed

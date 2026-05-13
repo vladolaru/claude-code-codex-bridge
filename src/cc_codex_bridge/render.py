@@ -38,10 +38,16 @@ CHANGE_SYMBOLS: dict[str, str] = {
     "create": "+",
     "update": "~",
     "remove": "-",
+    "release": "!",
 }
 """Canonical symbolic labels for CRUD-style change kinds.
 
 Extended reconcile actions deliberately fall back to their explicit kind names.
+
+``release`` represents an ownership drop on a shared global artifact: the
+current project stops contributing to the entry, but the on-disk file stays
+in place for any remaining owners. It is a no-op at the filesystem layer
+but a visible pending change in planner reports.
 """
 
 
@@ -193,7 +199,7 @@ def change_color(kind: str, c: dict) -> object:
     """Return the color function for a change kind."""
     if kind in c:
         return c[kind]
-    if kind == "restore":
+    if kind in ("restore", "release"):
         return c["warn"]
     return c["dim"]
 
