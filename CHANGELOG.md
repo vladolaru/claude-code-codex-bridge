@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Installer no longer leaves the ``cc-codex-bridge`` command with a
+  ``bad interpreter`` error after install.  pip's wheel installer bakes
+  the staging venv path into entry-point shebangs; the previous flow
+  built the venv at ``${STAGE_DIR}`` and then ``mv``-ed it to
+  ``${TARGET_DIR}``, leaving every script's shebang pointing at a path
+  that no longer existed.  The staging path is now rewritten to the
+  final target path across ``bin/*``, ``pyvenv.cfg``, and ``activate``
+  scripts, and a post-relocation ``--help`` smoke test guards against
+  regressions.
+
 ## [1.5.1] - 2026-04-29
 
 ### Fixed
