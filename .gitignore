@@ -4,6 +4,7 @@
 .vscode/
 
 .venv
+.worktrees/
 .python-version
 
 __pycache__/
