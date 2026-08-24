@@ -2630,6 +2630,41 @@ def test_uninstall_rejects_symlinked_registry(tmp_path: Path):
         uninstall_all(codex_home=tmp_path / "codex-home")
 
 
+@pytest.mark.parametrize("dry_run", (True, False))
+def test_uninstall_preserves_global_agents_md_when_sync_disabled(
+    tmp_path: Path,
+    dry_run: bool,
+):
+    """Uninstall leaves opted-out Codex global instructions unmanaged."""
+    from cc_codex_bridge.reconcile import (
+        GLOBAL_INSTRUCTIONS_SENTINEL,
+        uninstall_all,
+    )
+
+    bridge_home = tmp_path / "bridge-home"
+    bridge_home.mkdir()
+    (bridge_home / "config.toml").write_text(
+        "[sync]\nglobal_instructions = false\n"
+    )
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    agents_md = codex_home / "AGENTS.md"
+    content = "Previously managed instructions.\n" + GLOBAL_INSTRUCTIONS_SENTINEL
+    agents_md.write_text(content)
+
+    report = uninstall_all(
+        codex_home=codex_home,
+        bridge_home=bridge_home,
+        dry_run=dry_run,
+    )
+
+    assert agents_md.read_text() == content
+    assert not any(
+        change.resource_kind == "global_instructions"
+        for change in report.global_removals
+    )
+
+
 def test_clean_removes_project_from_registry_projects_list(
     make_project,
     make_plugin_version,

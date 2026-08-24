@@ -1177,10 +1177,14 @@ def uninstall_all(
     one, then removes global artifacts and LaunchAgent plists.
     """
     from cc_codex_bridge.install_launchagent import find_bridge_launchagents
+    from cc_codex_bridge.config import load_config
 
     codex_home_path = Path(codex_home or DEFAULT_CODEX_HOME).expanduser().resolve()
     bridge_home_path = Path(bridge_home or resolve_bridge_home()).expanduser().resolve()
     registry_path = bridge_home_path / GLOBAL_REGISTRY_FILENAME
+    manage_global_instructions = load_config(
+        bridge_home_path / "config.toml"
+    ).sync_global_instructions
 
     # Step 1: Discover project roots from the registry
     project_roots: set[Path] = set()
@@ -1262,7 +1266,8 @@ def uninstall_all(
     # Remove global AGENTS.md only if bridge-generated (sentinel present)
     global_agents_md = codex_home_path / "AGENTS.md"
     if (
-        global_agents_md.exists()
+        manage_global_instructions
+        and global_agents_md.exists()
         and not global_agents_md.is_symlink()
         and _has_bridge_sentinel(global_agents_md.read_bytes())
     ):
