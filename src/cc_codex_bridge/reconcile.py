@@ -1080,6 +1080,7 @@ class ReconcileAllReport:
     results: tuple[ReconcileAllProjectResult, ...]
     errors: tuple[ReconcileAllError, ...]
     scan_result: ScanResult | None = None
+    global_instructions_sync_enabled: bool = True
 
 
 def reconcile_all(
@@ -1098,10 +1099,14 @@ def reconcile_all(
     """Reconcile all registered projects."""
     from cc_codex_bridge.model import AgentTranslationDiagnostic
     from cc_codex_bridge.translate_agents import format_agent_translation_diagnostics
+    from cc_codex_bridge.config import load_config
 
     codex_home_path = Path(codex_home or DEFAULT_CODEX_HOME).expanduser().resolve()
     bridge_home_path = Path(bridge_home or resolve_bridge_home()).expanduser().resolve()
     registry_path = bridge_home_path / GLOBAL_REGISTRY_FILENAME
+    sync_global_instructions = load_config(
+        bridge_home_path / "config.toml"
+    ).sync_global_instructions
 
     snapshot = _load_registry_snapshot(registry_path)
     scan_result = scan_for_projects(bridge_home_path)
@@ -1161,7 +1166,12 @@ def reconcile_all(
         except Exception as exc:
             errors.append(ReconcileAllError(project_root=project_root, error=str(exc)))
 
-    return ReconcileAllReport(results=tuple(results), errors=tuple(errors), scan_result=scan_result)
+    return ReconcileAllReport(
+        results=tuple(results),
+        errors=tuple(errors),
+        scan_result=scan_result,
+        global_instructions_sync_enabled=sync_global_instructions,
+    )
 
 
 def uninstall_all(

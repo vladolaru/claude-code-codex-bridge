@@ -1479,6 +1479,39 @@ def test_status_all_text(
 
     captured = capsys.readouterr()
     assert "OK:" in captured.out
+    assert "GLOBAL_INSTRUCTIONS_SYNC enabled" in captured.out
+
+
+def test_status_all_reports_disabled_global_instructions_sync(
+    make_project, make_plugin_version, tmp_path: Path, capsys,
+):
+    """Bulk status exposes the effective global instruction policy in both modes."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "test-plugin", "1.0.0")
+    codex_home = tmp_path / "codex-home"
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    bridge_home.mkdir(parents=True)
+    (bridge_home / "config.toml").write_text(
+        "[sync]\nglobal_instructions = false\n"
+    )
+
+    assert cli.main([
+        "reconcile", "--project", str(project_root),
+        "--cache-dir", str(cache_root),
+        "--codex-home", str(codex_home),
+    ]) == 0
+    capsys.readouterr()
+
+    assert cli.main([
+        "status", "--all", "--codex-home", str(codex_home),
+    ]) == 0
+    assert "GLOBAL_INSTRUCTIONS_SYNC disabled" in capsys.readouterr().out
+
+    assert cli.main([
+        "status", "--all", "--json", "--codex-home", str(codex_home),
+    ]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["global_instructions_sync_enabled"] is False
 
 
 def test_reconcile_all_with_scan_config_shows_scan_info(

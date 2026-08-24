@@ -1872,7 +1872,11 @@ def _handle_all_command(args: argparse.Namespace) -> int:
 
 def _format_all_json(report) -> str:
     """Render --all report as JSON, including scan info when available."""
-    payload: dict[str, object] = {}
+    payload: dict[str, object] = {
+        "global_instructions_sync_enabled": getattr(
+            report, "global_instructions_sync_enabled", True
+        ),
+    }
 
     if report.scan_result is not None:
         payload["scan"] = {
@@ -1922,6 +1926,15 @@ def _format_all_report(report, *, dry_run: bool = False, is_status: bool = False
 
     lines: list[str] = [""]
     scan = report.scan_result
+
+    if is_status:
+        sync_state = (
+            "enabled"
+            if getattr(report, "global_instructions_sync_enabled", True)
+            else "disabled"
+        )
+        lines.append(f"{c['key']('GLOBAL_INSTRUCTIONS_SYNC')} {sync_state}")
+        lines.append("")
 
     if dry_run:
         any_pending = any(len(r.report.changes) > 0 for r in report.results)
