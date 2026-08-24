@@ -10,6 +10,7 @@ from pathlib import Path
 from cc_codex_bridge.exclusions import SyncExclusions, parse_sync_exclusions
 
 DEFAULT_LOG_RETENTION_DAYS = 90
+DEFAULT_SYNC_GLOBAL_INSTRUCTIONS = True
 
 _log = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ class BridgeConfig:
     """Validated global bridge configuration."""
 
     log_retention_days: int = DEFAULT_LOG_RETENTION_DAYS
+    sync_global_instructions: bool = DEFAULT_SYNC_GLOBAL_INSTRUCTIONS
     exclude: SyncExclusions = SyncExclusions()
 
 
@@ -41,9 +43,27 @@ def load_config(config_path: Path) -> BridgeConfig:
     if isinstance(retention, bool) or not isinstance(retention, int) or retention < 1:
         retention = DEFAULT_LOG_RETENTION_DAYS
 
+    sync_section = data.get("sync", {})
+    if not isinstance(sync_section, dict):
+        _log.warning("Global config `sync` is not a table in: %s", config_path)
+        sync_section = {}
+    sync_global_instructions = sync_section.get(
+        "global_instructions", DEFAULT_SYNC_GLOBAL_INSTRUCTIONS
+    )
+    if not isinstance(sync_global_instructions, bool):
+        _log.warning(
+            "Global config `sync.global_instructions` is not a boolean in: %s",
+            config_path,
+        )
+        sync_global_instructions = DEFAULT_SYNC_GLOBAL_INSTRUCTIONS
+
     exclusions = _parse_exclusions(data, config_path)
 
-    return BridgeConfig(log_retention_days=retention, exclude=exclusions)
+    return BridgeConfig(
+        log_retention_days=retention,
+        sync_global_instructions=sync_global_instructions,
+        exclude=exclusions,
+    )
 
 
 def _parse_exclusions(data: dict[str, object], config_path: Path) -> SyncExclusions:

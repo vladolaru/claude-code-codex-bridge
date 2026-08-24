@@ -29,6 +29,8 @@ def test_all_defaults_renders_default_and_none():
     assert "(none)" in output
     # No real entries — only "(none)" markers should appear for list sections
     assert "Log retention:" in output
+    assert "Global instructions sync:" in output
+    assert "enabled (default)" in output
     assert "Scan paths:" in output
     assert "Exclude paths:" in output
     assert "Exclude plugins:" in output
@@ -36,6 +38,37 @@ def test_all_defaults_renders_default_and_none():
     assert "Exclude agents:" in output
     assert "Exclude commands:" in output
     assert "Exclude mcp_servers:" in output
+
+
+def test_disabled_global_instructions_sync_shows_global_attribution():
+    """Explicitly disabled global instruction sync is attributed to global config."""
+    output = format_config_show(
+        global_config=BridgeConfig(sync_global_instructions=False),
+        project_exclusions=None,
+        scan_paths=(),
+        exclude_paths=(),
+        scope="global",
+    )
+
+    assert "Global instructions sync:" in output
+    assert "disabled (global)" in output
+
+
+def test_config_show_json_includes_global_instructions_sync_policy():
+    """JSON config output exposes the global instruction sync value and source."""
+    output = format_config_show_json(
+        global_config=BridgeConfig(sync_global_instructions=False),
+        project_exclusions=None,
+        scan_paths=(),
+        exclude_paths=(),
+        scope="global",
+    )
+
+    payload = json.loads(output)
+    assert payload["sync"]["global_instructions"] == {
+        "value": False,
+        "source": "global",
+    }
 
 
 def test_scan_paths_show_global_attribution():

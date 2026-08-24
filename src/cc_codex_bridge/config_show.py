@@ -9,7 +9,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from cc_codex_bridge.config import BridgeConfig, DEFAULT_LOG_RETENTION_DAYS
+from cc_codex_bridge.config import (
+    BridgeConfig,
+    DEFAULT_LOG_RETENTION_DAYS,
+    DEFAULT_SYNC_GLOBAL_INSTRUCTIONS,
+)
 from cc_codex_bridge.exclusions import SyncExclusions
 
 
@@ -43,6 +47,15 @@ def format_config_show(
     else:
         source = "global"
     lines.append(f"Log retention:    {retention} days ({source})")
+    lines.append("")
+
+    # --- Global instructions sync (always global) ---
+    sync_enabled = global_config.sync_global_instructions
+    sync_source = (
+        "default" if sync_enabled == DEFAULT_SYNC_GLOBAL_INSTRUCTIONS else "global"
+    )
+    sync_label = "enabled" if sync_enabled else "disabled"
+    lines.append(f"Global instructions sync: {sync_label} ({sync_source})")
     lines.append("")
 
     # --- Scan paths (always global) ---
@@ -116,6 +129,17 @@ def format_config_show_json(
     payload: dict[str, Any] = {
         "scope": scope,
         "log_retention_days": {"value": retention, "source": retention_source},
+        "sync": {
+            "global_instructions": {
+                "value": global_config.sync_global_instructions,
+                "source": (
+                    "default"
+                    if global_config.sync_global_instructions
+                    == DEFAULT_SYNC_GLOBAL_INSTRUCTIONS
+                    else "global"
+                ),
+            }
+        },
         "scan_paths": [
             {"value": p, "source": "global"} for p in scan_paths
         ],

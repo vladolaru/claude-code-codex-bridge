@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from cc_codex_bridge.config import BridgeConfig, load_config
 
 
@@ -57,6 +59,36 @@ def test_bridge_config_defaults():
     """BridgeConfig with no args uses all defaults."""
     cfg = BridgeConfig()
     assert cfg.log_retention_days == 90
+    assert cfg.sync_global_instructions is True
+
+
+def test_load_config_disables_global_instructions(tmp_path):
+    """Global instructions synchronization can be disabled explicitly."""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[sync]\nglobal_instructions = false\n")
+
+    cfg = load_config(config_path)
+
+    assert cfg.sync_global_instructions is False
+
+
+@pytest.mark.parametrize(
+    "content",
+    (
+        "[sync]\nglobal_instructions = true\n",
+        "[other]\nvalue = true\n",
+        '[sync]\nglobal_instructions = "false"\n',
+        "sync = false\n",
+    ),
+)
+def test_load_config_keeps_global_instructions_enabled(content, tmp_path):
+    """Absent or malformed synchronization settings retain the enabled default."""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(content)
+
+    cfg = load_config(config_path)
+
+    assert cfg.sync_global_instructions is True
 
 
 def test_load_config_malformed_toml(tmp_path):
