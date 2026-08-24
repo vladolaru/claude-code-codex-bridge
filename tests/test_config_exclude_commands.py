@@ -337,6 +337,43 @@ class TestHandleExcludeAdd:
             "market/superpowers"
         ]
 
+    def test_add_plugin_from_candidates_canonicalizes_unique_shorthand(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A unique plugin leaf persists as its canonical marketplace ID."""
+        config_path = tmp_path / "config.toml"
+
+        result = exclude_commands.handle_exclude_add_from_candidates(
+            kind="plugin",
+            entity_id="superpowers",
+            config_path=config_path,
+            candidates=("market/superpowers",),
+        )
+
+        assert result.success is True
+        assert read_config_data(config_path)["exclude"]["plugins"] == [
+            "market/superpowers"
+        ]
+
+    def test_add_plugin_from_candidates_rejects_ambiguous_shorthand(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """A shared plugin leaf requires an explicit marketplace."""
+        config_path = tmp_path / "config.toml"
+
+        result = exclude_commands.handle_exclude_add_from_candidates(
+            kind="plugin",
+            entity_id="superpowers",
+            config_path=config_path,
+            candidates=("market-a/superpowers", "market-b/superpowers"),
+        )
+
+        assert result.success is False
+        assert "ambiguous" in result.message.lower()
+        assert not config_path.exists()
+
     def test_add_plugin_not_found(self, tmp_path: Path) -> None:
         """Adding a plugin not in discovery fails with 'not found'."""
         discovery = _make_discovery(tmp_path)

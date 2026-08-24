@@ -211,8 +211,30 @@ def handle_exclude_add_from_candidates(
             message=f"Invalid kind '{kind}'; expected one of: {valid}",
         )
 
+    normalized_input = entity_id.strip()
+    if kind == "plugin" and normalized_input and "/" not in normalized_input:
+        matches = sorted(
+            candidate
+            for candidate in candidates
+            if candidate.rsplit("/", 1)[-1] == normalized_input
+        )
+        if not matches:
+            return ExcludeCommandResult(
+                success=False,
+                message=f"plugin '{entity_id}' not found in discovered entities",
+            )
+        if len(matches) > 1:
+            return ExcludeCommandResult(
+                success=False,
+                message=(
+                    f"Plugin shorthand '{entity_id}' is ambiguous; use one of: "
+                    f"{', '.join(matches)}"
+                ),
+            )
+        normalized_input = matches[0]
+
     try:
-        normalized = normalize_entity_id(entity_id, kind=kind)
+        normalized = normalize_entity_id(normalized_input, kind=kind)
     except ReconcileError as exc:
         return ExcludeCommandResult(success=False, message=str(exc))
 

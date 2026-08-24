@@ -119,6 +119,79 @@ def test_config_exclude_add_plugin_does_not_require_content_discovery(
     assert exit_code == 0
 
 
+def test_config_exclude_add_plugin_canonicalizes_unique_shorthand(
+    tmp_path,
+    monkeypatch,
+):
+    """The CLI persists the full enabled ID for a unique plugin leaf."""
+    import cc_codex_bridge.discover as discover_module
+    from cc_codex_bridge import cli
+    from cc_codex_bridge.config_writer import read_config_data
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# test\n")
+    bridge_home = tmp_path / "bridge-home"
+    monkeypatch.setattr(cli, "resolve_bridge_home", lambda: bridge_home)
+    monkeypatch.setattr(
+        discover_module,
+        "query_enabled_plugin_ids",
+        lambda root: frozenset({"market/superpowers"}),
+    )
+
+    exit_code = cli.main([
+        "config",
+        "exclude",
+        "add",
+        "--global",
+        "plugin",
+        "superpowers",
+        "--project",
+        str(project_root),
+    ])
+
+    assert exit_code == 0
+    assert read_config_data(bridge_home / "config.toml")["exclude"]["plugins"] == [
+        "market/superpowers"
+    ]
+
+
+def test_global_plugin_exclusion_ignores_malformed_project_config(
+    tmp_path,
+    monkeypatch,
+):
+    """Global plugin recovery does not depend on project exclusion validity."""
+    import cc_codex_bridge.discover as discover_module
+    from cc_codex_bridge import cli
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# test\n")
+    project_config = project_root / ".codex" / "bridge.toml"
+    project_config.parent.mkdir()
+    project_config.write_text("[exclude\ninvalid")
+    bridge_home = tmp_path / "bridge-home"
+    monkeypatch.setattr(cli, "resolve_bridge_home", lambda: bridge_home)
+    monkeypatch.setattr(
+        discover_module,
+        "query_enabled_plugin_ids",
+        lambda root: frozenset({"market/superpowers"}),
+    )
+
+    exit_code = cli.main([
+        "config",
+        "exclude",
+        "add",
+        "--global",
+        "plugin",
+        "market/superpowers",
+        "--project",
+        str(project_root),
+    ])
+
+    assert exit_code == 0
+
+
 def test_config_exclude_add_applies_existing_plugin_exclusions_before_discovery(
     tmp_path,
     monkeypatch,

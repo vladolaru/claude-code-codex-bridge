@@ -14,9 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `status` or `reconcile`; plugin exclusions now constrain discovery before
   cache-version validation while remaining visible in status reports.
 - `config exclude add` remains usable when plugin content discovery fails.
-  Plugin exclusions validate against Claude's enabled plugin IDs, existing
-  plugin exclusions constrain other entity discovery, and interactive mode
-  can fall back to plugin-only recovery choices.
+  Plugin exclusions validate exact or unique shorthand against Claude's
+  enabled plugin IDs without depending on project exclusion validity, existing
+  plugin exclusions constrain other entity discovery, and interactive mode can
+  fall back to plugin-only recovery choices.
 
 ## [1.5.2] - 2026-05-13
 

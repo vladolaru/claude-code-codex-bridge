@@ -1506,22 +1506,30 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
                 getattr(args, "project", None) or Path.cwd()
             )
             enabled_plugin_ids = query_enabled_plugin_ids(project.root)
-            global_config = load_config(bridge_home / "config.toml")
-            project_exclusions = load_project_exclusions(project.root)
-            effective_exclusions = resolve_effective_exclusions(
-                project_exclusions,
-                global_config=global_config.exclude,
-            )
         except (DiscoveryError, OSError, UnicodeError) as exc:
             print(f"Error: discovery failed: {exc}", file=sys.stderr)
             return 1
 
-        if enabled_plugin_ids is None:
+        if cli_kind == "plugin" and enabled_plugin_ids is not None:
             discovery_plugin_ids = None
         else:
-            discovery_plugin_ids = frozenset(enabled_plugin_ids) - frozenset(
-                effective_exclusions.plugins
-            )
+            try:
+                global_config = load_config(bridge_home / "config.toml")
+                project_exclusions = load_project_exclusions(project.root)
+                effective_exclusions = resolve_effective_exclusions(
+                    project_exclusions,
+                    global_config=global_config.exclude,
+                )
+            except ReconcileError as exc:
+                print(f"Error: configuration failed: {exc}", file=sys.stderr)
+                return 1
+
+            if enabled_plugin_ids is None:
+                discovery_plugin_ids = None
+            else:
+                discovery_plugin_ids = frozenset(enabled_plugin_ids) - frozenset(
+                    effective_exclusions.plugins
+                )
 
         discoverable = {kind: [] for kind in KIND_TO_KEY}
         if cli_kind != "plugin" or enabled_plugin_ids is None:
