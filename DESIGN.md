@@ -110,27 +110,27 @@ If a behavior is described differently in multiple docs:
 The runtime is a deterministic pipeline:
 
 1. resolve the target project root by searching upward for `AGENTS.md`
-2. query `claude plugins list --json` for enabled plugin IDs (using the project root as CWD for project-scoped settings)
-3. discover installed Claude plugins from `~/.claude/plugins/cache` or `--cache-dir`
-4. skip plugin cache directories outside the enabled-plugin set, then choose the highest semantic version for each enabled `<marketplace>/<plugin>`
-5. discover user-level skills, agents, and global instructions from `~/.claude/` (or `--claude-home`)
-6. discover project-level skills and agents from `.claude/`
-6b. discover MCP server definitions from `~/.claude.json` (user-global and per-project) and `.mcp.json` (project-shared)
-7. load optional `.codex/bridge.toml` exclusions and merge any CLI exclusion flags
-8. filter discovered plugins/skills/agents/MCP servers by the effective exclusion set
-9. translate plugin agents into `GeneratedAgentFile` objects
-10. translate standalone user and project agents into `GeneratedAgentFile` objects
-11. translate plugin and user skills into `GeneratedSkill` trees (global registry)
-12. translate project skills into project-local `GeneratedSkill` trees
-13. translate plugin commands into `GeneratedPrompt` objects (global prompts), with plugin resource vendoring when `bridge_home` is provided
-14. translate standalone user commands into `GeneratedPrompt` objects (global prompts)
-15. translate project commands into `GeneratedPrompt` objects (global prompts) with `--<project-dirname>` filename suffix
-16. merge all agents, render project-local agent `.toml` files to `.codex/agents/`, and collect global agents for `~/.codex/agents/`
-17. translate discovered MCP servers into `GeneratedMcpServer` objects with Codex-compatible TOML tables
-18. decide whether `CLAUDE.md` can be created or preserved as an `@AGENTS.md` shim
-19. build a full desired state for project files, Codex skill directories, global agent files, global instructions, and MCP server entries
-20. inspect/preview or reconcile that desired state with ownership and rollback protections
-21. for MCP servers: surgically edit `~/.codex/config.toml` (global) and `<project>/.codex/config.toml` (project) using `tomlkit`, preserving user-authored content
+2. load global and project exclusions, then apply any CLI exclusion replacements
+3. query `claude plugins list --json` for enabled plugin IDs (using the project root as CWD for project-scoped settings)
+4. remove effectively excluded plugin IDs from discovery scope before validating cache versions
+5. discover installed Claude plugins from `~/.claude/plugins/cache` or `--cache-dir`, then choose the highest semantic version for each remaining `<marketplace>/<plugin>`
+6. discover user-level skills, agents, and global instructions from `~/.claude/` (or `--claude-home`)
+7. discover project-level skills and agents from `.claude/`
+8. discover MCP server definitions from `~/.claude.json` (user-global and per-project) and `.mcp.json` (project-shared)
+9. filter discovered skills, agents, commands, and MCP servers by the effective exclusion set
+10. translate plugin agents into `GeneratedAgentFile` objects
+11. translate standalone user and project agents into `GeneratedAgentFile` objects
+12. translate plugin and user skills into `GeneratedSkill` trees (global registry)
+13. translate project skills into project-local `GeneratedSkill` trees
+14. translate plugin commands into `GeneratedPrompt` objects (global prompts), with plugin resource vendoring when `bridge_home` is provided
+15. translate standalone user commands into `GeneratedPrompt` objects (global prompts)
+16. translate project commands into `GeneratedPrompt` objects (global prompts) with `--<project-dirname>` filename suffix
+17. merge all agents, render project-local agent `.toml` files to `.codex/agents/`, and collect global agents for `~/.codex/agents/`
+18. translate discovered MCP servers into `GeneratedMcpServer` objects with Codex-compatible TOML tables
+19. decide whether `CLAUDE.md` can be created or preserved as an `@AGENTS.md` shim
+20. build a full desired state for project files, Codex skill directories, global agent files, global instructions, and MCP server entries
+21. inspect/preview or reconcile that desired state with ownership and rollback protections
+22. for MCP servers: surgically edit `~/.codex/config.toml` (global) and `<project>/.codex/config.toml` (project) using `tomlkit`, preserving user-authored content
 
 The reconcile pipeline is shared by `status` and `reconcile`.
 
@@ -354,7 +354,9 @@ When a source file exists but contains malformed JSON, discovery is *degraded*: 
 - `query_enabled_plugin_ids()` shells out to `claude plugins list --json` using the project root as CWD
 - the CLI output provides an authoritative enablement status that reflects the merged settings hierarchy (user → project → local)
 - the CLI's `id` format (`plugin-name@marketplace`) is converted to the bridge's internal `marketplace/plugin_name` format
+- pipeline callers resolve effective plugin exclusions before content discovery and remove matching enabled IDs from discovery scope
 - `discover_latest_plugins()` applies the enabled set before validating plugin version directories
+- excluded enabled plugins are retained in the exclusion report even though their cache contents are not instantiated as `InstalledPlugin` objects
 - uninstalled-but-cached plugins are excluded because the CLI only lists installed plugins
 - the CLI's `installPath` and `version` fields are not used — they are stale for a significant portion of enabled plugins due to auto-updates that don't refresh the install metadata
 - if the `claude` CLI is not on PATH, discovery raises a `DiscoveryError` with installation instructions
@@ -969,10 +971,10 @@ The `config` subcommand group provides CLI-native flows for viewing, validating,
 - `config show` — display effective config with source attribution (default/global/project)
 - `config check` — audit config files against current environment
 - `config scan add/remove/list` — manage scan path globs (global-only)
-- `config exclude add/remove/list` — manage sync exclusions with discovery-backed validation
+- `config exclude add/remove/list` — manage sync exclusions with enabled-ID or discovery-backed validation
 - `config log set-retention` — set log retention period (global-only)
 
-**Validation model:** every mutation validates strictly against current state. Invalid values are refused (exit 1), not written with warnings. `config exclude add` runs the discovery pipeline to verify entity existence. Discovery validation is scope-aware: global scope only validates plugin and user entities, not project entities.
+**Validation model:** every mutation validates strictly against current state. Invalid values are refused (exit 1), not written with warnings. `config exclude add plugin` validates against the enabled plugin IDs reported by Claude, so malformed cache contents cannot block the recovery command. Other entity kinds run content discovery after existing plugin exclusions have constrained discovery scope. Discovery validation is scope-aware: global scope only validates plugin and user entities, not project entities. If content discovery fails during fully interactive selection, the command falls back to plugin-only candidates from Claude's enabled ID list.
 
 **Scope feedback:** `config exclude add` and `config exclude remove` include scope attribution in their output messages — either "(global)" or "(project: path)" — so the user always knows which config file was modified.
 
