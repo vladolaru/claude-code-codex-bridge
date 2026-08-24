@@ -294,14 +294,14 @@ cc-codex-bridge config exclude list               # list current exclusions
 cc-codex-bridge config log set-retention 30       # set log retention to 30 days
 ```
 
-Global instructions sync is enabled by default. To manage `~/.codex/AGENTS.md` independently and leave it untouched by `status`, `reconcile`, and ownership validation, add this to the global config:
+Global instructions sync is enabled by default. To manage `~/.codex/AGENTS.md` independently and leave it untouched by `status`, `reconcile`, `uninstall`, and ownership validation, add this to the global config:
 
 ```toml
 [sync]
 global_instructions = false
 ```
 
-This setting is global-only. It does not change project instruction behavior: project `AGENTS.md` remains canonical and the bridge continues to manage eligible project `CLAUDE.md` shims.
+When disabled, the bridge does not read `~/.claude/CLAUDE.md` or inspect `~/.codex/AGENTS.md`. This setting is global-only. It does not change project instruction behavior: project `AGENTS.md` remains canonical and the bridge continues to manage eligible project `CLAUDE.md` shims.
 
 Omit values for interactive guided flows (requires a terminal):
 

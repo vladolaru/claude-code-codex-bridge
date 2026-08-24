@@ -114,7 +114,7 @@ The runtime is a deterministic pipeline:
 3. query `claude plugins list --json` for enabled plugin IDs (using the project root as CWD for project-scoped settings)
 4. remove effectively excluded plugin IDs from discovery scope before validating cache versions
 5. discover installed Claude plugins from `~/.claude/plugins/cache` or `--cache-dir`, then choose the highest semantic version for each remaining `<marketplace>/<plugin>`
-6. discover user-level skills, agents, and global instructions from `~/.claude/` (or `--claude-home`)
+6. discover user-level skills and agents from `~/.claude/` (or `--claude-home`), and read global instructions only when their management policy is enabled
 7. discover project-level skills and agents from `.claude/`
 8. discover MCP server definitions from `~/.claude.json` (user-global and per-project) and `.mcp.json` (project-shared)
 9. filter discovered skills, agents, commands, and MCP servers by the effective exclusion set
@@ -317,7 +317,7 @@ Discovery lives in `src/cc_codex_bridge/discover.py`.
 - user-level skills are read from `~/.claude/skills/` (or `--claude-home`)
 - each subdirectory containing `SKILL.md` is a discovered skill
 - user-level agents are read from `~/.claude/agents/` as `*.md` files
-- user-level global instructions are read from `~/.claude/CLAUDE.md` if present
+- user-level global instructions are read from `~/.claude/CLAUDE.md` if present and global instructions sync is enabled; disabled sync skips the source read entirely
 - `--claude-home` overrides the `~/.claude` base path for all user-level discovery
 
 ### Project-level discovery
@@ -759,7 +759,7 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
   - report `in_sync` vs `pending_changes`
   - report `invalid` when agent translation contains unsupported Claude tools
   - print full discovery summary: project root, AGENTS.md path, CLAUDE.md action, plugin list with per-plugin skill/agent/prompt counts, generated totals, exclusions
-  - report whether global instructions sync is enabled in text and JSON output
+  - report whether global instructions sync is enabled in text and JSON output for both single-project and `--all` runs
   - report categorized project-file vs skill create/update/remove changes
   - report drifted managed files as a separate `DRIFTED` category (drift is computed by comparing stored content hashes against on-disk content for all managed project files; missing files and symlinks are excluded, and v8-migrated managed files with empty hashes are preserved until reconcile can backfill a hash)
   - include agent translation diagnostics in both text and JSON output when invalid
@@ -780,7 +780,7 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
 - `uninstall`
   - discover all projects from the global registry projects list (with fallback to skill owners for backwards compatibility)
   - clean each accessible project (skip and report inaccessible ones)
-  - remove remaining global skills, agents, registry, and AGENTS.md
+  - remove remaining global skills, agents, and registry; remove global AGENTS.md only when global instruction management is enabled and the ownership sentinel is present
   - remove bridge LaunchAgent plists
   - exit code 0 if all accessible projects cleaned successfully, 1 if any accessible project had a cleanup error (vanished project directories are not treated as errors)
   - support `--dry-run` for preview
