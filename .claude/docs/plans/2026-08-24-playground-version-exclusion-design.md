@@ -1,9 +1,11 @@
-Last updated: 2026-08-24 15:09
+Last updated: 2026-08-24 15:13
 
 > **Prompt:** "The current system cc-codex-bridge is failing at status. I am trying to add the superpowers plugin to the ignore list but I can't do it"
 > **Prompt:** "There is a bug relates to the playground plugin and some issue about version"
 > **Prompt:** "The cc-codex-bridge CLI should not fail in such manner."
 > **Prompt:** "confirm."
+> **Prompt:** "just do it"
+> **Prompt:** "Then release a patch version"
 
 # Exclusion-aware plugin discovery design
 
@@ -39,4 +41,4 @@ Tests will prove that an excluded enabled plugin with only an `unknown/` cache d
 
 ## Documentation and release metadata
 
-`DESIGN.md` will describe exclusion-aware discovery ordering and the plugin exclusion recovery path. `CHANGELOG.md` will record the user-visible fix under `Unreleased`. Semver classifies this as a patch-level fix; package version declarations will remain unchanged unless this work is used to prepare a release.
+`DESIGN.md` will describe exclusion-aware discovery ordering and the plugin exclusion recovery path. `CHANGELOG.md` will record the user-visible fix in a dated `1.5.3` section. The package version will be bumped to `1.5.3` in both declarations, editable distribution metadata will be refreshed, and the repository's `make release VERSION=1.5.3` command will verify, tag, and push the patch release from clean `main`.
