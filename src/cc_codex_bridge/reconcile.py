@@ -293,6 +293,7 @@ class ProjectBuildResult:
     skill_count: int
     prompt_count: int
     mcp_server_count: int
+    global_instructions_sync_enabled: bool
     exclusion_report: object  # ExclusionReport from exclusions module
     diagnostics: tuple  # AgentTranslationDiagnostic and SkillValidationDiagnostic items
 
@@ -472,6 +473,7 @@ def build_project_desired_state(
             skill_count=0,
             prompt_count=0,
             mcp_server_count=0,
+            global_instructions_sync_enabled=cfg.sync_global_instructions,
             exclusion_report=exclusion_report,
             diagnostics=tuple(all_diagnostics),
         )
@@ -617,6 +619,7 @@ def build_project_desired_state(
         skill_count=total_skill_count,
         prompt_count=prompt_count,
         mcp_server_count=len(mcp_result.servers),
+        global_instructions_sync_enabled=cfg.sync_global_instructions,
         exclusion_report=exclusion_report,
         diagnostics=tuple(all_diagnostics),
     )

@@ -965,6 +965,7 @@ def main(argv: list[str] | None = None) -> int:
                         skill_count=build.skill_count,
                         prompt_count=build.prompt_count,
                         mcp_server_count=build.mcp_server_count,
+                        global_instructions_sync_enabled=build.global_instructions_sync_enabled,
                         diagnostics=agent_diags, skill_diagnostics=skill_diags,
                         mcp_diagnostics=mcp_diags,
                         drifted_files=drifted,
@@ -976,6 +977,7 @@ def main(argv: list[str] | None = None) -> int:
                         skill_count=build.skill_count,
                         prompt_count=build.prompt_count,
                         mcp_server_count=build.mcp_server_count,
+                        global_instructions_sync_enabled=build.global_instructions_sync_enabled,
                         diagnostics=agent_diags, skill_diagnostics=skill_diags,
                         mcp_diagnostics=mcp_diags,
                         drifted_files=drifted,
@@ -1044,6 +1046,7 @@ def main(argv: list[str] | None = None) -> int:
                     skill_count=build.skill_count,
                     prompt_count=build.prompt_count,
                     mcp_server_count=build.mcp_server_count,
+                    global_instructions_sync_enabled=build.global_instructions_sync_enabled,
                     skill_diagnostics=skill_diags,
                     mcp_diagnostics=mcp_diags,
                     drifted_files=drifted,
@@ -1055,6 +1058,7 @@ def main(argv: list[str] | None = None) -> int:
                     skill_count=build.skill_count,
                     prompt_count=build.prompt_count,
                     mcp_server_count=build.mcp_server_count,
+                    global_instructions_sync_enabled=build.global_instructions_sync_enabled,
                     skill_diagnostics=skill_diags,
                     mcp_diagnostics=mcp_diags,
                     drifted_files=drifted,
@@ -2289,6 +2293,7 @@ def _build_status_payload(
     skill_count: int = 0,
     prompt_count: int = 0,
     mcp_server_count: int = 0,
+    global_instructions_sync_enabled: bool = True,
     diagnostics=None,
     skill_diagnostics=None,
     mcp_diagnostics=None,
@@ -2378,6 +2383,7 @@ def _build_status_payload(
         "skill_count": skill_count,
         "prompt_count": prompt_count,
         "mcp_server_count": mcp_server_count,
+        "global_instructions_sync_enabled": global_instructions_sync_enabled,
         "version": __version__,
         "status": status,
         "pending_change_count": pending_change_count,
@@ -2401,6 +2407,7 @@ def format_status_json(
     report, exclusion_report: ExclusionReport,
     *, agent_count: int = 0, skill_count: int = 0, prompt_count: int = 0,
     mcp_server_count: int = 0,
+    global_instructions_sync_enabled: bool = True,
     diagnostics=None, skill_diagnostics=None, mcp_diagnostics=None,
     drifted_files: list[str] | None = None,
 ) -> str:
@@ -2410,6 +2417,7 @@ def format_status_json(
             report, exclusion_report,
             agent_count=agent_count, skill_count=skill_count,
             prompt_count=prompt_count, mcp_server_count=mcp_server_count,
+            global_instructions_sync_enabled=global_instructions_sync_enabled,
             diagnostics=diagnostics, skill_diagnostics=skill_diagnostics,
             mcp_diagnostics=mcp_diagnostics,
             drifted_files=drifted_files,
@@ -2426,6 +2434,7 @@ def format_status_report(
     report, exclusion_report: ExclusionReport,
     *, agent_count: int = 0, skill_count: int = 0, prompt_count: int = 0,
     mcp_server_count: int = 0,
+    global_instructions_sync_enabled: bool = True,
     diagnostics=None, skill_diagnostics=None, mcp_diagnostics=None,
     drifted_files: list[str] | None = None,
     discovery=None,
@@ -2436,6 +2445,7 @@ def format_status_report(
         report, exclusion_report,
         agent_count=agent_count, skill_count=skill_count,
         prompt_count=prompt_count, mcp_server_count=mcp_server_count,
+        global_instructions_sync_enabled=global_instructions_sync_enabled,
         diagnostics=diagnostics, skill_diagnostics=skill_diagnostics,
         mcp_diagnostics=mcp_diagnostics,
         drifted_files=drifted_files,
@@ -2493,6 +2503,10 @@ def format_status_report(
     # Group 1: project metadata
     lines = [""]
     lines.append(f"{_k('VERSION')} v{payload['version']}")
+    sync_state = (
+        "enabled" if payload["global_instructions_sync_enabled"] else "disabled"
+    )
+    lines.append(f"{_k('GLOBAL_INSTRUCTIONS_SYNC')} {sync_state}")
     if discovery is not None:
         lines.append(f"{_k('PROJECT_ROOT')} {discovery.project.root}")
         lines.append(f"{_k('AGENTS_MD')} {discovery.project.agents_md_path}")

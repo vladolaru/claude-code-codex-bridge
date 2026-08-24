@@ -563,6 +563,39 @@ def test_status_cli_reports_pending_and_json(make_project, make_plugin_version, 
     assert payload["categorized_changes"]["skills"]["create"] == []
 
 
+def test_status_reports_disabled_global_instructions_sync(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+    capsys,
+):
+    """Human and JSON status expose the effective global instructions policy."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "tools", "1.0.0")
+    bridge_home = tmp_path / "home" / ".cc-codex-bridge"
+    bridge_home.mkdir(parents=True)
+    (bridge_home / "config.toml").write_text(
+        "[sync]\nglobal_instructions = false\n"
+    )
+    common_args = [
+        "--project",
+        str(project_root),
+        "--cache-dir",
+        str(cache_root),
+        "--codex-home",
+        str(tmp_path / "codex-home"),
+    ]
+
+    assert cli.main(["status", *common_args]) == 0
+    human_output = capsys.readouterr().out
+    assert "GLOBAL_INSTRUCTIONS_SYNC:" in human_output
+    assert "disabled" in human_output
+
+    assert cli.main(["status", "--json", *common_args]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["global_instructions_sync_enabled"] is False
+
+
 def test_validate_honors_project_exclusion_config(make_project, make_plugin_version, capsys):
     """`validate` applies exclusions from `.codex/bridge.toml`."""
     project_root, _agents_md = make_project()
@@ -1953,6 +1986,7 @@ def test_status_json_output(make_project, make_plugin_version, tmp_path, capsys)
     assert "excluded" in data
     assert "status" in data
     assert "pending_change_count" in data
+    assert data["global_instructions_sync_enabled"] is True
 
 
 def test_clean_json_output(make_project, make_plugin_version, tmp_path, capsys):
