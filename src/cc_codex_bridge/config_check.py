@@ -15,12 +15,12 @@ from pathlib import Path
 
 # Known top-level keys in the global config.toml.
 _KNOWN_GLOBAL_KEYS: frozenset[str] = frozenset(
-    {"scan_paths", "exclude_paths", "log", "exclude"}
+    {"scan_paths", "exclude_paths", "log", "sync", "exclude"}
 )
 
 # Keys that are only valid in the global config, not in project config.
 _GLOBAL_ONLY_KEYS: frozenset[str] = frozenset(
-    {"scan_paths", "exclude_paths", "log"}
+    {"scan_paths", "exclude_paths", "log", "sync"}
 )
 
 
@@ -147,7 +147,7 @@ def check_project_config(config_path: Path) -> list[CheckResult]:
     exist, returns a single pass result (no project overrides). If TOML
     parsing fails, returns early with a single failure.
 
-    Global-only keys (``scan_paths``, ``exclude_paths``, ``[log]``) are
+    Global-only keys (``scan_paths``, ``exclude_paths``, ``[log]``, ``[sync]``) are
     rejected — they belong in the global config only.
     """
     if not config_path.exists():

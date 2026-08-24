@@ -129,13 +129,14 @@ class TestCheckGlobalConfig:
         assert "apple" in unknown_results[0].message
 
     def test_known_keys_not_flagged(self, tmp_path):
-        """Known top-level keys (scan_paths, exclude_paths, log, exclude) are accepted."""
+        """Known global top-level keys are accepted."""
         bridge_home = tmp_path / "bridge"
         config_path = tmp_path / "config.toml"
         config_path.write_text(
             'scan_paths = []\n'
             'exclude_paths = []\n'
             '[log]\nlog_retention_days = 90\n'
+            '[sync]\nglobal_instructions = false\n'
             '[exclude]\nplugins = []\n'
         )
         results = check_global_config(config_path, bridge_home=bridge_home)
@@ -250,6 +251,18 @@ class TestCheckProjectConfig:
         assert len(rejected) >= 1
         messages = " ".join(r.message for r in rejected)
         assert "log" in messages
+
+    def test_sync_section_rejected_in_project(self, tmp_path):
+        """[sync] is global-only because the policy applies across projects."""
+        config_path = tmp_path / "bridge.toml"
+        config_path.write_text('[sync]\nglobal_instructions = false\n')
+
+        results = check_project_config(config_path)
+
+        rejected = [r for r in results if not r.passed]
+        assert len(rejected) >= 1
+        messages = " ".join(r.message for r in rejected)
+        assert "sync" in messages
 
     def test_multiple_global_only_keys(self, tmp_path):
         """Multiple global-only keys are all reported."""
