@@ -83,6 +83,142 @@ def test_config_exclude_add_unexpected_error_propagates(tmp_path, monkeypatch):
         cli.main(["config", "exclude", "add", "plugin", "some/plugin", "--project", str(project_root)])
 
 
+def test_config_exclude_add_plugin_does_not_require_content_discovery(
+    tmp_path,
+    monkeypatch,
+):
+    """Explicit plugin exclusions remain available when cache discovery is broken."""
+    import cc_codex_bridge.discover as discover_module
+    from cc_codex_bridge import cli
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# test\n")
+    monkeypatch.setattr(
+        discover_module,
+        "query_enabled_plugin_ids",
+        lambda root: frozenset({"market/superpowers", "market/playground"}),
+    )
+    monkeypatch.setattr(
+        discover_module,
+        "discover",
+        lambda **kwargs: pytest.fail("content discovery should not run"),
+    )
+
+    exit_code = cli.main([
+        "config",
+        "exclude",
+        "add",
+        "--global",
+        "plugin",
+        "market/superpowers",
+        "--project",
+        str(project_root),
+    ])
+
+    assert exit_code == 0
+
+
+def test_config_exclude_add_applies_existing_plugin_exclusions_before_discovery(
+    tmp_path,
+    monkeypatch,
+):
+    """Non-plugin candidates discover content only from non-excluded plugins."""
+    import cc_codex_bridge.discover as discover_module
+    from cc_codex_bridge import cli
+    from cc_codex_bridge.model import DiscoveryResult, ProjectContext
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# test\n")
+    user_skill = tmp_path / "claude-home" / "skills" / "custom-skill"
+    user_skill.mkdir(parents=True)
+    (user_skill / "SKILL.md").write_text(
+        "---\nname: custom-skill\ndescription: test\n---\n"
+    )
+    bridge_home = tmp_path / "bridge-home"
+    bridge_home.mkdir()
+    (bridge_home / "config.toml").write_text(
+        '[exclude]\nplugins = ["market/playground"]\n'
+    )
+    monkeypatch.setattr(cli, "resolve_bridge_home", lambda: bridge_home)
+    monkeypatch.setattr(
+        discover_module,
+        "query_enabled_plugin_ids",
+        lambda root: frozenset({"market/kept", "market/playground"}),
+    )
+
+    def _discover(**kwargs):
+        assert kwargs["enabled_plugin_ids"] == frozenset({"market/kept"})
+        return DiscoveryResult(
+            project=ProjectContext(
+                root=project_root,
+                agents_md_path=project_root / "AGENTS.md",
+            ),
+            plugins=(),
+            user_skills=(user_skill,),
+        )
+
+    monkeypatch.setattr(discover_module, "discover", _discover)
+
+    exit_code = cli.main([
+        "config",
+        "exclude",
+        "add",
+        "--global",
+        "skill",
+        "user/custom-skill",
+        "--project",
+        str(project_root),
+    ])
+
+    assert exit_code == 0
+
+
+def test_interactive_plugin_exclusion_recovers_from_content_discovery_failure(
+    tmp_path,
+    monkeypatch,
+):
+    """Interactive selection falls back to enabled plugin IDs on cache failure."""
+    import cc_codex_bridge.discover as discover_module
+    from cc_codex_bridge import cli, interactive
+    from cc_codex_bridge.model import DiscoveryError
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# test\n")
+    bridge_home = tmp_path / "bridge-home"
+    monkeypatch.setattr(cli, "resolve_bridge_home", lambda: bridge_home)
+    monkeypatch.setattr(
+        discover_module,
+        "query_enabled_plugin_ids",
+        lambda root: frozenset({"market/playground", "market/superpowers"}),
+    )
+    monkeypatch.setattr(
+        discover_module,
+        "discover",
+        lambda **kwargs: (_ for _ in ()).throw(DiscoveryError("broken cache")),
+    )
+    selections = iter(("plugin", "market/superpowers"))
+    monkeypatch.setattr(interactive, "is_interactive", lambda: True)
+    monkeypatch.setattr(
+        interactive,
+        "select_from_list",
+        lambda *args, **kwargs: next(selections),
+    )
+
+    exit_code = cli.main([
+        "config",
+        "exclude",
+        "add",
+        "--global",
+        "--project",
+        str(project_root),
+    ])
+
+    assert exit_code == 0
+
+
 def test_list_discoverable_entities_global_scope_excludes_project(tmp_path):
     """Global scope should not include project-scoped entities."""
     from cc_codex_bridge.config_exclude_commands import list_discoverable_entities

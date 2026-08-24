@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import cc_codex_bridge.config_exclude_commands as exclude_commands
 from cc_codex_bridge.config_exclude_commands import (
     ExcludeCommandResult,
     ExcludeListResult,
@@ -316,6 +317,25 @@ class TestHandleExcludeAdd:
         # Verify persisted to config
         data = read_config_data(config_path)
         assert "market/alpha" in data.get("exclude", {}).get("plugins", [])
+
+    def test_add_plugin_from_candidates_without_discovery(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Known plugin IDs can validate an exclusion without content discovery."""
+        config_path = tmp_path / "config.toml"
+
+        result = exclude_commands.handle_exclude_add_from_candidates(
+            kind="plugin",
+            entity_id="market/superpowers",
+            config_path=config_path,
+            candidates=("market/superpowers",),
+        )
+
+        assert result.success is True
+        assert read_config_data(config_path)["exclude"]["plugins"] == [
+            "market/superpowers"
+        ]
 
     def test_add_plugin_not_found(self, tmp_path: Path) -> None:
         """Adding a plugin not in discovery fails with 'not found'."""

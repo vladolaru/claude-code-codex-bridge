@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -186,6 +187,23 @@ def handle_exclude_add(
     4. Read config, add to ``exclude.<kind_plural>``, write back.
     5. Return success/failure result.
     """
+    known = list_discoverable_entities(discovery, scope=scope)
+    return handle_exclude_add_from_candidates(
+        kind=kind,
+        entity_id=entity_id,
+        config_path=config_path,
+        candidates=known.get(kind, ()),
+    )
+
+
+def handle_exclude_add_from_candidates(
+    *,
+    kind: str,
+    entity_id: str,
+    config_path: Path,
+    candidates: Sequence[str],
+) -> ExcludeCommandResult:
+    """Add an exclusion after validating against known entity IDs."""
     if kind not in KIND_TO_KEY:
         valid = ", ".join(sorted(KIND_TO_KEY))
         return ExcludeCommandResult(
@@ -198,9 +216,7 @@ def handle_exclude_add(
     except ReconcileError as exc:
         return ExcludeCommandResult(success=False, message=str(exc))
 
-    # Validate against discovered entities
-    known = list_discoverable_entities(discovery, scope=scope)
-    if not _matches_any(normalized, known[kind], kind):
+    if not _matches_any(normalized, list(candidates), kind):
         return ExcludeCommandResult(
             success=False,
             message=f"{kind} '{entity_id}' not found in discovered entities",

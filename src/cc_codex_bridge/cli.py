@@ -1440,6 +1440,7 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
     from cc_codex_bridge.config_exclude_commands import (
         KIND_TO_KEY,
         handle_exclude_add,
+        handle_exclude_add_from_candidates,
         handle_exclude_list,
         handle_exclude_remove,
         is_user_global_entity,
@@ -1486,28 +1487,79 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
 
     # -- add --
     if subcmd == "add":
-        from cc_codex_bridge.discover import discover
+        from cc_codex_bridge.config import load_config
+        from cc_codex_bridge.discover import (
+            discover,
+            query_enabled_plugin_ids,
+            resolve_project_root,
+        )
+        from cc_codex_bridge.exclusions import (
+            load_project_exclusions,
+            resolve_effective_exclusions,
+        )
 
+        cli_kind = getattr(args, "kind", None)
+        entity_id = getattr(args, "entity_id", None)
+        discovery = None
         try:
-            discovery = discover(
-                project_path=scope.project_root,
-                cache_dir=getattr(args, "cache_dir", None),
-                claude_home=getattr(args, "claude_home", None),
+            project = resolve_project_root(
+                getattr(args, "project", None) or Path.cwd()
+            )
+            enabled_plugin_ids = query_enabled_plugin_ids(project.root)
+            global_config = load_config(bridge_home / "config.toml")
+            project_exclusions = load_project_exclusions(project.root)
+            effective_exclusions = resolve_effective_exclusions(
+                project_exclusions,
+                global_config=global_config.exclude,
             )
         except (DiscoveryError, OSError, UnicodeError) as exc:
             print(f"Error: discovery failed: {exc}", file=sys.stderr)
             return 1
 
-        cli_kind = getattr(args, "kind", None)
-        entity_id = getattr(args, "entity_id", None)
+        if enabled_plugin_ids is None:
+            discovery_plugin_ids = None
+        else:
+            discovery_plugin_ids = frozenset(enabled_plugin_ids) - frozenset(
+                effective_exclusions.plugins
+            )
+
+        discoverable = {kind: [] for kind in KIND_TO_KEY}
+        if cli_kind != "plugin" or enabled_plugin_ids is None:
+            try:
+                discovery = discover(
+                    project_path=project.root,
+                    cache_dir=getattr(args, "cache_dir", None),
+                    claude_home=getattr(args, "claude_home", None),
+                    enabled_plugin_ids=discovery_plugin_ids,
+                )
+            except (DiscoveryError, OSError, UnicodeError) as exc:
+                if cli_kind is not None or enabled_plugin_ids is None:
+                    print(f"Error: discovery failed: {exc}", file=sys.stderr)
+                    return 1
+                print(
+                    "Warning: content discovery failed; only plugin exclusions "
+                    f"are available: {exc}",
+                    file=sys.stderr,
+                )
+            else:
+                discoverable = list_discoverable_entities(
+                    discovery,
+                    scope=scope.target,
+                )
+
+        if enabled_plugin_ids is not None:
+            discoverable["plugin"] = sorted(enabled_plugin_ids)
 
         # Build candidate lists, filtered by what's already excluded.
         current_excl = handle_exclude_list(config_path=scope.config_path)
-        discoverable = list_discoverable_entities(discovery, scope=scope.target)
         available: dict[str, list[str]] = {}
-        for k, key in KIND_TO_KEY.items():
+        for candidate_kind, key in KIND_TO_KEY.items():
             already = set(getattr(current_excl, key))
-            available[k] = [e for e in discoverable.get(k, []) if e not in already]
+            available[candidate_kind] = [
+                candidate
+                for candidate in discoverable.get(candidate_kind, [])
+                if candidate not in already
+            ]
 
         # Interactive loop: ESC at entity level goes back to kind selection.
         kind = cli_kind
@@ -1517,7 +1569,11 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
                     print("Error: kind required (not running interactively).", file=sys.stderr)
                     return 1
                 # Only show kinds that have remaining candidates.
-                selectable_kinds = [k for k in sorted(KIND_TO_KEY.keys()) if available.get(k)]
+                selectable_kinds = [
+                    candidate_kind
+                    for candidate_kind in sorted(KIND_TO_KEY)
+                    if available.get(candidate_kind)
+                ]
                 if not selectable_kinds:
                     print("All discoverable entities are already excluded.")
                     return 0
@@ -1555,20 +1611,35 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
 
             break
 
-        result = handle_exclude_add(
-            kind=kind,
-            entity_id=entity_id,
-            config_path=scope.config_path,
-            discovery=discovery,
-            scope=scope.target,
-        )
+        if kind == "plugin" and enabled_plugin_ids is not None:
+            result = handle_exclude_add_from_candidates(
+                kind=kind,
+                entity_id=entity_id,
+                config_path=scope.config_path,
+                candidates=tuple(sorted(enabled_plugin_ids)),
+            )
+        else:
+            assert discovery is not None
+            result = handle_exclude_add(
+                kind=kind,
+                entity_id=entity_id,
+                config_path=scope.config_path,
+                discovery=discovery,
+                scope=scope.target,
+            )
         print(f"{result.message}{scope_label}")
         if result.success and kind == "plugin":
             print(
                 "Note: plugin exclusions do not cover MCP servers. "
                 "Use `config exclude add mcp_server <name>` to exclude related MCP servers."
             )
-        if result.success and is_user_global_entity(kind, entity_id, discovery):
+        if result.success and (
+            kind == "plugin"
+            or (
+                discovery is not None
+                and is_user_global_entity(kind, entity_id, discovery)
+            )
+        ):
             if scope.target == "project":
                 print(
                     f"Note: this {kind} is user-global (shared across projects). "
