@@ -1999,6 +1999,40 @@ def test_build_project_disables_only_global_instruction_management(
     )
 
 
+def test_build_project_does_not_read_global_instructions_when_disabled(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Disabled global sync ignores even unreadable Claude instructions."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "demo", "1.0.0")
+    bridge_home = tmp_path / "bridge-home"
+    bridge_home.mkdir()
+    (bridge_home / "config.toml").write_text(
+        "[sync]\nglobal_instructions = false\n"
+    )
+    claude_home = tmp_path / "claude-home"
+    claude_home.mkdir()
+    (claude_home / "CLAUDE.md").write_bytes(b"\xff")
+
+    with patch(
+        "cc_codex_bridge.discover.query_enabled_plugin_ids",
+        return_value=None,
+    ):
+        build = build_project_desired_state(
+            project_root,
+            cache_dir=cache_root,
+            claude_home=claude_home,
+            codex_home=tmp_path / "codex-home",
+            bridge_home=bridge_home,
+        )
+
+    assert build.desired_state is not None
+    assert build.discovery.user_claude_md is None
+    assert build.desired_state.manage_global_instructions is False
+
+
 def test_reconcile_removes_stale_project_skill_directory(
     make_project,
     make_plugin_version,

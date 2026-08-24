@@ -138,6 +138,7 @@ def discover(
     claude_home: str | Path | None = None,
     *,
     enabled_plugin_ids: frozenset[str] | None = None,
+    include_user_claude_md: bool = True,
 ) -> DiscoveryResult:
     """Resolve the target project and latest installed Claude plugins."""
     project = resolve_project_root(project_path)
@@ -167,7 +168,11 @@ def discover(
         project_skills=discover_project_skills(project.root),
         project_agents=discover_project_agents(project.root),
         project_commands=discover_project_commands(project.root),
-        user_claude_md=discover_user_claude_md(claude_home),
+        user_claude_md=(
+            discover_user_claude_md(claude_home)
+            if include_user_claude_md
+            else None
+        ),
         mcp_servers=mcp_servers,
         mcp_discovery_degraded=mcp_degraded,
     )

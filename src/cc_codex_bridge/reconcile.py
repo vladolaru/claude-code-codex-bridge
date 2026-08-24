@@ -436,6 +436,7 @@ def build_project_desired_state(
         cache_dir=cache_dir,
         claude_home=claude_home,
         enabled_plugin_ids=discovery_plugin_ids,
+        include_user_claude_md=cfg.sync_global_instructions,
     )
     result, exclusion_report = apply_sync_exclusions(result, exclusions)
     exclusion_report = replace(
