@@ -1552,6 +1552,9 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
                     cache_dir=getattr(args, "cache_dir", None),
                     claude_home=getattr(args, "claude_home", None),
                     enabled_plugin_ids=discovery_plugin_ids,
+                    include_user_claude_md=(
+                        global_config.sync_global_instructions
+                    ),
                 )
             except (DiscoveryError, OSError, UnicodeError) as exc:
                 if cli_kind is not None or enabled_plugin_ids is None:

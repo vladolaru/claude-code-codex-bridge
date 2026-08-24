@@ -349,6 +349,44 @@ def test_config_exclude_add_applies_existing_plugin_exclusions_before_discovery(
     assert exit_code == 0
 
 
+def test_config_exclude_add_skips_opted_out_global_instructions(
+    tmp_path,
+    monkeypatch,
+):
+    """Unrelated exclusion discovery never reads disabled global instructions."""
+    from cc_codex_bridge import cli
+    from cc_codex_bridge.config_writer import read_config_data
+    import cc_codex_bridge.discover as discover_module
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# test\n")
+    claude_home = tmp_path / "claude-home"
+    user_skill = claude_home / "skills" / "custom-skill"
+    user_skill.mkdir(parents=True)
+    (user_skill / "SKILL.md").write_text(
+        "---\nname: custom-skill\ndescription: test\n---\n"
+    )
+    (claude_home / "CLAUDE.md").write_bytes(b"\xff")
+    bridge_home = tmp_path / "bridge-home"
+    bridge_home.mkdir()
+    (bridge_home / "config.toml").write_text(
+        "[sync]\nglobal_instructions = false\n"
+    )
+    monkeypatch.setattr(cli, "resolve_bridge_home", lambda: bridge_home)
+    monkeypatch.setattr(discover_module, "DEFAULT_CLAUDE_HOME", claude_home)
+
+    exit_code = cli.main([
+        "config", "exclude", "add", "--global",
+        "skill", "user/custom-skill",
+        "--project", str(project_root),
+    ])
+
+    assert exit_code == 0
+    config = read_config_data(bridge_home / "config.toml")
+    assert config["exclude"]["skills"] == ["user/custom-skill"]
+
+
 def test_interactive_plugin_exclusion_recovers_from_content_discovery_failure(
     tmp_path,
     monkeypatch,
