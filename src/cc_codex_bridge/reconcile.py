@@ -376,7 +376,11 @@ def build_project_desired_state(
     from cc_codex_bridge.bridge_home import config_path as bridge_config_path
     from cc_codex_bridge.claude_shim import plan_claude_shim
     from cc_codex_bridge.config import load_config
-    from cc_codex_bridge.discover import discover
+    from cc_codex_bridge.discover import (
+        discover,
+        query_enabled_plugin_ids,
+        resolve_project_root,
+    )
     from cc_codex_bridge.exclusions import (
         apply_sync_exclusions,
         load_project_exclusions,
@@ -401,15 +405,9 @@ def build_project_desired_state(
     )
 
     bridge_home_path = Path(bridge_home or resolve_bridge_home()).expanduser().resolve()
-
-    result = discover(
-        project_path=project_root,
-        cache_dir=cache_dir,
-        claude_home=claude_home,
-    )
+    project = resolve_project_root(project_root)
     cfg = load_config(bridge_config_path(bridge_home=bridge_home_path))
-
-    config_exclusions = load_project_exclusions(result.project.root)
+    config_exclusions = load_project_exclusions(project.root)
     exclusions = resolve_effective_exclusions(
         config_exclusions,
         global_config=cfg.exclude,
@@ -419,7 +417,29 @@ def build_project_desired_state(
         cli_exclude_commands=tuple(exclude_commands) or None,
         cli_exclude_mcp_servers=tuple(exclude_mcp_servers) or None,
     )
+    enabled_plugin_ids = query_enabled_plugin_ids(project.root)
+    if enabled_plugin_ids is None:
+        discovery_plugin_ids = None
+        prefiltered_plugin_ids: frozenset[str] = frozenset()
+    else:
+        prefiltered_plugin_ids = frozenset(enabled_plugin_ids) & frozenset(
+            exclusions.plugins
+        )
+        discovery_plugin_ids = frozenset(enabled_plugin_ids) - prefiltered_plugin_ids
+
+    result = discover(
+        project_path=project.root,
+        cache_dir=cache_dir,
+        claude_home=claude_home,
+        enabled_plugin_ids=discovery_plugin_ids,
+    )
     result, exclusion_report = apply_sync_exclusions(result, exclusions)
+    exclusion_report = replace(
+        exclusion_report,
+        plugins=tuple(
+            sorted(set(exclusion_report.plugins) | prefiltered_plugin_ids)
+        ),
+    )
     shim_decision = plan_claude_shim(result.project)
 
     # Bootstrap: when CLAUDE.md exists without AGENTS.md, the full translation

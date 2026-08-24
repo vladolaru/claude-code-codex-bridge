@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
+import cc_codex_bridge.discover as discover_module
 import cc_codex_bridge.reconcile as reconcile_module
 from cc_codex_bridge.bridge_home import project_state_dir
 from cc_codex_bridge.claude_shim import plan_claude_shim
@@ -1145,6 +1146,38 @@ def test_build_desired_state_proceeds_with_skip_shim(
     project_file_paths = [p for p, _ in build.desired_state.project_files]
     assert (project_root / "CLAUDE.md") not in project_file_paths
     assert (project_root / "CLAUDE.md") not in build.desired_state.preserved_project_files
+
+
+def test_build_project_desired_state_skips_excluded_malformed_enabled_plugin(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Excluded enabled plugins leave discovery scope before version validation."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "kept", "1.0.0")
+    (cache_root / "market" / "playground" / "unknown").mkdir(parents=True)
+    bridge_home = tmp_path / "bridge-home"
+    bridge_home.mkdir()
+    (bridge_home / "config.toml").write_text(
+        '[exclude]\nplugins = ["market/playground"]\n'
+    )
+    monkeypatch.setattr(
+        discover_module,
+        "query_enabled_plugin_ids",
+        lambda root: frozenset({"market/kept", "market/playground"}),
+    )
+
+    build = build_project_desired_state(
+        project_root,
+        cache_dir=cache_root,
+        bridge_home=bridge_home,
+        codex_home=tmp_path / "codex-home",
+    )
+
+    assert [plugin.plugin_name for plugin in build.discovery.plugins] == ["kept"]
+    assert build.exclusion_report.plugins == ("market/playground",)
 
 
 def test_diff_report_skips_remove_and_skill_changes_in_diff_output(

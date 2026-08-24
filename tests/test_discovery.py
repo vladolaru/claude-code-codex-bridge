@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import cc_codex_bridge.discover as discover_module
 from cc_codex_bridge.discover import (
     _parse_enabled_plugin_ids,
     discover,
@@ -564,6 +565,30 @@ def test_discover_latest_plugins_returns_all_when_no_filter(make_plugin_version)
 
     names = {p.plugin_name for p in plugins}
     assert names == {"alpha", "beta"}
+
+
+def test_discover_uses_supplied_enabled_ids_without_querying_claude(
+    make_project,
+    make_plugin_version,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Caller-supplied plugin scope bypasses a second Claude CLI query."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "kept", "1.0.0")
+    (cache_root / "market" / "excluded-broken" / "unknown").mkdir(parents=True)
+    monkeypatch.setattr(
+        discover_module,
+        "query_enabled_plugin_ids",
+        lambda root: pytest.fail("unexpected query"),
+    )
+
+    result = discover(
+        project_root,
+        cache_root,
+        enabled_plugin_ids=frozenset({"market/kept"}),
+    )
+
+    assert [plugin.plugin_name for plugin in result.plugins] == ["kept"]
 
 
 # ---------------------------------------------------------------------------

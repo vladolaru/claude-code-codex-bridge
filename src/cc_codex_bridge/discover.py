@@ -136,10 +136,14 @@ def discover(
     project_path: str | Path | None = None,
     cache_dir: str | Path | None = None,
     claude_home: str | Path | None = None,
+    *,
+    enabled_plugin_ids: frozenset[str] | None = None,
 ) -> DiscoveryResult:
     """Resolve the target project and latest installed Claude plugins."""
     project = resolve_project_root(project_path)
-    enabled_ids = query_enabled_plugin_ids(project.root)
+    enabled_ids = enabled_plugin_ids
+    if enabled_ids is None:
+        enabled_ids = query_enabled_plugin_ids(project.root)
     plugins = discover_latest_plugins(
         cache_dir=cache_dir,
         claude_home=claude_home,
