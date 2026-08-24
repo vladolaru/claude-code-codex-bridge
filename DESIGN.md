@@ -41,7 +41,7 @@ These are authoritative inputs:
 - user-level Claude agents from `~/.claude/agents/`
 - project-level Claude skills from `.claude/skills/`
 - project-level Claude agents from `.claude/agents/`
-- user-level global instructions from `~/.claude/CLAUDE.md`
+- user-level global instructions from `~/.claude/CLAUDE.md` when global instructions sync is enabled
 - MCP server definitions from `~/.claude.json` (user-global and per-project scopes)
 - MCP server definitions from `<project>/.mcp.json` (project-shared scope)
 
@@ -78,7 +78,7 @@ If a behavior is described differently in multiple docs:
 - Claude plugin discovery from the installed local Claude cache
 - user-level skill and agent discovery from `~/.claude/skills/` and `~/.claude/agents/`
 - project-level skill and agent discovery from `.claude/skills/` and `.claude/agents/`
-- user-level global instructions discovery from `~/.claude/CLAUDE.md`
+- user-level global instructions discovery from `~/.claude/CLAUDE.md`, with bridge management controlled by the global `[sync].global_instructions` policy
 - selection of the latest installed plugin version by semantic version
 - translation of Claude agents into self-contained Codex agent `.toml` files
 - translation of Claude skills into self-contained Codex skills
@@ -128,7 +128,7 @@ The runtime is a deterministic pipeline:
 17. merge all agents, render project-local agent `.toml` files to `.codex/agents/`, and collect global agents for `~/.codex/agents/`
 18. translate discovered MCP servers into `GeneratedMcpServer` objects with Codex-compatible TOML tables
 19. decide whether `CLAUDE.md` can be created or preserved as an `@AGENTS.md` shim
-20. build a full desired state for project files, Codex skill directories, global agent files, global instructions, and MCP server entries
+20. build a full desired state for project files, Codex skill directories, global agent files, optionally managed global instructions, and MCP server entries
 21. inspect/preview or reconcile that desired state with ownership and rollback protections
 22. for MCP servers: surgically edit `~/.codex/config.toml` (global) and `<project>/.codex/config.toml` (project) using `tomlkit`, preserving user-authored content
 
@@ -161,7 +161,8 @@ Utility commands such as `doctor` and the LaunchAgent commands are intentionally
   - project-level commands get a `--<project-dirname>` suffix (e.g., `build--my-app.md`)
   - tracked in the global registry under the `prompts` section
 - `~/.codex/AGENTS.md`
-  - user-global Codex instructions bridged from `~/.claude/CLAUDE.md`
+  - user-global Codex instructions bridged from `~/.claude/CLAUDE.md` while global instructions sync is enabled (the default)
+  - entirely outside bridge planning, validation, and mutation while global instructions sync is disabled
 
 ### Bridge-internal outputs
 
@@ -681,6 +682,7 @@ Reconcile lives in `src/cc_codex_bridge/reconcile.py`.
 - generated skills (global registry, installed to `~/.codex/skills/`)
 - global agents (global registry, installed as `.toml` files to `~/.codex/agents/`)
 - global instructions content (for `~/.codex/AGENTS.md`)
+- whether global instructions management is enabled for this run
 - vendored plugin resources (bridge-internal, written to `~/.cc-codex-bridge/plugins/`)
 - MCP servers (global entries tracked in the registry, project entries tracked in bridge state)
 - path to the state file (under bridge home)
@@ -709,7 +711,7 @@ Supported kinds in current reporting:
 4. compute desired project skill directory mutations using directory-snapshot comparison
 5. compute desired generated-skill claims and reconcile changes from registry ownership plus on-disk content hashes
 6. compute desired global agent file mutations and reconcile changes from registry ownership plus content hashes
-7. compute desired global instructions changes for `~/.codex/AGENTS.md`
+7. when global instructions management is enabled, compute desired changes for `~/.codex/AGENTS.md`; otherwise skip that file without inspecting ownership or content
 8. validate ownership constraints
 9. write project file, project skill, global skill, agent, prompt, instruction, and vendored plugin resource changes
 10. apply MCP server mutations to the relevant Codex `config.toml` files
@@ -757,6 +759,7 @@ The CLI lives in `src/cc_codex_bridge/cli.py`.
   - report `in_sync` vs `pending_changes`
   - report `invalid` when agent translation contains unsupported Claude tools
   - print full discovery summary: project root, AGENTS.md path, CLAUDE.md action, plugin list with per-plugin skill/agent/prompt counts, generated totals, exclusions
+  - report whether global instructions sync is enabled in text and JSON output
   - report categorized project-file vs skill create/update/remove changes
   - report drifted managed files as a separate `DRIFTED` category (drift is computed by comparing stored content hashes against on-disk content for all managed project files; missing files and symlinks are excluded, and v8-migrated managed files with empty hashes are preserved until reconcile can backfill a hash)
   - include agent translation diagnostics in both text and JSON output when invalid
@@ -935,17 +938,21 @@ Global configuration lives in `src/cc_codex_bridge/config.py`.
 
 `~/.cc-codex-bridge/config.toml` is a user-authored file that the bridge reads and — since the `config` CLI commands — also writes. The file is optional — all settings have defaults that apply when the file is missing.
 
-The config file serves three purposes:
+The config file serves four purposes:
 
 1. scan-based discovery configuration (`scan_paths`, `exclude_paths`) — loaded by `scan.py`
 2. activity log configuration (`[log]` section) — loaded by `config.py`
 3. global sync exclusions (`[exclude]` section) — loaded by `config.py`, merged into the exclusion pipeline
+4. global instruction ownership policy (`[sync].global_instructions`) — loaded by `config.py`, enabled by default
 
 ### Current settings
 
 ```toml
 [log]
 log_retention_days = 90   # default; minimum 1
+
+[sync]
+global_instructions = true   # default
 
 [exclude]
 plugins = ["my-marketplace/plugin-name"]
@@ -957,6 +964,9 @@ commands = []
 - `log_retention_days` controls how many days of activity log files are retained before auto-prune removes them
 - non-integer or sub-1 values fall back to the default (90 days)
 - a missing `[log]` section or missing config file both produce the default
+- `global_instructions = true` lets the bridge manage `~/.codex/AGENTS.md` from `~/.claude/CLAUDE.md`; `false` preserves the Codex file untouched and skips ownership validation
+- malformed or missing `[sync].global_instructions` values fall back to `true`
+- the sync policy is global-only and does not change project `AGENTS.md` or `CLAUDE.md` shim behavior
 - `[exclude]` lists are unioned with per-project `.codex/bridge.toml` exclusions; CLI `--exclude-*` flags replace the merged set for that kind
 - malformed `[exclude]` values are silently ignored (logged as warnings) and fall back to empty exclusions
 
@@ -1005,7 +1015,7 @@ Current runtime module responsibilities:
 - `model.py`
   - core dataclasses and domain-specific error types
 - `config.py`
-  - global bridge configuration: `BridgeConfig` dataclass, TOML loading from `config.toml` `[log]` section, default value handling
+  - global bridge configuration: `BridgeConfig` dataclass, TOML loading from `config.toml` `[log]`, `[sync]`, and `[exclude]` sections, default value handling
 - `config_check.py`
   - config validation: TOML well-formedness, scan path resolution, unknown key detection, global-only key rejection for project configs
 - `config_exclude_commands.py`
@@ -1077,7 +1087,7 @@ The suite currently verifies:
 - skill translation, relocation rewriting, vendoring, and standalone skill translation
 - prompt translation from commands, variable pass-through, provenance marking, plugin resource vendoring through prompt translation, and standalone command-to-prompt translation
 - exclusion filtering for plugins and standalone sources with part-count disambiguation
-- reconcile idempotence, stale cleanup, ownership safety, diff reporting, and global instructions bridging
+- reconcile idempotence, stale cleanup, ownership safety, diff reporting, global instructions bridging, and global instructions opt-out preservation
 - CLI command behavior including multi-source integration
 - end-to-end multi-source scenario testing with all discovery scopes
 - LaunchAgent rendering, installation, uninstallation, and status reporting (global plist model with PATH baking)

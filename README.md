@@ -6,7 +6,7 @@ Automatically bridge your local Claude Code setup into Codex so both stay equall
 
 `cc-codex-bridge` reads the Claude Code setup on your machine — plugins, skills, agents, commands, MCP servers, and instructions — and generates equivalent Codex artifacts. You install/set up/author once in Claude Code; the bridge keeps Codex in sync.
 
-**This is a one-way bridge: Claude Code → Codex.** Changes made directly in Codex (editing generated files, adding skills manually under `~/.codex/`) are not reflected back into Claude Code and will be overwritten on the next reconcile.
+**This is a one-way bridge: Claude Code → Codex.** Changes made directly in Codex (editing generated files, adding skills manually under `~/.codex/`) are not reflected back into Claude Code and will be overwritten on the next reconcile. The exception is `~/.codex/AGENTS.md` when global instructions sync is explicitly disabled; the bridge then leaves that file entirely unmanaged.
 
 ## Quick setup
 
@@ -117,7 +117,7 @@ When multiple installed versions of the same plugin exist, the highest semantic 
 | `~/.codex/skills/<name>/` | Skill directories from plugin and user Claude skills |
 | `~/.codex/agents/*.toml` | Agent files from plugin and user Claude agents |
 | `~/.codex/prompts/*.md` | Prompt files from plugin, user, and project Claude commands |
-| `~/.codex/AGENTS.md` | Global instructions bridged from `~/.claude/CLAUDE.md` |
+| `~/.codex/AGENTS.md` | Global instructions bridged from `~/.claude/CLAUDE.md` when global instructions sync is enabled (the default) |
 | `~/.codex/config.toml` `[mcp_servers.*]` | MCP server entries from user-global Claude Code servers |
 
 ### Bridge-internal state
@@ -140,7 +140,7 @@ The bridge translates between two different extensibility models. This table sho
 | **Agents** (`.md` with frontmatter) | **Agents** (`.toml` with role config) | Translated into self-contained `.toml` files. `name` and `description` map directly. The markdown body becomes `developer_instructions`. Claude `tools` are mapped to Codex `sandbox_mode` (`Bash`/`Write`/`Edit` → `workspace-write`, read-only tools → `read-only`). |
 | **Commands** (`.md` slash commands) | **Prompts** (`.md` in `~/.codex/prompts/`) | Translated into native Codex prompt files. `description` and `argument-hint` frontmatter are preserved. `$ARGUMENTS` and positional args (`$1`-`$9`) pass through natively — Codex supports the same syntax. `allowed-tools` is dropped (Codex controls tool access differently). |
 | **`CLAUDE.md`** (project instructions) | **`AGENTS.md`** (project instructions) | The bridge generates `CLAUDE.md` as the shim `@AGENTS.md` so both CLIs read the same shared instructions. `AGENTS.md` is the canonical source; the bridge creates it during bootstrap but never overwrites it once it exists. |
-| **`~/.claude/CLAUDE.md`** (global instructions) | **`~/.codex/AGENTS.md`** (global instructions) | Content is copied with a bridge ownership sentinel appended. |
+| **`~/.claude/CLAUDE.md`** (global instructions) | **`~/.codex/AGENTS.md`** (global instructions) | Content is copied with a bridge ownership sentinel appended unless `[sync].global_instructions` is `false`. |
 | **Plugin resources** (`scripts/`, `references/`, etc.) | Vendored under `~/.cc-codex-bridge/plugins/` | Resource directories referenced by skills, agents, or commands via `$PLUGIN_ROOT` or `${CLAUDE_PLUGIN_ROOT}` are copied to bridge-internal storage. All references in generated content are rewritten to absolute vendored paths. Transitive dependencies are detected and vendored automatically. |
 | **MCP servers** (`mcpServers` in config) | **MCP servers** (`[mcp_servers.*]` in `config.toml`) | Stdio servers map `command`/`args`/`env` directly. HTTP servers map `url` and rename `headers` to `http_headers`. Bearer token env var references are extracted into `bearer_token_env_var`. SSE transport is skipped (unsupported in Codex). |
 
@@ -294,6 +294,15 @@ cc-codex-bridge config exclude list               # list current exclusions
 cc-codex-bridge config log set-retention 30       # set log retention to 30 days
 ```
 
+Global instructions sync is enabled by default. To manage `~/.codex/AGENTS.md` independently and leave it untouched by `status`, `reconcile`, and ownership validation, add this to the global config:
+
+```toml
+[sync]
+global_instructions = false
+```
+
+This setting is global-only. It does not change project instruction behavior: project `AGENTS.md` remains canonical and the bridge continues to manage eligible project `CLAUDE.md` shims.
+
 Omit values for interactive guided flows (requires a terminal):
 
 ```bash
@@ -372,7 +381,7 @@ The reconcile engine is conservative. It tracks which files it created and refus
 - `.codex/config.toml` `[mcp_servers.*]` (bridge-owned MCP entries only)
 - `~/.codex/config.toml` `[mcp_servers.*]` (bridge-owned MCP entries only)
 - `~/.codex/skills/`, `~/.codex/agents/`, `~/.codex/prompts/` (generated entries)
-- `~/.codex/AGENTS.md` (bridged from `~/.claude/CLAUDE.md`)
+- `~/.codex/AGENTS.md` (bridged from `~/.claude/CLAUDE.md` only while `[sync].global_instructions` is enabled)
 
 **Safety guarantees:**
 - Files are written atomically (temp file + rename) to prevent partial reads

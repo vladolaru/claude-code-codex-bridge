@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Added a default-enabled `[sync].global_instructions` global config switch.
+  Setting it to `false` preserves independently managed
+  `~/.codex/AGENTS.md` without bridge validation or mutation while leaving
+  project instruction handling unchanged.
+
 ## [1.5.3] - 2026-08-24
 
 ### Fixed
