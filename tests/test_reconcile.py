@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -1905,6 +1906,97 @@ def test_reconcile_refuses_to_overwrite_hand_authored_global_instructions(
 
     # Hand-authored file must survive
     assert (codex_home / "AGENTS.md").read_text() == hand_content
+
+
+def test_disabled_global_instructions_preserve_hand_authored_agents_md(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Disabled global sync never validates or changes hand-authored Codex instructions."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "demo", "1.0.0")
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    agents_md = codex_home / "AGENTS.md"
+    agents_md.write_text("Codex-specific instructions.\n")
+    desired = replace(
+        _build_desired(project_root, cache_root, codex_home),
+        manage_global_instructions=False,
+    )
+
+    report = reconcile_desired_state(desired)
+
+    assert agents_md.read_text() == "Codex-specific instructions.\n"
+    assert not any(
+        change.resource_kind == "global_instructions" for change in report.changes
+    )
+
+
+def test_disabled_global_instructions_preserve_bridge_owned_agents_md(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Disabled global sync preserves previously bridge-owned Codex instructions."""
+    from cc_codex_bridge.reconcile import GLOBAL_INSTRUCTIONS_SENTINEL
+
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "demo", "1.0.0")
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    agents_md = codex_home / "AGENTS.md"
+    content = "Old instructions.\n" + GLOBAL_INSTRUCTIONS_SENTINEL
+    agents_md.write_text(content)
+    desired = replace(
+        _build_desired(project_root, cache_root, codex_home),
+        manage_global_instructions=False,
+    )
+
+    report = reconcile_desired_state(desired)
+
+    assert agents_md.read_text() == content
+    assert not any(
+        change.resource_kind == "global_instructions" for change in report.changes
+    )
+
+
+def test_build_project_disables_only_global_instruction_management(
+    make_project,
+    make_plugin_version,
+    tmp_path: Path,
+):
+    """Global sync config does not alter project CLAUDE.md shim planning."""
+    project_root, _ = make_project()
+    cache_root, _ = make_plugin_version("market", "demo", "1.0.0")
+    bridge_home = tmp_path / "bridge-home"
+    bridge_home.mkdir()
+    (bridge_home / "config.toml").write_text(
+        "[sync]\nglobal_instructions = false\n"
+    )
+    claude_home = tmp_path / "claude-home"
+    claude_home.mkdir()
+    (claude_home / "CLAUDE.md").write_text("Global Claude instructions.\n")
+
+    with patch(
+        "cc_codex_bridge.discover.query_enabled_plugin_ids",
+        return_value=None,
+    ):
+        build = build_project_desired_state(
+            project_root,
+            cache_dir=cache_root,
+            claude_home=claude_home,
+            codex_home=tmp_path / "codex-home",
+            bridge_home=bridge_home,
+        )
+
+    assert build.desired_state is not None
+    assert build.desired_state.manage_global_instructions is False
+    assert build.shim_decision.action == "create"
+    assert any(
+        path.name == "CLAUDE.md" and content == b"@AGENTS.md\n"
+        for path, content in build.desired_state.project_files
+    )
 
 
 def test_reconcile_removes_stale_project_skill_directory(

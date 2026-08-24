@@ -73,6 +73,7 @@ class DesiredState:
     plugin_resources: tuple[VendoredPluginResource, ...] = ()
     mcp_servers: tuple[GeneratedMcpServer, ...] = ()
     mcp_discovery_degraded: bool = False
+    manage_global_instructions: bool = True
 
 
 @dataclass(frozen=True)
@@ -199,6 +200,7 @@ def build_desired_state(
     plugin_resources: Iterable[VendoredPluginResource] | None = None,
     mcp_servers: Iterable[GeneratedMcpServer] | None = None,
     mcp_discovery_degraded: bool = False,
+    manage_global_instructions: bool = True,
 ) -> DesiredState:
     """Build the desired generated outputs for a project."""
     if shim_decision.action == "fail":
@@ -276,6 +278,7 @@ def build_desired_state(
         plugin_resources=tuple(plugin_resources or ()),
         mcp_servers=tuple(mcp_servers or ()),
         mcp_discovery_degraded=mcp_discovery_degraded,
+        manage_global_instructions=manage_global_instructions,
     )
 
 
@@ -603,6 +606,7 @@ def build_project_desired_state(
         plugin_resources=plugin_resources,
         mcp_servers=mcp_result.servers,
         mcp_discovery_degraded=result.mcp_discovery_degraded,
+        manage_global_instructions=cfg.sync_global_instructions,
     )
 
     return ProjectBuildResult(
@@ -2180,6 +2184,9 @@ def _plan_skill_mutations(
 
 def _plan_global_instructions_changes(desired: DesiredState) -> tuple[Change, ...]:
     """Plan changes for the global instructions file (~/.codex/AGENTS.md)."""
+    if not desired.manage_global_instructions:
+        return ()
+
     path = desired.codex_home / "AGENTS.md"
 
     if desired.global_instructions is None:
