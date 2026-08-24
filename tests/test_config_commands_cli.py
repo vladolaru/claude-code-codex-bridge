@@ -192,6 +192,107 @@ def test_global_plugin_exclusion_ignores_malformed_project_config(
     assert exit_code == 0
 
 
+def test_global_plugin_exclusion_skips_registered_malformed_project_config(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    """Redundant cleanup warns and continues past malformed project config."""
+    import cc_codex_bridge.discover as discover_module
+    from cc_codex_bridge import cli
+    from cc_codex_bridge.config_writer import read_config_data
+    from cc_codex_bridge.registry import GlobalResourceRegistry
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# test\n")
+    project_config = project_root / ".codex" / "bridge.toml"
+    project_config.parent.mkdir()
+    project_config.write_text("[exclude\ninvalid")
+    bridge_home = tmp_path / "bridge-home"
+    bridge_home.mkdir()
+    (bridge_home / "registry.json").write_text(
+        GlobalResourceRegistry(
+            skills={},
+            projects=(project_root.resolve(),),
+        ).to_json()
+    )
+    monkeypatch.setattr(cli, "resolve_bridge_home", lambda: bridge_home)
+    monkeypatch.setattr(
+        discover_module,
+        "query_enabled_plugin_ids",
+        lambda root: frozenset({"market/superpowers"}),
+    )
+
+    exit_code = cli.main([
+        "config",
+        "exclude",
+        "add",
+        "--global",
+        "plugin",
+        "market/superpowers",
+        "--project",
+        str(project_root),
+    ])
+
+    assert exit_code == 0
+    assert read_config_data(bridge_home / "config.toml")["exclude"]["plugins"] == [
+        "market/superpowers"
+    ]
+    captured = capsys.readouterr()
+    assert "warning" in captured.err.lower()
+    assert str(project_config) in captured.err
+
+
+def test_global_plugin_shorthand_removes_canonical_project_exclusion(
+    tmp_path,
+    monkeypatch,
+):
+    """Redundant cleanup receives the canonical ID resolved from shorthand."""
+    import cc_codex_bridge.discover as discover_module
+    from cc_codex_bridge import cli
+    from cc_codex_bridge.config_writer import read_config_data, write_config_data
+    from cc_codex_bridge.registry import GlobalResourceRegistry
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "AGENTS.md").write_text("# test\n")
+    project_config = project_root / ".codex" / "bridge.toml"
+    write_config_data(
+        project_config,
+        {"exclude": {"plugins": ["market/superpowers"]}},
+    )
+    bridge_home = tmp_path / "bridge-home"
+    bridge_home.mkdir()
+    (bridge_home / "registry.json").write_text(
+        GlobalResourceRegistry(
+            skills={},
+            projects=(project_root.resolve(),),
+        ).to_json()
+    )
+    monkeypatch.setattr(cli, "resolve_bridge_home", lambda: bridge_home)
+    monkeypatch.setattr(
+        discover_module,
+        "query_enabled_plugin_ids",
+        lambda root: frozenset({"market/superpowers"}),
+    )
+
+    exit_code = cli.main([
+        "config",
+        "exclude",
+        "add",
+        "--global",
+        "plugin",
+        "superpowers",
+        "--project",
+        str(project_root),
+    ])
+
+    assert exit_code == 0
+    project_plugins = read_config_data(project_config)["exclude"]["plugins"]
+    assert "market/superpowers" not in project_plugins
+
+
 def test_config_exclude_add_applies_existing_plugin_exclusions_before_discovery(
     tmp_path,
     monkeypatch,

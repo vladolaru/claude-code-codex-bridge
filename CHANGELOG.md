@@ -17,7 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Plugin exclusions validate exact or unique shorthand against Claude's
   enabled plugin IDs without depending on project exclusion validity, existing
   plugin exclusions constrain other entity discovery, and interactive mode can
-  fall back to plugin-only recovery choices.
+  fall back to plugin-only recovery choices. Redundant project cleanup uses the
+  canonical plugin ID and skips malformed registered configs with a warning.
 
 ## [1.5.2] - 2026-05-13
 

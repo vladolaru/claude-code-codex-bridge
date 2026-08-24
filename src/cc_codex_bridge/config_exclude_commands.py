@@ -30,6 +30,7 @@ class ExcludeCommandResult:
 
     success: bool
     message: str
+    entity_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -261,6 +262,7 @@ def handle_exclude_add_from_candidates(
     return ExcludeCommandResult(
         success=True,
         message=f"Added {kind} exclusion: {normalized}",
+        entity_id=normalized,
     )
 
 
@@ -305,6 +307,7 @@ def handle_exclude_remove(
     return ExcludeCommandResult(
         success=True,
         message=f"Removed {kind} exclusion: {normalized}",
+        entity_id=normalized,
     )
 
 

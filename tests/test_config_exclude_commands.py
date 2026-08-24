@@ -333,6 +333,7 @@ class TestHandleExcludeAdd:
         )
 
         assert result.success is True
+        assert result.entity_id == "market/superpowers"
         assert read_config_data(config_path)["exclude"]["plugins"] == [
             "market/superpowers"
         ]

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tomllib
 from pathlib import Path
 
 PACKAGE_PARENT = Path(__file__).resolve().parent.parent
@@ -1425,11 +1426,19 @@ def _remove_redundant_project_exclusions(
         config_path = project_root / ".codex" / "bridge.toml"
         if not config_path.exists():
             continue
-        result = handle_exclude_remove(
-            kind=kind,
-            entity_id=entity_id,
-            config_path=config_path,
-        )
+        try:
+            result = handle_exclude_remove(
+                kind=kind,
+                entity_id=entity_id,
+                config_path=config_path,
+            )
+        except (OSError, UnicodeError, tomllib.TOMLDecodeError, ReconcileError) as exc:
+            print(
+                "Warning: skipped redundant project exclusion cleanup for "
+                f"{config_path}: {exc}",
+                file=sys.stderr,
+            )
+            continue
         if result.success:
             print(f"Removed redundant project exclusion: {entity_id} ({config_path})")
 
@@ -1661,7 +1670,10 @@ def _handle_config_exclude(args: argparse.Namespace) -> int:
                 "project drops it)."
             )
         if result.success and scope.target == "global":
-            _remove_redundant_project_exclusions(kind, entity_id)
+            _remove_redundant_project_exclusions(
+                kind,
+                result.entity_id or entity_id,
+            )
         return 0 if result.success else 1
 
     # -- remove --
